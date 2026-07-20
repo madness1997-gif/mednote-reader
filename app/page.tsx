@@ -1,0 +1,603 @@
+"use client";
+
+import {
+  Bookmark,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eraser,
+  FileText,
+  FolderOpen,
+  Highlighter,
+  Lasso,
+  Menu,
+  Minus,
+  MousePointer2,
+  MoreHorizontal,
+  PenTool,
+  Plus,
+  Redo2,
+  Search,
+  Share2,
+  TextCursorInput,
+  Trash2,
+  Undo2,
+} from "lucide-react";
+import type { PDFDocumentProxy, PDFRenderTask } from "pdfjs-dist";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "text";
+type InkTool = "pen" | "highlight";
+type Point = { x: number; y: number; pressure: number };
+type Stroke = {
+  id: string;
+  tool: InkTool;
+  color: string;
+  width: number;
+  points: Point[];
+};
+type NotePage = {
+  id: string;
+  title: string;
+  body: string;
+  citationPage: number | null;
+  strokes: Stroke[];
+};
+
+const STORAGE_KEY = "mednote-notebook-v1";
+const DB_NAME = "mednote-local";
+const DB_STORE = "documents";
+const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
+
+const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
+  { id: "pointer", label: "Chọn", icon: MousePointer2 },
+  { id: "pen", label: "Bút", icon: PenTool },
+  { id: "highlight", label: "Tô sáng", icon: Highlighter },
+  { id: "eraser", label: "Tẩy nét", icon: Eraser },
+  { id: "lasso", label: "Khoanh chọn", icon: Lasso },
+  { id: "text", label: "Nhập chữ", icon: TextCursorInput },
+];
+
+const starterStrokes: Stroke[] = [
+  {
+    id: "starter-red-underline",
+    tool: "pen",
+    color: "#c94b50",
+    width: 2.4,
+    points: Array.from({ length: 18 }, (_, index) => ({
+      x: 0.19 + index * 0.035,
+      y: 0.135 + Math.sin(index / 2.6) * 0.002,
+      pressure: 0.55,
+    })),
+  },
+  {
+    id: "starter-blue-note",
+    tool: "pen",
+    color: "#2465a8",
+    width: 2.2,
+    points: [
+      { x: 0.7, y: 0.55, pressure: 0.5 },
+      { x: 0.75, y: 0.54, pressure: 0.5 },
+      { x: 0.79, y: 0.56, pressure: 0.5 },
+      { x: 0.83, y: 0.53, pressure: 0.5 },
+    ],
+  },
+];
+
+const initialPages: NotePage[] = [
+  {
+    id: "note-1",
+    title: "BỆNH THẦN KINH ĐÁI THÁO ĐƯỜNG",
+    body:
+      "CƠ CHẾ BỆNH SINH\n\n• Tăng đường huyết mạn tính.\n• Hoạt hóa con đường polyol → tích lũy sorbitol.\n• Sản phẩm glycat hóa nâng cao (AGEs) → tổn thương thần kinh.\n• Stress oxy hóa → tổn thương ty thể và tế bào Schwann.\n• Thiếu máu vi mạch nuôi thần kinh.\n\nĐIỂM CẦN NHỚ\n\n• Thần kinh ngoại biên thường gặp nhất: đa dây thần kinh đối xứng.\n• Biểu hiện: tê bì, kiến bò, đau rát, giảm cảm giác.\n• Đánh giá: monofilament 10 g, âm thoa 128 Hz.\n• Điều trị: kiểm soát đường huyết, giảm đau và chăm sóc bàn chân.",
+    citationPage: 126,
+    strokes: starterStrokes,
+  },
+];
+
+function uid(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function openLocalDb() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(DB_STORE)) {
+        request.result.createObjectStore(DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveLocalPdf(blob: Blob, name: string) {
+  const db = await openLocalDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    transaction.objectStore(DB_STORE).put({ blob, name }, "current-pdf");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function readLocalPdf() {
+  const db = await openLocalDb();
+  const result = await new Promise<{ blob: Blob; name: string } | undefined>((resolve, reject) => {
+    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("current-pdf");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return result;
+}
+
+function DemoDocument({ page }: { page: number }) {
+  return (
+    <article className="document-paper">
+      <div className="page-meta"><strong>{page}</strong><em>Diabetes Mellitus: A Clinical Textbook, 5th Edition</em></div>
+      <h1>3.4&nbsp;&nbsp; DIABETIC NEUROPATHY</h1>
+      <div className="document-columns">
+        <section>
+          <h2>3.4.1&nbsp;&nbsp; Introduction</h2>
+          <p>Diabetic neuropathy is the most common chronic complication of diabetes mellitus and a leading cause of morbidity. It may involve the peripheral and autonomic nervous systems.</p>
+          <h2>3.4.3&nbsp;&nbsp; Clinical Features</h2>
+          <p>Peripheral neuropathy typically presents with distal symmetrical sensory loss and neuropathic pain.</p>
+          <ul><li>Numbness, tingling and burning pain</li><li>Loss of vibration and temperature sensation</li><li>Reduced ankle reflexes</li></ul>
+          <div className="figure-card">
+            <div className="mechanism-row"><span>Hyperglycemia</span><b>→</b><span>Polyol pathway</span><b>→</b><span>Nerve damage</span></div>
+            <div className="nerve-illustration"><i /><i /><i /><i /><i /></div>
+            <small>Figure 3.7. Proposed mechanisms in diabetic peripheral neuropathy.</small>
+          </div>
+        </section>
+        <section>
+          <h2>3.4.2&nbsp;&nbsp; Pathophysiology</h2>
+          <p>The pathogenesis is multifactorial, involving metabolic, vascular and neurotrophic mechanisms.</p>
+          <ul><li>Chronic hyperglycemia → polyol pathway activation</li><li>Advanced glycation end products (AGEs)</li><li>Oxidative stress and inflammation</li><li>Microvascular ischemia</li><li>Neurotrophic factor deficiency</li></ul>
+          <h2>3.4.4&nbsp;&nbsp; Diagnosis</h2>
+          <p>Diagnosis is primarily clinical and based on history and physical examination.</p>
+          <ul><li>10-g monofilament test</li><li>Vibration perception (128-Hz tuning fork)</li><li>Nerve conduction studies when needed</li></ul>
+          <h2>3.4.5&nbsp;&nbsp; Management</h2>
+          <ul><li>Optimal glycemic control</li><li>Pain management</li><li>Foot care and ulcer prevention</li></ul>
+        </section>
+      </div>
+    </article>
+  );
+}
+
+function PdfPageCanvas({ document, page, zoom }: { document: PDFDocumentProxy; page: number; zoom: number }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let disposed = false;
+    let renderTask: PDFRenderTask | null = null;
+    const wrapper = wrapRef.current;
+    const canvas = canvasRef.current;
+    if (!wrapper || !canvas) return;
+
+    const render = async () => {
+      renderTask?.cancel();
+      const pdfPage = await document.getPage(page);
+      if (disposed) return;
+      const base = pdfPage.getViewport({ scale: 1 });
+      const available = Math.max(260, wrapper.clientWidth - 2);
+      const scale = (available / base.width) * zoom;
+      const viewport = pdfPage.getViewport({ scale });
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(viewport.width * ratio);
+      canvas.height = Math.floor(viewport.height * ratio);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
+      try {
+        await renderTask.promise;
+        if (!disposed) setLoading(false);
+      } catch (error) {
+        if (!disposed && (error as Error).name !== "RenderingCancelledException") throw error;
+      }
+    };
+
+    const observer = new ResizeObserver(() => void render());
+    observer.observe(wrapper);
+    void render();
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      renderTask?.cancel();
+    };
+  }, [document, page, zoom]);
+
+  return <div className="pdf-canvas-wrap" ref={wrapRef}>{loading && <div className="pdf-loading">Đang dựng trang…</div>}<canvas ref={canvasRef} /></div>;
+}
+
+function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocumentProxy; page: number; active: boolean; onClick: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let disposed = false;
+    let task: PDFRenderTask | null = null;
+    void document.getPage(page).then((pdfPage) => {
+      if (disposed || !canvasRef.current) return;
+      const base = pdfPage.getViewport({ scale: 1 });
+      const viewport = pdfPage.getViewport({ scale: 72 / base.width });
+      const canvas = canvasRef.current;
+      canvas.width = Math.floor(viewport.width * 1.5);
+      canvas.height = Math.floor(viewport.height * 1.5);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.setTransform(1.5, 0, 0, 1.5, 0, 0);
+      task = pdfPage.render({ canvas, canvasContext: context, viewport });
+      return task.promise;
+    }).catch(() => undefined);
+    return () => { disposed = true; task?.cancel(); };
+  }, [document, page]);
+  return <button className={`pdf-thumb ${active ? "active" : ""}`} onClick={onClick}><span className="mini-paper pdf-mini"><canvas ref={canvasRef} /></span><span>{page}</span></button>;
+}
+
+function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stroke: Stroke) {
+  if (!stroke.points.length) return;
+  context.save();
+  context.globalAlpha = stroke.tool === "highlight" ? 0.3 : 1;
+  context.strokeStyle = stroke.color;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  const first = stroke.points[0];
+  context.beginPath();
+  context.moveTo(first.x * canvas.clientWidth, first.y * canvas.clientHeight);
+  for (let index = 1; index < stroke.points.length; index += 1) {
+    const point = stroke.points[index];
+    const previous = stroke.points[index - 1];
+    context.lineWidth = stroke.width * (0.7 + point.pressure * 0.5);
+    const midX = ((previous.x + point.x) / 2) * canvas.clientWidth;
+    const midY = ((previous.y + point.y) / 2) * canvas.clientHeight;
+    context.quadraticCurveTo(previous.x * canvas.clientWidth, previous.y * canvas.clientHeight, midX, midY);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function InkCanvas({ tool, color, width, strokes, onChange }: { tool: Tool; color: string; width: number; strokes: Stroke[]; onChange: (strokes: Stroke[]) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const currentStroke = useRef<Stroke | null>(null);
+  const drawing = useRef(false);
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(canvas.clientWidth * ratio);
+    canvas.height = Math.floor(canvas.clientHeight * ratio);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    strokes.forEach((stroke) => drawStroke(context, canvas, stroke));
+  }, [strokes]);
+
+  useEffect(() => {
+    redraw();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(redraw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [redraw]);
+
+  const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>): Point => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+      pressure: event.pressure || 0.5,
+    };
+  };
+
+  const eraseAt = (point: Point) => {
+    const threshold = 0.025;
+    const next = strokes.filter((stroke) => !stroke.points.some((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) < threshold));
+    if (next.length !== strokes.length) onChange(next);
+  };
+
+  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (tool !== "pen" && tool !== "highlight" && tool !== "eraser") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drawing.current = true;
+    const point = pointFromEvent(event);
+    if (tool === "eraser") {
+      eraseAt(point);
+      return;
+    }
+    currentStroke.current = { id: uid("stroke"), tool, color, width: tool === "highlight" ? width * 4 : width, points: [point] };
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return;
+    const point = pointFromEvent(event);
+    if (tool === "eraser") {
+      eraseAt(point);
+      return;
+    }
+    if (!currentStroke.current) return;
+    currentStroke.current.points.push(point);
+    redraw();
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (canvas && context) drawStroke(context, canvas, currentStroke.current);
+  };
+
+  const finishStroke = () => {
+    drawing.current = false;
+    if (currentStroke.current && currentStroke.current.points.length > 1) onChange([...strokes, currentStroke.current]);
+    currentStroke.current = null;
+  };
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`ink-canvas tool-${tool}`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={finishStroke}
+      onPointerCancel={finishStroke}
+      aria-label="Lớp viết tay"
+    />
+  );
+}
+
+export default function Home() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const [activeTool, setActiveTool] = useState<Tool>("pen");
+  const [inkColor, setInkColor] = useState("#2465a8");
+  const [inkWidth, setInkWidth] = useState(2);
+  const [sourcePage, setSourcePage] = useState(126);
+  const [sourceZoom, setSourceZoom] = useState(1);
+  const [notePages, setNotePages] = useState<NotePage[]>(initialPages);
+  const [activeNoteId, setActiveNoteId] = useState(initialPages[0].id);
+  const [redoStrokes, setRedoStrokes] = useState<Record<string, Stroke[]>>({});
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [documentName, setDocumentName] = useState("Diabetic Neuropathy — Chapter 3");
+  const [readerShare, setReaderShare] = useState(50);
+  const [toast, setToast] = useState("Đã tự lưu");
+  const [ready, setReady] = useState(false);
+
+  const activeNote = notePages.find((page) => page.id === activeNoteId) ?? notePages[0];
+  const totalPages = pdfDocument?.numPages ?? 482;
+  const sourcePages = useMemo(() => {
+    if (!pdfDocument) return DEMO_PAGES;
+    const count = pdfDocument.numPages;
+    if (count <= 8) return Array.from({ length: count }, (_, index) => index + 1);
+    const start = Math.min(Math.max(1, sourcePage - 3), count - 7);
+    return Array.from({ length: 8 }, (_, index) => start + index);
+  }, [pdfDocument, sourcePage]);
+
+  useEffect(() => {
+    let storedState: { pages?: NotePage[]; activeNoteId?: string; readerShare?: number } | null = null;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) storedState = JSON.parse(stored) as typeof storedState;
+    } catch { /* keep starter note */ }
+    const restored = storedState;
+    queueMicrotask(() => {
+      if (restored?.pages?.length) setNotePages(restored.pages);
+      if (restored?.activeNoteId) setActiveNoteId(restored.activeNoteId);
+      if (restored?.readerShare) setReaderShare(restored.readerShare);
+      setReady(true);
+    });
+    void readLocalPdf().then((stored) => {
+      if (!stored) return;
+      setPdfBlob(stored.blob);
+      setDocumentName(stored.name.replace(/\.pdf$/i, ""));
+      setSourcePage(1);
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ pages: notePages, activeNoteId, readerShare }));
+    } catch { /* storage may be unavailable in private browsing */ }
+  }, [notePages, activeNoteId, readerShare, ready]);
+
+  useEffect(() => {
+    if (!pdfBlob) return;
+    let disposed = false;
+    let document: PDFDocumentProxy | null = null;
+    void pdfBlob.arrayBuffer().then(async (buffer) => {
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+      document = await task.promise;
+      if (!disposed) {
+        setPdfDocument(document);
+        setSourcePage((page) => Math.min(Math.max(1, page), document!.numPages));
+        setToast(`Đã mở ${document.numPages} trang`);
+      }
+    }).catch(() => !disposed && setToast("Không thể mở PDF này"));
+    return () => { disposed = true; void document?.destroy(); };
+  }, [pdfBlob]);
+
+  useEffect(() => {
+    if (!toast || toast === "Đã tự lưu") return;
+    const timer = window.setTimeout(() => setToast("Đã tự lưu"), 2600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const persistNotebook = (pages: NotePage[], activeId: string, share = readerShare) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ pages, activeNoteId: activeId, readerShare: share }));
+    } catch {
+      setToast("Trình duyệt đang chặn tự lưu");
+    }
+  };
+
+  const updateActiveNote = (changes: Partial<NotePage>) => {
+    setNotePages((pages) => {
+      const next = pages.map((page) => page.id === activeNote.id ? { ...page, ...changes } : page);
+      persistNotebook(next, activeNote.id);
+      return next;
+    });
+  };
+
+  const handlePdfFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setToast("Vui lòng chọn tệp PDF");
+      return;
+    }
+    setPdfBlob(file);
+    setDocumentName(file.name.replace(/\.pdf$/i, ""));
+    setSourcePage(1);
+    await saveLocalPdf(file, file.name).catch(() => setToast("PDF mở được nhưng chưa lưu trên thiết bị"));
+  };
+
+  const addNotePage = () => {
+    const next: NotePage = { id: uid("note"), title: "GHI CHÚ MỚI", body: "Bắt đầu nhập nội dung tại đây…", citationPage: sourcePage, strokes: [] };
+    setNotePages((pages) => {
+      const nextPages = [...pages, next];
+      persistNotebook(nextPages, next.id);
+      return nextPages;
+    });
+    setActiveNoteId(next.id);
+    setActiveTool("text");
+    setToast("Đã thêm trang A4");
+  };
+
+  const deleteNotePage = () => {
+    if (notePages.length === 1) { setToast("Sổ cần giữ lại ít nhất một trang"); return; }
+    const index = notePages.findIndex((page) => page.id === activeNote.id);
+    const nextPages = notePages.filter((page) => page.id !== activeNote.id);
+    const nextActiveId = nextPages[Math.max(0, index - 1)].id;
+    setNotePages(nextPages);
+    setActiveNoteId(nextActiveId);
+    persistNotebook(nextPages, nextActiveId);
+  };
+
+  const undo = () => {
+    const last = activeNote.strokes.at(-1);
+    if (!last) return;
+    updateActiveNote({ strokes: activeNote.strokes.slice(0, -1) });
+    setRedoStrokes((state) => ({ ...state, [activeNote.id]: [...(state[activeNote.id] ?? []), last] }));
+  };
+
+  const redo = () => {
+    const stack = redoStrokes[activeNote.id] ?? [];
+    const stroke = stack.at(-1);
+    if (!stroke) return;
+    updateActiveNote({ strokes: [...activeNote.strokes, stroke] });
+    setRedoStrokes((state) => ({ ...state, [activeNote.id]: stack.slice(0, -1) }));
+  };
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (moveEvent: PointerEvent) => {
+      const rect = workspaceRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const usable = rect.width - 236;
+      const readerWidth = moveEvent.clientX - rect.left - 108;
+      const nextShare = Math.min(65, Math.max(35, (readerWidth / usable) * 100));
+      setReaderShare(nextShare);
+      persistNotebook(notePages, activeNoteId, nextShare);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const gridStyle = {
+    "--reader-share": `${readerShare}fr`,
+    "--notes-share": `${100 - readerShare}fr`,
+  } as React.CSSProperties;
+
+  return (
+    <main className="app-shell">
+      <input ref={fileInputRef} className="hidden-input" type="file" accept="application/pdf,.pdf" onChange={(event) => void handlePdfFile(event.target.files?.[0])} />
+      <header className="topbar">
+        <div className="brand-group">
+          <button className="icon-button menu-button" aria-label="Mở trình đơn"><Menu size={19} /></button>
+          <div className="brand-mark">M</div><span className="brand-name">MedNote</span><span className="top-divider" />
+          <div className="document-title"><span>{documentName}</span><ChevronDown size={15} /></div>
+        </div>
+        <div className="top-actions">
+          <span className="autosave-status"><i />{toast}</span>
+          <button className="icon-button" aria-label="Tìm kiếm"><Search size={19} /></button>
+          <button className="icon-button" aria-label="Đánh dấu"><Bookmark size={18} /></button>
+          <button className="icon-button" aria-label="Chia sẻ"><Share2 size={18} /></button>
+          <button className="primary-button" onClick={() => fileInputRef.current?.click()}><FolderOpen size={16} /> Mở PDF</button>
+          <button className="avatar-button" aria-label="Tài khoản">BS</button>
+        </div>
+      </header>
+
+      <section className="workspace" ref={workspaceRef} style={gridStyle}>
+        <aside className="pdf-thumbnails" aria-label="Trang tài liệu">
+          <div className="rail-heading"><FileText size={16} /><button className="icon-button compact" aria-label="Thu gọn"><ChevronLeft size={17} /></button></div>
+          <div className="thumb-list">
+            {sourcePages.map((page) => pdfDocument ? (
+              <PdfThumbnail key={page} document={pdfDocument} page={page} active={page === sourcePage} onClick={() => setSourcePage(page)} />
+            ) : (
+              <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => setSourcePage(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
+            ))}
+          </div>
+        </aside>
+
+        <section className="reader-pane">
+          <div className="pane-toolbar">
+            <div className="search-field"><Search size={15} /><span>Tìm trong tài liệu</span><kbd>⌘F</kbd></div><div className="toolbar-spacer" />
+            <div className="zoom-control"><button aria-label="Thu nhỏ" onClick={() => setSourceZoom((zoom) => Math.max(.6, zoom - .1))}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" onClick={() => setSourceZoom((zoom) => Math.min(2, zoom + .1))}><Plus size={15} /></button></div>
+            <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(pdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>
+            <button className="icon-button compact" aria-label="Thêm"><MoreHorizontal size={18} /></button>
+          </div>
+          <div className="document-stage">{pdfDocument ? <PdfPageCanvas document={pdfDocument} page={sourcePage} zoom={sourceZoom} /> : <DemoDocument page={sourcePage} />}</div>
+        </section>
+
+        <div className="split-divider" aria-label="Điều chỉnh độ rộng" onPointerDown={startResize}><span>•••</span></div>
+
+        <section className="notes-pane">
+          <div className="note-toolbar" role="toolbar" aria-label="Công cụ ghi chú">
+            {tools.map(({ id, label, icon: Icon }) => <button key={id} className={`tool-button ${activeTool === id ? "active" : ""}`} onClick={() => { setActiveTool(id); if (id === "lasso") setToast("Khoanh chọn nét sẽ có ở bản tiếp theo"); }} aria-label={label} title={label}><Icon size={20} /></button>)}
+            <span className="toolbar-divider" />
+            <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!activeNote.strokes.length}><Undo2 size={19} /></button>
+            <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(redoStrokes[activeNote.id]?.length)}><Redo2 size={19} /></button>
+            <button className="icon-button compact delete-tool" aria-label="Xóa trang" onClick={deleteNotePage}><Trash2 size={18} /></button>
+            <span className="toolbar-divider" />
+            {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
+            <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
+          </div>
+
+          <div className="note-stage">
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""}`}>
+              <div className="ruled-lines" />
+              <div className="typed-layer">
+                <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
+                <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} spellCheck={false} aria-label="Nội dung ghi chú" />
+                {activeNote.citationPage && <button className="citation-chip" onClick={() => { setSourcePage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
+              </div>
+              <InkCanvas tool={activeTool} color={inkColor} width={inkWidth} strokes={activeNote.strokes} onChange={(strokes) => { updateActiveNote({ strokes }); setRedoStrokes((state) => ({ ...state, [activeNote.id]: [] })); }} />
+              {activeTool === "text" && <div className="mode-hint">Chế độ nhập chữ</div>}
+            </article>
+            <div className="paper-size">A4 (210 × 297 mm) · {activeTool === "text" ? "Chạm vào trang để nhập chữ" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+          </div>
+        </section>
+
+        <aside className="note-thumbnails" aria-label="Trang ghi chú">
+          <div className="notes-heading"><span>Ghi chú</span><ChevronDown size={14} /><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
+          {notePages.map((page, index) => <button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} key={page.id} onClick={() => setActiveNoteId(page.id)}><span className="mini-note"><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>)}
+          <button className="new-page" onClick={addNotePage}><Plus size={21} /><span>Trang mới</span></button>
+        </aside>
+      </section>
+    </main>
+  );
+}
