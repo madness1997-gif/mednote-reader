@@ -77,7 +77,24 @@ type PaperSize = "a4" | "a5" | "b5" | "letter" | "square";
 type PaperOrientation = "portrait" | "landscape";
 type PaperTemplate = "blank" | "ruled" | "ruled-dense" | "grid" | "dotted" | "cornell";
 type PaperColor = "white" | "ivory" | "yellow" | "mint" | "blue" | "dark";
-type TextFont = "handwriting" | "sans" | "serif" | "mono";
+type TextFont =
+  | "handwriting"
+  | "segoe"
+  | "arial"
+  | "tahoma"
+  | "verdana"
+  | "trebuchet"
+  | "calibri"
+  | "aptos"
+  | "sans"
+  | "times"
+  | "cambria"
+  | "georgia"
+  | "palatino"
+  | "serif"
+  | "courier"
+  | "cascadia"
+  | "mono";
 type TextAlign = "left" | "center" | "right";
 type TextSettings = {
   font: TextFont;
@@ -237,9 +254,22 @@ const PEN_STYLES: { id: PenStyle; label: string; icon: typeof PenTool }[] = [
 
 const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
   { id: "handwriting", label: "Viết tay", family: '"Segoe Print", "Bradley Hand", cursive' },
-  { id: "sans", label: "Không chân", family: 'Inter, "Segoe UI", Arial, sans-serif' },
-  { id: "serif", label: "Có chân", family: 'Georgia, "Times New Roman", serif' },
-  { id: "mono", label: "Máy chữ", family: '"Courier New", monospace' },
+  { id: "segoe", label: "Segoe UI", family: '"Segoe UI", Arial, sans-serif' },
+  { id: "arial", label: "Arial", family: 'Arial, "Helvetica Neue", sans-serif' },
+  { id: "tahoma", label: "Tahoma", family: 'Tahoma, "Segoe UI", sans-serif' },
+  { id: "verdana", label: "Verdana", family: 'Verdana, Geneva, sans-serif' },
+  { id: "trebuchet", label: "Trebuchet MS", family: '"Trebuchet MS", Arial, sans-serif' },
+  { id: "calibri", label: "Calibri", family: 'Calibri, Carlito, "Segoe UI", sans-serif' },
+  { id: "aptos", label: "Aptos", family: 'Aptos, Calibri, "Segoe UI", sans-serif' },
+  { id: "sans", label: "Không chân (hệ thống)", family: 'Inter, "Segoe UI", Arial, sans-serif' },
+  { id: "times", label: "Times New Roman", family: '"Times New Roman", Times, serif' },
+  { id: "cambria", label: "Cambria", family: 'Cambria, Georgia, serif' },
+  { id: "georgia", label: "Georgia", family: 'Georgia, "Times New Roman", serif' },
+  { id: "palatino", label: "Palatino Linotype", family: '"Palatino Linotype", Palatino, serif' },
+  { id: "serif", label: "Có chân (hệ thống)", family: 'Georgia, "Times New Roman", serif' },
+  { id: "courier", label: "Courier New", family: '"Courier New", Courier, monospace' },
+  { id: "cascadia", label: "Cascadia Mono", family: '"Cascadia Mono", Consolas, monospace' },
+  { id: "mono", label: "Đơn cách (hệ thống)", family: '"Courier New", monospace' },
 ];
 
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
@@ -2442,7 +2472,7 @@ export default function Home() {
           {notePanel === "text" && (
             <div className="floating-tool-panel text-format-panel" role="dialog" aria-label="Định dạng chữ">
               <div className="tool-panel-heading"><div><strong>Type</strong><span>Định dạng nội dung chữ trên trang này</span></div><button className="icon-button compact" onClick={() => setNotePanel(null)} aria-label="Đóng"><X size={17} /></button></div>
-              <div className="text-control-row"><label>Font</label><select value={activeNote.text.font} onChange={(event) => updateText({ font: event.target.value as TextFont })}>{TEXT_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}</select><label>Cỡ</label><select className="font-size-select" value={activeNote.text.size} onChange={(event) => updateText({ size: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 24, 28, 32].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
+              <div className="text-control-row"><label>Font</label><select value={activeNote.text.font} style={{ fontFamily: selectedTextFont.family }} onChange={(event) => updateText({ font: event.target.value as TextFont })}>{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select><label>Cỡ</label><select className="font-size-select" value={activeNote.text.size} onChange={(event) => updateText({ size: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 24, 28, 32].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
               <div className="text-toolbar-row">
                 <div className="text-style-buttons" aria-label="Kiểu chữ"><button className={activeNote.text.bold ? "selected" : ""} onClick={() => updateText({ bold: !activeNote.text.bold })} title="Đậm"><Bold size={17} /></button><button className={activeNote.text.italic ? "selected" : ""} onClick={() => updateText({ italic: !activeNote.text.italic })} title="Nghiêng"><Italic size={17} /></button><button className={activeNote.text.underline ? "selected" : ""} onClick={() => updateText({ underline: !activeNote.text.underline })} title="Gạch chân"><Underline size={17} /></button></div>
                 <div className="text-style-buttons" aria-label="Căn chữ"><button className={activeNote.text.align === "left" ? "selected" : ""} onClick={() => updateText({ align: "left" })} title="Căn trái"><AlignLeft size={17} /></button><button className={activeNote.text.align === "center" ? "selected" : ""} onClick={() => updateText({ align: "center" })} title="Căn giữa"><AlignCenter size={17} /></button><button className={activeNote.text.align === "right" ? "selected" : ""} onClick={() => updateText({ align: "right" })} title="Căn phải"><AlignRight size={17} /></button></div>
