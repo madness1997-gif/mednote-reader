@@ -361,21 +361,93 @@ export function PdfPageView({
     if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout"].includes(tool)) return;
     window.setTimeout(() => {
       const selection = window.getSelection();
-      if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+      const textLayer = textLayerRef.current;
+      if (!selection || selection.isCollapsed || !selection.rangeCount || !textLayer) return;
       const range = selection.getRangeAt(0);
       const ancestor = range.commonAncestorContainer.nodeType === Node.TEXT_NODE ? range.commonAncestorContainer.parentNode : range.commonAncestorContainer;
-      if (!ancestor || !textLayerRef.current?.contains(ancestor)) return;
+      if (!ancestor || !textLayer.contains(ancestor)) return;
       const text = selection.toString().replace(/\s+/g, " ").trim();
       if (!text) return;
-      const surfaceRect = surfaceRef.current!.getBoundingClientRect();
-      const clientRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 1 && rect.height > 1);
-      const rects = clientRects.map((rect) => {
-        const [x1, y1] = viewport.convertToPdfPoint(rect.left - surfaceRect.left, rect.top - surfaceRect.top);
-        const [x2, y2] = viewport.convertToPdfPoint(rect.right - surfaceRect.left, rect.bottom - surfaceRect.top);
+
+      type ClientBox = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+      const boxes: ClientBox[] = [];
+      const spans = Array.from(textLayer.querySelectorAll("span"));
+
+      spans.forEach((span) => {
+        try {
+          if (!range.intersectsNode(span)) return;
+        } catch {
+          return;
+        }
+
+        const walker = window.document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
+        let textNode = walker.nextNode() as Text | null;
+        while (textNode) {
+          const data = textNode.data;
+          let start = 0;
+          let end = data.length;
+
+          if (range.startContainer === textNode) start = Math.max(0, Math.min(data.length, range.startOffset));
+          else if (span.contains(range.startContainer) && range.startContainer === span) start = range.startOffset > 0 ? data.length : 0;
+
+          if (range.endContainer === textNode) end = Math.max(0, Math.min(data.length, range.endOffset));
+          else if (span.contains(range.endContainer) && range.endContainer === span) end = range.endOffset <= 0 ? 0 : data.length;
+
+          while (start < end && /\s/.test(data[start])) start += 1;
+          while (end > start && /\s/.test(data[end - 1])) end -= 1;
+
+          if (end > start) {
+            const characterRange = window.document.createRange();
+            characterRange.setStart(textNode, start);
+            characterRange.setEnd(textNode, end);
+            Array.from(characterRange.getClientRects()).forEach((rect) => {
+              if (rect.width <= .5 || rect.height <= 1) return;
+              const verticalInset = Math.min(1.5, rect.height * .08);
+              const top = rect.top + verticalInset;
+              const bottom = rect.bottom - verticalInset;
+              boxes.push({
+                left: rect.left,
+                top,
+                right: rect.right,
+                bottom,
+                width: rect.width,
+                height: Math.max(1, bottom - top),
+              });
+            });
+          }
+
+          textNode = walker.nextNode() as Text | null;
+        }
+      });
+
+      const fallback = boxes.length
+        ? boxes
+        : Array.from(range.getClientRects())
+          .filter((rect) => rect.width > 1 && rect.height > 1)
+          .map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
+
+      const mergedBoxes = fallback.reduce<ClientBox[]>((merged, box) => {
+        const previous = merged.at(-1);
+        if (!previous) return [box];
+        const sameLine = Math.abs(previous.top - box.top) <= Math.max(2, Math.min(previous.height, box.height) * .28);
+        const smallGap = box.left - previous.right <= Math.max(2.5, Math.min(previous.height, box.height) * .32);
+        if (!sameLine || !smallGap || box.left < previous.left - 2) return [...merged, box];
+        const left = Math.min(previous.left, box.left);
+        const top = Math.min(previous.top, box.top);
+        const right = Math.max(previous.right, box.right);
+        const bottom = Math.max(previous.bottom, box.bottom);
+        merged[merged.length - 1] = { left, top, right, bottom, width: right - left, height: bottom - top };
+        return merged;
+      }, []);
+
+      if (!mergedBoxes.length) return;
+      const layerRect = textLayer.getBoundingClientRect();
+      const rects = mergedBoxes.map((rect) => {
+        const [x1, y1] = viewport.convertToPdfPoint(rect.left - layerRect.left, rect.top - layerRect.top);
+        const [x2, y2] = viewport.convertToPdfPoint(rect.right - layerRect.left, rect.bottom - layerRect.top);
         return normalizeRect({ x1, y1, x2, y2 });
       });
-      if (!rects.length) return;
-      const anchor = clientRects.at(-1)!;
+      const anchor = mergedBoxes.at(-1)!;
       onSelection({
         page,
         text,
