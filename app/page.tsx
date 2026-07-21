@@ -1,32 +1,63 @@
 "use client";
 
 import {
+  BookOpen,
+  Bookmark,
+  BookmarkCheck,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
+  Crop,
+  Download,
   Eraser,
   FileText,
   FolderOpen,
+  Hand,
   Highlighter,
+  Image,
   Lasso,
+  ListTree,
+  Maximize2,
   Menu,
   Minus,
   MousePointer2,
   NotebookTabs,
+  PanelLeftOpen,
   PenTool,
   Plus,
   Redo2,
+  RotateCw,
+  Rows3,
+  ScanText,
+  Search,
   Shapes,
+  Square,
+  Strikethrough,
+  TextSelect,
   TextCursorInput,
   Trash2,
+  Underline,
   Undo2,
   X,
 } from "lucide-react";
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import {
+  LazyPdfPageView,
+  PdfPageView,
+  type PdfAnnotation,
+  type PdfCropResult,
+  type PdfFitMode,
+  type PdfInkAnnotation,
+  type PdfMarkupAnnotation,
+  type PdfRect,
+  type PdfSelection,
+  type PdfTool,
+  type PdfViewMode,
+} from "./pdf-reader";
 
 type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
 type InkTool = "pen" | "highlight" | "shape";
@@ -57,6 +88,19 @@ type NotePage = {
   citationPage: number | null;
   strokes: Stroke[];
   paper: PaperSettings;
+  excerpts: NoteExcerpt[];
+};
+
+type NoteExcerpt = {
+  id: string;
+  kind: "text" | "image";
+  text?: string;
+  assetId?: string;
+  documentId: string;
+  documentName: string;
+  page: number;
+  rect?: PdfRect;
+  createdAt: number;
 };
 
 type Notebook = {
@@ -72,7 +116,22 @@ type LibraryDocument = {
   name: string;
   size: number;
   lastModified: number;
+  reader: ReaderState;
 };
+
+type ReaderState = {
+  page: number;
+  zoom: number;
+  fitMode: PdfFitMode;
+  rotation: number;
+  viewMode: PdfViewMode;
+  bookmarks: number[];
+  annotations: PdfAnnotation[];
+};
+
+type PdfOutlineEntry = { title: string; page: number | null; depth: number };
+type PdfRailTab = "pages" | "outline" | "search" | "marks";
+type SearchResult = { documentId: string | null; documentName: string; page: number; snippet: string; occurrences: number };
 
 type WorkspaceItem = {
   id: string;
@@ -98,6 +157,7 @@ type LegacyNotebookState = {
 };
 
 type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
+type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;
 
 const STORAGE_KEY = "mednote-library-v2";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
@@ -105,6 +165,7 @@ const DB_NAME = "mednote-local";
 const DB_STORE = "documents";
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
+const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "width", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
   a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
@@ -139,6 +200,17 @@ const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "lasso", label: "Khoanh chọn", icon: Lasso },
   { id: "shape", label: "Hình học", icon: Shapes },
   { id: "text", label: "Nhập chữ", icon: TextCursorInput },
+];
+
+const PDF_TOOLS: { id: PdfTool; label: string; icon: typeof MousePointer2 }[] = [
+  { id: "pan", label: "Bàn tay — kéo trang", icon: Hand },
+  { id: "select", label: "Chọn và sao chép chữ", icon: TextSelect },
+  { id: "highlight", label: "Tô sáng chữ", icon: Highlighter },
+  { id: "underline", label: "Gạch chân chữ", icon: Underline },
+  { id: "strikeout", label: "Gạch ngang chữ", icon: Strikethrough },
+  { id: "pen", label: "Viết trên PDF", icon: PenTool },
+  { id: "eraser", label: "Tẩy nét bút trên PDF", icon: Eraser },
+  { id: "crop", label: "Cắt hình hoặc bảng sang note", icon: Crop },
 ];
 
 const starterStrokes: Stroke[] = [
@@ -176,6 +248,7 @@ const initialPages: NotePage[] = [
     citationPage: 126,
     strokes: starterStrokes,
     paper: DEFAULT_PAPER,
+    excerpts: [],
   },
 ];
 
@@ -202,12 +275,23 @@ function normalizePage(page: NotePage): NotePage {
     body: page.body ?? "",
     strokes: Array.isArray(page.strokes) ? page.strokes : [],
     paper: normalizePaper(page.paper),
+    excerpts: Array.isArray(page.excerpts) ? page.excerpts : [],
+  };
+}
+
+function normalizeReader(reader?: Partial<ReaderState>): ReaderState {
+  return {
+    ...DEFAULT_READER,
+    ...reader,
+    bookmarks: Array.isArray(reader?.bookmarks) ? reader.bookmarks : [],
+    annotations: Array.isArray(reader?.annotations) ? reader.annotations : [],
   };
 }
 
 function normalizeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
   return {
     ...workspace,
+    documents: workspace.documents.map((document) => ({ ...document, reader: normalizeReader(document.reader) })),
     notebooks: workspace.notebooks.map((notebook) => ({
       ...notebook,
       pages: notebook.pages.map(normalizePage),
@@ -223,6 +307,7 @@ function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEF
     citationPage,
     strokes: [],
     paper: { ...paper },
+    excerpts: [],
   };
 }
 
@@ -315,6 +400,79 @@ async function deleteLocalPdf(documentId: string) {
     transaction.onerror = () => reject(transaction.error);
   });
   db.close();
+}
+
+async function deleteLocalAsset(assetId: string) {
+  const db = await openLocalDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    transaction.objectStore(DB_STORE).delete(`asset:${assetId}`);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function saveLocalAsset(assetId: string, blob: Blob) {
+  const db = await openLocalDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    transaction.objectStore(DB_STORE).put({ blob }, `asset:${assetId}`);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function readLocalAsset(assetId: string) {
+  const db = await openLocalDb();
+  const result = await new Promise<{ blob: Blob } | undefined>((resolve, reject) => {
+    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(`asset:${assetId}`);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return result?.blob;
+}
+
+async function loadStoredPdfDocument(documentId: string) {
+  const stored = await readLocalPdf(documentId);
+  if (!stored) return null;
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  const buffer = await stored.blob.arrayBuffer();
+  return pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]!);
+}
+
+function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
+  const [source, setSource] = useState<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let objectUrl: string | null = null;
+    void readLocalAsset(assetId).then((blob) => {
+      if (!blob || disposed) return;
+      objectUrl = URL.createObjectURL(blob);
+      setSource(objectUrl);
+    });
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [assetId]);
+  return source ? <img src={source} alt={alt} /> : <span className="excerpt-image-loading">Đang mở ảnh…</span>;
 }
 
 async function readLegacyPdf() {
@@ -430,8 +588,21 @@ function PdfPageCanvas({ document, page, zoom }: { document: PDFDocumentProxy; p
 }
 
 function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocumentProxy; page: number; active: boolean; onClick: () => void }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(page <= 4);
   useEffect(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    const root = button.closest(".pdf-thumbnails");
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisible(true);
+    }, { root, rootMargin: "500px 0px" });
+    observer.observe(button);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!visible) return;
     let disposed = false;
     let task: PDFRenderTask | null = null;
     void document.getPage(page).then((pdfPage) => {
@@ -450,8 +621,8 @@ function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocume
       return task.promise;
     }).catch(() => undefined);
     return () => { disposed = true; task?.cancel(); };
-  }, [document, page]);
-  return <button className={`pdf-thumb ${active ? "active" : ""}`} onClick={onClick}><span className="mini-paper pdf-mini"><canvas ref={canvasRef} /></span><span>{page}</span></button>;
+  }, [document, page, visible]);
+  return <button ref={buttonRef} className={`pdf-thumb ${active ? "active" : ""}`} onClick={onClick}><span className="mini-paper pdf-mini">{visible ? <canvas ref={canvasRef} /> : <i className="thumb-placeholder" />}</span><span>{page}</span></button>;
 }
 
 function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stroke: Stroke) {
@@ -928,11 +1099,25 @@ function InkCanvas({ tool, color, width, shape, strokes, onCommit }: InkCanvasPr
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
+  const documentStageRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const [activeTool, setActiveTool] = useState<Tool>("pen");
   const [inkColor, setInkColor] = useState("#2465a8");
   const [inkWidth, setInkWidth] = useState(2);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
-  const [sourceZoom, setSourceZoom] = useState(1);
+  const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
+  const [pdfTool, setPdfTool] = useState<PdfTool>("select");
+  const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
+  const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
+  const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("pages");
+  const [outline, setOutline] = useState<PdfOutlineEntry[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeSearchQuery, setActiveSearchQuery] = useState("");
+  const [searchWholeCollection, setSearchWholeCollection] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [readerFocus, setReaderFocus] = useState(false);
+  const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace()]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
   const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});
@@ -953,12 +1138,32 @@ export default function Home() {
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
-  const sourcePage = activeWorkspace.sourcePage;
+  const activeReader = activeDocument?.reader ?? demoReader;
+  const sourcePage = activeDocument?.reader.page ?? demoReader.page;
+  const sourceZoom = activeReader.zoom;
+  const fitMode = activeReader.fitMode;
+  const rotation = activeReader.rotation;
+  const viewMode = activeReader.viewMode;
+  const bookmarks = activeReader.bookmarks;
+  const pdfAnnotations = activeReader.annotations;
   const documentName = activeWorkspace.name;
   const totalPages = currentPdfDocument?.numPages ?? (activeDocument ? 1 : 482);
 
   const updateActiveWorkspace = (updater: (workspace: WorkspaceItem) => WorkspaceItem) => {
     setWorkspaces((items) => items.map((workspace) => workspace.id === activeWorkspaceId ? updater(workspace) : workspace));
+  };
+
+  const updateReader = (updater: (reader: ReaderState) => ReaderState) => {
+    if (!activeDocument) {
+      setDemoReader((reader) => updater(reader));
+      return;
+    }
+    updateActiveWorkspace((workspace) => ({
+      ...workspace,
+      documents: workspace.documents.map((document) => document.id === activeDocument.id
+        ? { ...document, reader: updater(normalizeReader(document.reader)) }
+        : document),
+    }));
   };
 
   const updateActiveNotebook = (updater: (notebook: Notebook) => Notebook) => {
@@ -969,10 +1174,52 @@ export default function Home() {
   };
 
   const setSourcePage = (value: number | ((page: number) => number)) => {
+    const next = Math.max(1, Math.min(totalPages, typeof value === "function" ? value(sourcePage) : value));
+    if (activeDocument) {
+      updateActiveWorkspace((workspace) => ({
+        ...workspace,
+        sourcePage: next,
+        documents: workspace.documents.map((document) => document.id === activeDocument.id
+          ? { ...document, reader: { ...normalizeReader(document.reader), page: next } }
+          : document),
+      }));
+    } else {
+      setDemoReader((reader) => ({ ...reader, page: next }));
+      updateActiveWorkspace((workspace) => ({ ...workspace, sourcePage: next }));
+    }
+  };
+
+  const setSourceZoom = (value: number | ((zoom: number) => number)) => {
+    updateReader((reader) => ({ ...reader, zoom: Math.max(.55, Math.min(2.5, typeof value === "function" ? value(reader.zoom) : value)) }));
+  };
+
+  const goToPage = (page: number, smooth = true) => {
+    const next = Math.max(1, Math.min(totalPages, page));
+    setSourcePage(next);
+    if (viewMode === "continuous") {
+      window.requestAnimationFrame(() => {
+        documentStageRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${next}"]`)?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+      });
+    }
+  };
+
+  const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {
+    const target = activeWorkspace.documents.find((document) => document.id === documentId);
+    if (!target) return;
+    const nextPage = Math.max(1, page ?? target.reader.page ?? 1);
     updateActiveWorkspace((workspace) => ({
       ...workspace,
-      sourcePage: typeof value === "function" ? value(workspace.sourcePage) : value,
+      activeDocumentId: documentId,
+      sourcePage: nextPage,
+      documents: workspace.documents.map((document) => document.id === documentId
+        ? { ...document, reader: { ...normalizeReader(document.reader), page: nextPage } }
+        : document),
     }));
+    setPdfSelection(null);
+    if (rect) {
+      setSourceFocus({ documentId, page: nextPage, rect });
+      window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === documentId && focus.page === nextPage ? null : focus), 3600);
+    }
   };
 
   const setActiveNoteId = (pageId: string) => {
@@ -981,10 +1228,7 @@ export default function Home() {
 
   const sourcePages = useMemo(() => {
     if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
-    const count = currentPdfDocument.numPages;
-    if (count <= 8) return Array.from({ length: count }, (_, index) => index + 1);
-    const start = Math.min(Math.max(1, sourcePage - 3), count - 7);
-    return Array.from({ length: 8 }, (_, index) => start + index);
+    return Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1);
   }, [activeDocument, activeWorkspace.kind, currentPdfDocument, sourcePage]);
 
   useEffect(() => {
@@ -1025,6 +1269,7 @@ export default function Home() {
             name: storedPdf.name,
             size: storedPdf.blob.size,
             lastModified: 0,
+            reader: { ...DEFAULT_READER },
           };
           await saveLocalPdf(storedPdf.blob, document);
           const notebook: Notebook = {
@@ -1056,6 +1301,10 @@ export default function Home() {
     };
     void restore();
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
   }, []);
 
   useEffect(() => {
@@ -1099,7 +1348,15 @@ export default function Home() {
       if (!disposed) {
         setPdfDocument(document);
         setLoadedDocumentId(pdfSource.documentId);
-        setSourcePage((page) => Math.min(Math.max(1, page), document!.numPages));
+        setWorkspaces((items) => items.map((workspace) => ({
+          ...workspace,
+          sourcePage: workspace.id === activeWorkspaceId
+            ? Math.min(Math.max(1, workspace.documents.find((item) => item.id === pdfSource.documentId)?.reader.page ?? workspace.sourcePage), document!.numPages)
+            : workspace.sourcePage,
+          documents: workspace.documents.map((item) => item.id === pdfSource.documentId
+            ? { ...item, reader: { ...normalizeReader(item.reader), page: Math.min(Math.max(1, item.reader?.page ?? 1), document!.numPages) } }
+            : item),
+        })));
         setPdfStatus("idle");
         setToast(`Đã mở ${document.numPages} trang`);
       }
@@ -1111,6 +1368,41 @@ export default function Home() {
     });
     return () => { disposed = true; void document?.destroy(); };
   }, [pdfSource]);
+
+  useEffect(() => {
+    if (!currentPdfDocument) {
+      setOutline(activeDocument || activeWorkspace.kind !== "demo" ? [] : [
+        { title: "3.4 Diabetic Neuropathy", page: 123, depth: 0 },
+        { title: "Introduction", page: 123, depth: 1 },
+        { title: "Pathophysiology", page: 126, depth: 1 },
+        { title: "Clinical features", page: 127, depth: 1 },
+      ]);
+      return;
+    }
+    let disposed = false;
+    type RawOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: RawOutlineItem[] };
+    const resolvePage = async (dest: RawOutlineItem["dest"]) => {
+      if (!dest) return null;
+      let explicit: string | unknown[] | null | undefined = dest;
+      if (typeof explicit === "string") explicit = await currentPdfDocument.getDestination(explicit) as unknown[] | null;
+      if (!Array.isArray(explicit) || !explicit.length) return null;
+      const reference = explicit[0] as number | { num: number; gen: number };
+      if (typeof reference === "number") return reference + 1;
+      try { return await currentPdfDocument.getPageIndex(reference) + 1; } catch { return null; }
+    };
+    void currentPdfDocument.getOutline().then(async (items) => {
+      const entries: PdfOutlineEntry[] = [];
+      const visit = async (nodes: RawOutlineItem[], depth: number) => {
+        for (const item of nodes) {
+          entries.push({ title: item.title?.trim() || "Mục không tên", page: await resolvePage(item.dest), depth });
+          if (item.items?.length) await visit(item.items, depth + 1);
+        }
+      };
+      await visit((items ?? []) as RawOutlineItem[], 0);
+      if (!disposed) setOutline(entries);
+    }).catch(() => !disposed && setOutline([]));
+    return () => { disposed = true; };
+  }, [activeDocument, activeWorkspace.kind, currentPdfDocument]);
 
   useEffect(() => {
     if (!toast || toast === "Đã tự lưu") return;
@@ -1125,6 +1417,314 @@ export default function Home() {
     }));
   };
 
+  const pdfHistoryKey = activeDocument?.id ?? "demo";
+
+  const commitPdfAnnotations = (next: PdfAnnotation[], previous = pdfAnnotations) => {
+    const unchanged = next.length === previous.length && next.every((annotation, index) => annotation === previous[index]);
+    if (unchanged) return;
+    setPdfHistory((state) => {
+      const history = state[pdfHistoryKey] ?? { undo: [], redo: [] };
+      return { ...state, [pdfHistoryKey]: { undo: [...history.undo, previous].slice(-60), redo: [] } };
+    });
+    updateReader((reader) => ({ ...reader, annotations: next }));
+  };
+
+  const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
+    if (!selection || !activeDocument) return;
+    const color = kind === "highlight" ? "#f6d96b" : kind === "underline" ? inkColor : "#c94b50";
+    const annotation: PdfMarkupAnnotation = {
+      id: uid(`pdf-${kind}`),
+      kind,
+      page: selection.page,
+      color,
+      rects: selection.rects,
+      text: selection.text,
+      createdAt: Date.now(),
+    };
+    commitPdfAnnotations([...pdfAnnotations, annotation]);
+    window.getSelection()?.removeAllRanges();
+    setPdfSelection(null);
+    setToast(kind === "highlight" ? "Đã tô sáng" : kind === "underline" ? "Đã gạch chân" : "Đã gạch ngang");
+  };
+
+  const copyPdfSelection = async () => {
+    if (!pdfSelection) return;
+    try {
+      await navigator.clipboard.writeText(pdfSelection.text);
+      setToast("Đã sao chép đoạn chọn");
+    } catch {
+      setToast("Trình duyệt không cho phép sao chép tự động");
+    }
+  };
+
+  const handlePdfSelection = (selection: PdfSelection) => {
+    if (pdfTool === "highlight" || pdfTool === "underline" || pdfTool === "strikeout") {
+      addPdfMarkup(pdfTool, selection);
+      return;
+    }
+    setPdfSelection(selection);
+  };
+
+  const commitPdfInk = (page: number, nextPage: PdfInkAnnotation[], previousPage: PdfInkAnnotation[]) => {
+    const other = pdfAnnotations.filter((annotation) => annotation.kind !== "ink" || annotation.page !== page);
+    const previous = [...other, ...previousPage];
+    const next = [...other, ...nextPage.map((annotation) => ({ ...annotation, page }))];
+    commitPdfAnnotations(next, previous);
+  };
+
+  const undoPdf = () => {
+    const history = pdfHistory[pdfHistoryKey];
+    const previous = history?.undo.at(-1);
+    if (!previous) return;
+    updateReader((reader) => ({ ...reader, annotations: previous }));
+    setPdfHistory((state) => ({
+      ...state,
+      [pdfHistoryKey]: { undo: history.undo.slice(0, -1), redo: [...history.redo, pdfAnnotations].slice(-60) },
+    }));
+    setToast("Đã hoàn tác chú thích PDF");
+  };
+
+  const redoPdf = () => {
+    const history = pdfHistory[pdfHistoryKey];
+    const next = history?.redo.at(-1);
+    if (!next) return;
+    updateReader((reader) => ({ ...reader, annotations: next }));
+    setPdfHistory((state) => ({
+      ...state,
+      [pdfHistoryKey]: { undo: [...history.undo, pdfAnnotations].slice(-60), redo: history.redo.slice(0, -1) },
+    }));
+    setToast("Đã làm lại chú thích PDF");
+  };
+
+  const removePdfAnnotation = (annotationId: string) => {
+    commitPdfAnnotations(pdfAnnotations.filter((annotation) => annotation.id !== annotationId));
+    setToast("Đã xóa chú thích PDF");
+  };
+
+  const toggleBookmark = () => {
+    const exists = bookmarks.includes(sourcePage);
+    updateReader((reader) => ({
+      ...reader,
+      bookmarks: exists ? reader.bookmarks.filter((page) => page !== sourcePage) : [...reader.bookmarks, sourcePage].sort((a, b) => a - b),
+    }));
+    setToast(exists ? `Đã bỏ đánh dấu trang ${sourcePage}` : `Đã đánh dấu trang ${sourcePage}`);
+  };
+
+  const addTextExcerpt = (selection: PdfSelection | null = pdfSelection) => {
+    if (!selection || !activeDocument) return;
+    const excerpt: NoteExcerpt = {
+      id: uid("excerpt"),
+      kind: "text",
+      text: selection.text,
+      documentId: activeDocument.id,
+      documentName: activeDocument.name,
+      page: selection.page,
+      rect: selection.rects[0],
+      createdAt: Date.now(),
+    };
+    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: selection.page });
+    window.getSelection()?.removeAllRanges();
+    setPdfSelection(null);
+    setToast("Đã đưa đoạn trích sang note");
+  };
+
+  const addImageExcerpt = async (result: PdfCropResult) => {
+    if (!activeDocument) return;
+    const assetId = uid("crop");
+    try {
+      await saveLocalAsset(assetId, result.blob);
+      const excerpt: NoteExcerpt = {
+        id: uid("excerpt"),
+        kind: "image",
+        assetId,
+        documentId: activeDocument.id,
+        documentName: activeDocument.name,
+        page: result.page,
+        rect: result.rect,
+        createdAt: Date.now(),
+      };
+      updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: result.page });
+      setPdfTool("select");
+      setToast("Đã cắt hình và đưa sang note");
+    } catch {
+      setToast("Không thể lưu hình cắt trên thiết bị này");
+    }
+  };
+
+  const deleteExcerpt = (excerptId: string) => {
+    updateActiveNote({ excerpts: activeNote.excerpts.filter((excerpt) => excerpt.id !== excerptId) });
+    setToast("Đã xóa trích dẫn khỏi note");
+  };
+
+  const openExcerptSource = (excerpt: NoteExcerpt) => {
+    if (!activeWorkspace.documents.some((document) => document.id === excerpt.documentId)) {
+      setToast("Tài liệu nguồn đã bị xóa khỏi cụm");
+      return;
+    }
+    if (activeDocument?.id === excerpt.documentId) {
+      goToPage(excerpt.page);
+      if (excerpt.rect) {
+        setSourceFocus({ documentId: excerpt.documentId, page: excerpt.page, rect: excerpt.rect });
+        window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === excerpt.documentId && focus.page === excerpt.page ? null : focus), 3600);
+      }
+    } else {
+      switchDocument(excerpt.documentId, excerpt.page, excerpt.rect);
+    }
+    setReaderFocus(false);
+    setToast(`Đã quay lại ${excerpt.documentName} · trang ${excerpt.page}`);
+  };
+
+  const performSearch = async () => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setActiveSearchQuery("");
+      return;
+    }
+    setSearching(true);
+    setActiveSearchQuery(query);
+    setSearchResults([]);
+    const normalizedQuery = query.toLocaleLowerCase();
+    if (!activeWorkspace.documents.length) {
+      if (activeWorkspace.kind !== "demo") {
+        setSearchResults([]);
+        setSearching(false);
+        setToast("Chưa có PDF để tìm kiếm");
+        return;
+      }
+      const demoText = "Diabetic neuropathy pathophysiology hyperglycemia polyol pathway clinical features diagnosis management peripheral autonomic neuropathy";
+      const matches = demoText.toLocaleLowerCase().includes(normalizedQuery)
+        ? [{ documentId: null, documentName: "Tài liệu mẫu", page: 126, snippet: demoText, occurrences: 1 }]
+        : [];
+      setSearchResults(matches);
+      setSearching(false);
+      return;
+    }
+    const targets = searchWholeCollection ? activeWorkspace.documents : activeDocument ? [activeDocument] : [];
+    const found: SearchResult[] = [];
+    for (const target of targets) {
+      let proxy: PDFDocumentProxy | null = target.id === loadedDocumentId ? currentPdfDocument : null;
+      const temporary = !proxy;
+      try {
+        if (!proxy) proxy = await loadStoredPdfDocument(target.id);
+        if (!proxy) continue;
+        for (let pageNumber = 1; pageNumber <= proxy.numPages && found.length < 300; pageNumber += 1) {
+          const page = await proxy.getPage(pageNumber);
+          const content = await page.getTextContent();
+          const text = content.items.map((item) => "str" in item ? item.str : "").join(" ").replace(/\s+/g, " ").trim();
+          const lower = text.toLocaleLowerCase();
+          let index = lower.indexOf(normalizedQuery);
+          if (index < 0) continue;
+          let occurrences = 0;
+          while (index >= 0) {
+            occurrences += 1;
+            index = lower.indexOf(normalizedQuery, index + Math.max(1, normalizedQuery.length));
+          }
+          const first = lower.indexOf(normalizedQuery);
+          const start = Math.max(0, first - 70);
+          const end = Math.min(text.length, first + query.length + 110);
+          found.push({
+            documentId: target.id,
+            documentName: target.name,
+            page: pageNumber,
+            snippet: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
+            occurrences,
+          });
+          if (pageNumber % 12 === 0) await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
+      } catch { /* keep results from the remaining documents */ }
+      finally { if (temporary) void proxy?.destroy(); }
+    }
+    setSearchResults(found);
+    setSearching(false);
+    setToast(found.length ? `Tìm thấy ở ${found.length} trang` : "Không tìm thấy kết quả");
+  };
+
+  const openSearchResult = (result: SearchResult) => {
+    if (result.documentId && result.documentId !== activeDocument?.id) switchDocument(result.documentId, result.page);
+    else goToPage(result.page);
+    setPdfRailTab("search");
+  };
+
+  const exportNotebook = async () => {
+    setToast("Đang tạo tệp note…");
+    const pagesHtml: string[] = [];
+    for (const [index, page] of activeNotebook.pages.entries()) {
+      const excerptsHtml: string[] = [];
+      for (const excerpt of page.excerpts) {
+        let content = excerpt.kind === "text" ? `<blockquote>${escapeHtml(excerpt.text ?? "")}</blockquote>` : "";
+        if (excerpt.kind === "image" && excerpt.assetId) {
+          const blob = await readLocalAsset(excerpt.assetId);
+          if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
+        }
+        excerptsHtml.push(`<figure>${content}<figcaption>${escapeHtml(excerpt.documentName)} — trang ${excerpt.page}</figcaption></figure>`);
+      }
+      pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body">${escapeHtml(page.body).replace(/\n/g, "<br>")}</div>${excerptsHtml.join("")}</section>`);
+    }
+    const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(activeNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(activeNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${activeNotebook.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "MedNote"}.html`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setToast("Đã xuất note kèm nguồn");
+  };
+
+  const handleReaderScroll = () => {
+    if (viewMode !== "continuous" || !documentStageRef.current) return;
+    if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      const stage = documentStageRef.current!;
+      const stageTop = stage.getBoundingClientRect().top + 24;
+      const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
+      const nearest = pages.reduce<{ element: HTMLElement; distance: number } | null>((best, element) => {
+        const distance = Math.abs(element.getBoundingClientRect().top - stageTop);
+        return !best || distance < best.distance ? { element, distance } : best;
+      }, null);
+      const page = Number(nearest?.element.dataset.pdfPage);
+      if (page && page !== sourcePage) setSourcePage(page);
+    });
+  };
+
+  useEffect(() => {
+    setPdfSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, [activeDocument?.id, pdfTool, sourcePage]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.matches("input, textarea, select, [contenteditable='true']");
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
+        event.preventDefault();
+        setShowPdfRail(true);
+        setPdfRailTab("search");
+        window.setTimeout(() => document.getElementById("pdf-search-input")?.focus(), 0);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && (event.key === "+" || event.key === "=")) {
+        event.preventDefault();
+        setSourceZoom((zoom) => zoom + .1);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === "-") {
+        event.preventDefault();
+        setSourceZoom((zoom) => zoom - .1);
+        return;
+      }
+      if (!isTyping && event.key === "ArrowLeft" && viewMode === "single") goToPage(sourcePage - 1);
+      if (!isTyping && event.key === "ArrowRight" && viewMode === "single") goToPage(sourcePage + 1);
+      if (event.key === "Escape") {
+        setPdfSelection(null);
+        setReaderFocus(false);
+        window.getSelection()?.removeAllRanges();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   const handlePdfFiles = async (selection: FileList | null) => {
     const files = Array.from(selection ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
     if (!files.length) {
@@ -1136,6 +1736,7 @@ export default function Home() {
       name: file.name,
       size: file.size,
       lastModified: file.lastModified,
+      reader: { ...DEFAULT_READER },
     }));
     try {
       await Promise.all(files.map((file, index) => saveLocalPdf(file, documents[index])));
@@ -1194,9 +1795,11 @@ export default function Home() {
     setToast("Đã tạo sổ ghi chú mới");
   };
 
-  const deleteNotePage = () => {
+  const deleteNotePage = async () => {
     if (!window.confirm(`Xóa trang note “${activeNote.title}”? Thao tác này không thể hoàn tác.`)) return;
     const deletedPageId = activeNote.id;
+    const assetIds = activeNote.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!);
+    await Promise.allSettled(assetIds.map(deleteLocalAsset));
     if (notePages.length === 1) {
       const replacement = createBlankPage(sourcePage, 1, activeNote.paper);
       updateActiveNotebook((notebook) => ({ ...notebook, pages: [replacement], activePageId: replacement.id }));
@@ -1221,15 +1824,16 @@ export default function Home() {
     setToast("Đã xóa trang note");
   };
 
-  const deleteNotebook = () => {
+  const deleteNotebook = async () => {
     const pageCount = activeNotebook.pages.length;
     const lastNotebook = activeWorkspace.notebooks.length === 1;
     const warning = lastNotebook
       ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới cho tài liệu này.`
       : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Thao tác này không thể hoàn tác.`;
     if (!window.confirm(warning)) return;
-
     const deletedPageIds = new Set(activeNotebook.pages.map((page) => page.id));
+    const assetIds = activeNotebook.pages.flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!));
+    await Promise.allSettled(assetIds.map(deleteLocalAsset));
     if (lastNotebook) {
       const replacement = createNotebook(`Ghi chú — ${activeWorkspace.name}`, sourcePage);
       updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: [replacement], activeNotebookId: replacement.id }));
@@ -1249,19 +1853,19 @@ export default function Home() {
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
     if (!target) return;
     const pageCount = target.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
-    const targetLabel = target.kind === "collection" ? "cụm tài liệu" : "tài liệu";
+    const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
     if (!window.confirm(`Xóa ${targetLabel} “${target.name}” cùng ${target.notebooks.length} sổ và ${pageCount} trang note? Thao tác này không thể hoàn tác.`)) return;
-
-    await Promise.allSettled(target.documents.map((document) => deleteLocalPdf(document.id)));
+    const assetIds = target.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!)));
+    await Promise.allSettled([...target.documents.map((document) => deleteLocalPdf(document.id)), ...assetIds.map(deleteLocalAsset)]);
     const deletedPageIds = new Set(target.notebooks.flatMap((notebook) => notebook.pages.map((page) => page.id)));
+    const deletedDocumentIds = new Set(target.documents.map((document) => document.id));
     const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
     const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId);
     const nextWorkspaces = remaining.length ? remaining : [createEmptyWorkspace()];
     setWorkspaces(nextWorkspaces);
-    if (activeWorkspaceId === workspaceId) {
-      setActiveWorkspaceId(nextWorkspaces[Math.min(targetIndex, nextWorkspaces.length - 1)].id);
-    }
+    if (activeWorkspaceId === workspaceId) setActiveWorkspaceId(nextWorkspaces[Math.min(targetIndex, nextWorkspaces.length - 1)].id);
     setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
+    setPdfHistory((history) => Object.fromEntries(Object.entries(history).filter(([documentId]) => !deletedDocumentIds.has(documentId))));
     setPaperPanelOpen(false);
     setToast(`Đã xóa ${targetLabel} và note liên quan`);
   };
@@ -1273,7 +1877,6 @@ export default function Home() {
       return;
     }
     if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
-
     await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
     const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);
     const nextDocuments = activeWorkspace.documents.filter((document) => document.id !== activeDocument.id);
@@ -1282,8 +1885,13 @@ export default function Home() {
       ...workspace,
       documents: nextDocuments,
       activeDocumentId: nextActiveDocument.id,
-      sourcePage: 1,
+      sourcePage: nextActiveDocument.reader.page,
     }));
+    setPdfHistory((history) => {
+      const next = { ...history };
+      delete next[activeDocument.id];
+      return next;
+    });
     setToast("Đã xóa tài liệu khỏi cụm; note vẫn được giữ lại");
   };
 
@@ -1381,7 +1989,7 @@ export default function Home() {
                   <div className="library-row" key={workspace.id}>
                     <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
                       <span className="library-icon"><FileText size={19} /></span>
-                      <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
+                      <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Chưa có PDF" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
                     </button>
                     {workspace.kind !== "empty" && <button className="library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa tài liệu và note liên quan"><Trash2 size={17} /></button>}
                   </div>
@@ -1392,35 +2000,106 @@ export default function Home() {
         </div>
       )}
 
-      <section className={`workspace ${showPdfRail ? "" : "pdf-rail-collapsed"}`} ref={workspaceRef} style={gridStyle}>
-        <aside className="pdf-thumbnails" aria-label="Trang tài liệu">
-          <div className="rail-heading"><FileText size={16} /><button className="icon-button compact" aria-label="Thu gọn" onClick={() => setShowPdfRail(false)}><ChevronLeft size={17} /></button></div>
-          <div className="thumb-list">
-            {sourcePages.map((page) => currentPdfDocument ? (
-              <PdfThumbnail key={`${activeDocument?.id}-${page}`} document={currentPdfDocument} page={page} active={page === sourcePage} onClick={() => setSourcePage(page)} />
-            ) : (
-              <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => setSourcePage(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
-            ))}
+      {pdfSelection && (
+        <div className="pdf-selection-menu" style={{ left: pdfSelection.menuX, top: pdfSelection.menuY }} role="toolbar" aria-label="Thao tác với đoạn chữ đã chọn">
+          <button onClick={() => { void copyPdfSelection(); }}><Copy size={14} /> Sao chép</button>
+          <button onClick={() => addPdfMarkup("highlight")}><Highlighter size={14} /> Tô sáng</button>
+          <button onClick={() => addPdfMarkup("underline")}><Underline size={14} /> Gạch chân</button>
+          <button onClick={() => addPdfMarkup("strikeout")}><Strikethrough size={14} /> Gạch ngang</button>
+          <button className="send-note" onClick={() => addTextExcerpt()}><NotebookTabs size={14} /> Đưa sang note</button>
+          <button className="close-selection" onClick={() => { setPdfSelection(null); window.getSelection()?.removeAllRanges(); }} aria-label="Đóng"><X size={14} /></button>
+        </div>
+      )}
+
+      <section className={`workspace ${showPdfRail ? "" : "pdf-rail-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"} ${readerFocus ? "reader-focus" : ""}`} ref={workspaceRef} style={gridStyle}>
+        <aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">
+          <div className="pdf-rail-tabs">
+            <button className={pdfRailTab === "pages" ? "active" : ""} onClick={() => setPdfRailTab("pages")} title="Trang" aria-label="Hình thu nhỏ các trang"><ScanText size={17} /></button>
+            <button className={pdfRailTab === "outline" ? "active" : ""} onClick={() => setPdfRailTab("outline")} title="Mục lục" aria-label="Mục lục PDF"><ListTree size={17} /></button>
+            <button className={pdfRailTab === "search" ? "active" : ""} onClick={() => setPdfRailTab("search")} title="Tìm kiếm" aria-label="Tìm kiếm"><Search size={17} /></button>
+            <button className={pdfRailTab === "marks" ? "active" : ""} onClick={() => setPdfRailTab("marks")} title="Đánh dấu" aria-label="Bookmark và chú thích"><Bookmark size={17} /></button>
+            <button onClick={() => setShowPdfRail(false)} title="Thu gọn" aria-label="Thu gọn bảng điều hướng"><ChevronLeft size={17} /></button>
           </div>
+
+          {pdfRailTab === "pages" && (
+            <div className="thumb-list">
+              {sourcePages.map((page) => currentPdfDocument ? (
+                <PdfThumbnail key={`${activeDocument?.id}-${page}`} document={currentPdfDocument} page={page} active={page === sourcePage} onClick={() => goToPage(page)} />
+              ) : (
+                <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => goToPage(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
+              ))}
+            </div>
+          )}
+
+          {pdfRailTab === "outline" && (
+            <div className="pdf-rail-content">
+              <h3>Mục lục</h3>
+              {outline.length ? outline.map((entry, index) => (
+                <button key={`${entry.title}-${index}`} className="outline-entry" style={{ paddingLeft: 10 + Math.min(entry.depth, 4) * 13 }} disabled={!entry.page} onClick={() => entry.page && goToPage(entry.page)}>
+                  <span>{entry.title}</span>{entry.page && <b>{entry.page}</b>}
+                </button>
+              )) : <div className="rail-empty"><ListTree size={25} /><span>PDF này không có mục lục nhúng.</span></div>}
+            </div>
+          )}
+
+          {pdfRailTab === "search" && (
+            <div className="pdf-rail-content search-panel">
+              <h3>Tìm trong tài liệu</h3>
+              <form onSubmit={(event) => { event.preventDefault(); void performSearch(); }}>
+                <div className="rail-search-box"><Search size={15} /><input id="pdf-search-input" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Nhập từ cần tìm…" /><button type="submit">Tìm</button></div>
+                {activeWorkspace.documents.length > 1 && <label className="collection-search"><input type="checkbox" checked={searchWholeCollection} onChange={(event) => setSearchWholeCollection(event.target.checked)} /> Tìm trong cả {activeWorkspace.documents.length} tài liệu</label>}
+              </form>
+              <div className="search-summary">{searching ? "Đang đọc lớp chữ của PDF…" : activeSearchQuery ? `${searchResults.length} trang có kết quả` : "Ctrl+F để mở nhanh"}</div>
+              <div className="search-results">
+                {searchResults.map((result, index) => <button key={`${result.documentId}-${result.page}-${index}`} onClick={() => openSearchResult(result)}><span><b>{result.documentName}</b><em>Trang {result.page} · {result.occurrences} kết quả</em></span><p>{result.snippet}</p></button>)}
+                {!searching && activeSearchQuery && !searchResults.length && <div className="rail-empty"><Search size={24} /><span>Không tìm thấy “{activeSearchQuery}”. PDF scan cần OCR.</span></div>}
+              </div>
+            </div>
+          )}
+
+          {pdfRailTab === "marks" && (
+            <div className="pdf-rail-content marks-panel">
+              <h3>Đánh dấu trang</h3>
+              {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPage(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => updateReader((reader) => ({ ...reader, bookmarks: reader.bookmarks.filter((item) => item !== page) }))}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
+              <h3>Chú thích</h3>
+              {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPage(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{annotation.kind === "highlight" ? "Tô" : annotation.kind === "underline" ? "Gạch chân" : annotation.kind === "strikeout" ? "Gạch ngang" : "Nét bút"}</span><b>Trang {annotation.page}</b><p>{annotation.kind === "ink" ? `${annotation.points.length} điểm bút` : annotation.text}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight và nét bút sẽ xuất hiện tại đây.</span></div>}
+            </div>
+          )}
         </aside>
 
         <section className="reader-pane">
-          <div className="pane-toolbar">
-            {!showPdfRail && <button className="icon-button compact" aria-label="Hiện danh sách trang" onClick={() => setShowPdfRail(true)}><FileText size={17} /></button>}
+          <div className="pane-toolbar pdf-toolbar" role="toolbar" aria-label="Công cụ PDF">
+            {!showPdfRail && <button className="pdf-toolbar-button" aria-label="Hiện bảng điều hướng" title="Hiện bảng điều hướng" onClick={() => setShowPdfRail(true)}><PanelLeftOpen size={17} /></button>}
             {activeWorkspace.documents.length > 1 ? (
-              <select className="document-switcher" value={activeDocument?.id ?? ""} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeDocumentId: event.target.value, sourcePage: 1 }))} aria-label="Tài liệu trong cụm">
+              <select className="document-switcher" value={activeDocument?.id ?? ""} onChange={(event) => switchDocument(event.target.value)} aria-label="Tài liệu trong cụm">
                 {activeWorkspace.documents.map((document) => <option key={document.id} value={document.id}>{document.name}</option>)}
               </select>
             ) : <span className="current-document-label">{activeDocument?.name ?? "Tài liệu mẫu"}</span>}
-            <div className="toolbar-spacer" />
-            {activeDocument && <button className="icon-button compact danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void deleteActiveDocument(); }}><Trash2 size={17} /></button>}
-            <div className="zoom-control"><button aria-label="Thu nhỏ" onClick={() => setSourceZoom((zoom) => Math.max(.6, zoom - .1))}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" onClick={() => setSourceZoom((zoom) => Math.min(2, zoom + .1))}><Plus size={15} /></button></div>
-            {activeWorkspace.kind !== "empty" && <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(currentPdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>}
+            {activeDocument && <button className="pdf-toolbar-button danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void deleteActiveDocument(); }}><Trash2 size={17} /></button>}
+            <span className="toolbar-divider" />
+            {activeWorkspace.kind !== "empty" && <div className="page-control"><button aria-label="Trang trước" disabled={sourcePage <= 1} onClick={() => goToPage(sourcePage - 1)}><ChevronLeft size={14} /></button><label><input key={`${activeDocument?.id}-${sourcePage}`} defaultValue={sourcePage} inputMode="numeric" aria-label="Số trang" onKeyDown={(event) => { if (event.key === "Enter") goToPage(Number(event.currentTarget.value)); }} onBlur={(event) => goToPage(Number(event.currentTarget.value))} /><span>/ {totalPages}</span></label><button aria-label="Trang sau" disabled={sourcePage >= totalPages} onClick={() => goToPage(sourcePage + 1)}><ChevronRight size={14} /></button></div>}
+            <div className="zoom-control"><button aria-label="Thu nhỏ" disabled={!currentPdfDocument} onClick={() => setSourceZoom((zoom) => zoom - .1)}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" disabled={!currentPdfDocument} onClick={() => setSourceZoom((zoom) => zoom + .1)}><Plus size={15} /></button></div>
+            <button className={`pdf-toolbar-button ${fitMode === "width" ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "width", zoom: 1 }))} title="Vừa chiều rộng"><Rows3 size={17} /><span>Vừa rộng</span></button>
+            <button className={`pdf-toolbar-button ${fitMode === "page" ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "page", zoom: 1 }))} title="Vừa toàn trang"><Square size={16} /><span>Vừa trang</span></button>
+            <button className="pdf-toolbar-button" disabled={!currentPdfDocument} onClick={() => updateReader((reader) => ({ ...reader, rotation: (reader.rotation + 90) % 360 }))} title="Xoay 90°"><RotateCw size={17} /></button>
+            <button className={`pdf-toolbar-button ${viewMode === "continuous" ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => updateReader((reader) => ({ ...reader, viewMode: reader.viewMode === "single" ? "continuous" : "single", fitMode: reader.viewMode === "single" ? "width" : reader.fitMode }))} title={viewMode === "single" ? "Chuyển sang cuộn liên tục" : "Chuyển sang từng trang"}>{viewMode === "single" ? <Rows3 size={17} /> : <Square size={16} />}</button>
+            <button className={`pdf-toolbar-button ${bookmarks.includes(sourcePage) ? "active" : ""}`} disabled={!currentPdfDocument} onClick={toggleBookmark} title="Đánh dấu trang">{bookmarks.includes(sourcePage) ? <BookmarkCheck size={17} /> : <Bookmark size={17} />}</button>
+            <span className="toolbar-divider" />
+            {PDF_TOOLS.map(({ id, label, icon: Icon }) => <button key={id} className={`pdf-toolbar-button pdf-mode-button ${pdfTool === id ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => setPdfTool(id)} title={label} aria-label={label}><Icon size={18} /></button>)}
+            <input className="pdf-color-picker" type="color" value={inkColor} disabled={!currentPdfDocument} onChange={(event) => setInkColor(event.target.value)} aria-label="Màu bút PDF" title="Màu bút PDF" />
+            <button className="pdf-toolbar-button" disabled={!(pdfHistory[pdfHistoryKey]?.undo.length)} onClick={undoPdf} title="Hoàn tác chú thích"><Undo2 size={17} /></button>
+            <button className="pdf-toolbar-button" disabled={!(pdfHistory[pdfHistoryKey]?.redo.length)} onClick={redoPdf} title="Làm lại chú thích"><Redo2 size={17} /></button>
+            <span className="toolbar-divider" />
+            <button className={`pdf-toolbar-button ${readerFocus ? "active" : ""}`} onClick={() => setReaderFocus((focus) => !focus)} title={readerFocus ? "Trở lại chia đôi" : "Tập trung đọc PDF"}><Maximize2 size={17} /></button>
           </div>
-          <div className="document-stage">
-            {currentPdfDocument ? <PdfPageCanvas key={`${activeDocument?.id}-${sourcePage}`} document={currentPdfDocument} page={sourcePage} zoom={sourceZoom} /> : activeDocument ? (
+          <div className={`document-stage pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
+              <div className="continuous-pages">
+                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(page, next, previous)} onCrop={addImageExcerpt} />)}
+              </div>
+            ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
-            ) : activeWorkspace.kind === "demo" ? <DemoDocument page={sourcePage} /> : (
+            ) : activeWorkspace.kind === "demo" ? <><div className="demo-reader-hint"><BookOpen size={16} /><span>Đây là tài liệu minh họa. Thêm một PDF để dùng chọn chữ, chú thích và cắt hình.</span></div><DemoDocument page={sourcePage} /></> : (
               <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Thêm PDF để đọc và tạo ghi chú đi kèm.</span><button className="primary-button" onClick={() => fileInputRef.current?.click()}>Thêm tài liệu</button></div>
             )}
           </div>
@@ -1432,7 +2111,8 @@ export default function Home() {
           <div className="note-toolbar" role="toolbar" aria-label="Công cụ ghi chú">
             <button className="note-create-button primary" onClick={addNotePage}><Plus size={17} /><span>Trang mới</span></button>
             <button className="note-create-button" onClick={addNotebook}><FileText size={16} /><span>Sổ mới</span></button>
-            <button className="note-create-button danger" onClick={deleteNotebook}><Trash2 size={15} /><span>Xóa sổ</span></button>
+            <button className="note-create-button danger" onClick={() => { void deleteNotebook(); }}><Trash2 size={15} /><span>Xóa sổ</span></button>
+            <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
             <span className="toolbar-divider" />
             {tools.map(({ id, label, icon: Icon }) => <button key={id} className={`tool-button ${activeTool === id ? "active" : ""}`} onClick={() => setActiveTool(id)} aria-label={label} title={label}><Icon size={20} /></button>)}
             {activeTool === "shape" && (
@@ -1446,7 +2126,7 @@ export default function Home() {
             <span className="toolbar-divider" />
             <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
             <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
-            <button className="icon-button compact delete-tool" aria-label="Xóa trang note" title="Xóa trang" onClick={deleteNotePage}><Trash2 size={18} /></button>
+            <button className="icon-button compact delete-tool" aria-label="Xóa trang note" title="Xóa trang" onClick={() => { void deleteNotePage(); }}><Trash2 size={18} /></button>
             <span className="toolbar-divider" />
             {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
             <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
@@ -1488,10 +2168,22 @@ export default function Home() {
           <div className="note-stage">
             <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle}>
               <div className="paper-background" />
-              <div className="typed-layer">
+              <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`}>
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
                 <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
-                {activeNote.citationPage && <button className="citation-chip" onClick={() => { setSourcePage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
+                {activeNote.excerpts.length > 0 && (
+                  <div className="note-excerpts" aria-label="Trích dẫn từ PDF">
+                    {activeNote.excerpts.map((excerpt) => (
+                      <article className={`note-excerpt excerpt-${excerpt.kind}`} key={excerpt.id}>
+                        <div className="excerpt-content">
+                          {excerpt.kind === "text" ? <p>“{excerpt.text}”</p> : excerpt.assetId ? <StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName}, trang ${excerpt.page}`} /> : <span>Không tìm thấy ảnh</span>}
+                        </div>
+                        <div className="excerpt-source"><button onClick={() => openExcerptSource(excerpt)} title="Quay lại đúng vị trí nguồn">{excerpt.kind === "image" ? <Image size={13} /> : <BookOpen size={13} />}<span>{excerpt.documentName} · trang {excerpt.page}</span></button><button className="delete-excerpt" onClick={() => deleteExcerpt(excerpt.id)} aria-label="Xóa trích dẫn"><X size={13} /></button></div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+                {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
               <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={inkWidth} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Chế độ nhập chữ</div>}
@@ -1501,10 +2193,10 @@ export default function Home() {
         </section>
 
         <aside className="note-thumbnails" aria-label="Trang ghi chú">
-          <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-delete" aria-label="Xóa sổ note" title="Xóa sổ note" onClick={deleteNotebook}><Trash2 size={14} /></button><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
+          <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-delete" aria-label="Xóa sổ note" title="Xóa sổ note" onClick={() => { void deleteNotebook(); }}><Trash2 size={14} /></button><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
           {notePages.map((page, index) => {
             const paperColor = PAPER_COLORS.find((color) => color.id === page.paper.color)?.swatch;
-            return <div className="note-thumb-wrap" key={page.id}><button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>{page.id === activeNote.id && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={deleteNotePage}><Trash2 size={13} /></button>}</div>;
+            return <div className="note-thumb-wrap" key={page.id}><button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>{page.id === activeNote.id && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={() => { void deleteNotePage(); }}><Trash2 size={13} /></button>}</div>;
           })}
           <button className="new-page" onClick={addNotePage}><Plus size={21} /><span>Trang mới</span></button>
         </aside>
