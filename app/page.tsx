@@ -76,7 +76,7 @@ type LibraryDocument = {
 
 type WorkspaceItem = {
   id: string;
-  kind: "document" | "collection" | "demo";
+  kind: "document" | "collection" | "demo" | "empty";
   name: string;
   documents: LibraryDocument[];
   activeDocumentId: string | null;
@@ -257,6 +257,20 @@ function createDemoWorkspace(pages: NotePage[] = initialPages): WorkspaceItem {
   };
 }
 
+function createEmptyWorkspace(): WorkspaceItem {
+  const notebook = createNotebook("Ghi chú mới");
+  return {
+    id: "empty-workspace",
+    kind: "empty",
+    name: "Chưa có tài liệu",
+    documents: [],
+    activeDocumentId: null,
+    notebooks: [notebook],
+    activeNotebookId: notebook.id,
+    sourcePage: 1,
+  };
+}
+
 function openLocalDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
@@ -290,6 +304,17 @@ async function readLocalPdf(documentId: string) {
   });
   db.close();
   return result;
+}
+
+async function deleteLocalPdf(documentId: string) {
+  const db = await openLocalDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    transaction.objectStore(DB_STORE).delete(`pdf:${documentId}`);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
 }
 
 async function readLegacyPdf() {
@@ -955,12 +980,12 @@ export default function Home() {
   };
 
   const sourcePages = useMemo(() => {
-    if (!currentPdfDocument) return activeDocument ? [sourcePage] : DEMO_PAGES;
+    if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
     const count = currentPdfDocument.numPages;
     if (count <= 8) return Array.from({ length: count }, (_, index) => index + 1);
     const start = Math.min(Math.max(1, sourcePage - 3), count - 7);
     return Array.from({ length: 8 }, (_, index) => start + index);
-  }, [activeDocument, currentPdfDocument, sourcePage]);
+  }, [activeDocument, activeWorkspace.kind, currentPdfDocument, sourcePage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1144,7 +1169,7 @@ export default function Home() {
       activeNotebookId: notebook.id,
       sourcePage: 1,
     };
-    setWorkspaces((items) => [workspace, ...items]);
+    setWorkspaces((items) => [workspace, ...items.filter((item) => item.kind !== "empty")]);
     setActiveWorkspaceId(workspace.id);
     setActiveTool("text");
     setLibraryOpen(false);
@@ -1170,12 +1195,96 @@ export default function Home() {
   };
 
   const deleteNotePage = () => {
-    if (notePages.length === 1) { setToast("Sổ cần giữ lại ít nhất một trang"); return; }
+    if (!window.confirm(`Xóa trang note “${activeNote.title}”? Thao tác này không thể hoàn tác.`)) return;
+    const deletedPageId = activeNote.id;
+    if (notePages.length === 1) {
+      const replacement = createBlankPage(sourcePage, 1, activeNote.paper);
+      updateActiveNotebook((notebook) => ({ ...notebook, pages: [replacement], activePageId: replacement.id }));
+      setStrokeHistory((history) => {
+        const next = { ...history };
+        delete next[deletedPageId];
+        return next;
+      });
+      setActiveTool("text");
+      setToast("Đã xóa trang và tạo một trang trống");
+      return;
+    }
     const index = notePages.findIndex((page) => page.id === activeNote.id);
     const nextPages = notePages.filter((page) => page.id !== activeNote.id);
-    const nextActiveId = nextPages[Math.max(0, index - 1)].id;
+    const nextActiveId = nextPages[Math.min(index, nextPages.length - 1)].id;
     updateActiveNotebook((notebook) => ({ ...notebook, pages: nextPages, activePageId: nextActiveId }));
-    setToast("Đã xóa trang");
+    setStrokeHistory((history) => {
+      const next = { ...history };
+      delete next[deletedPageId];
+      return next;
+    });
+    setToast("Đã xóa trang note");
+  };
+
+  const deleteNotebook = () => {
+    const pageCount = activeNotebook.pages.length;
+    const lastNotebook = activeWorkspace.notebooks.length === 1;
+    const warning = lastNotebook
+      ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới cho tài liệu này.`
+      : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Thao tác này không thể hoàn tác.`;
+    if (!window.confirm(warning)) return;
+
+    const deletedPageIds = new Set(activeNotebook.pages.map((page) => page.id));
+    if (lastNotebook) {
+      const replacement = createNotebook(`Ghi chú — ${activeWorkspace.name}`, sourcePage);
+      updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: [replacement], activeNotebookId: replacement.id }));
+    } else {
+      const index = activeWorkspace.notebooks.findIndex((notebook) => notebook.id === activeNotebook.id);
+      const nextNotebooks = activeWorkspace.notebooks.filter((notebook) => notebook.id !== activeNotebook.id);
+      const nextActiveId = nextNotebooks[Math.min(index, nextNotebooks.length - 1)].id;
+      updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: nextNotebooks, activeNotebookId: nextActiveId }));
+    }
+    setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
+    setPaperPanelOpen(false);
+    setActiveTool("text");
+    setToast(lastNotebook ? "Đã xóa sổ note và tạo sổ trống" : "Đã xóa sổ note");
+  };
+
+  const deleteWorkspace = async (workspaceId: string) => {
+    const target = workspaces.find((workspace) => workspace.id === workspaceId);
+    if (!target) return;
+    const pageCount = target.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
+    const targetLabel = target.kind === "collection" ? "cụm tài liệu" : "tài liệu";
+    if (!window.confirm(`Xóa ${targetLabel} “${target.name}” cùng ${target.notebooks.length} sổ và ${pageCount} trang note? Thao tác này không thể hoàn tác.`)) return;
+
+    await Promise.allSettled(target.documents.map((document) => deleteLocalPdf(document.id)));
+    const deletedPageIds = new Set(target.notebooks.flatMap((notebook) => notebook.pages.map((page) => page.id)));
+    const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
+    const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId);
+    const nextWorkspaces = remaining.length ? remaining : [createEmptyWorkspace()];
+    setWorkspaces(nextWorkspaces);
+    if (activeWorkspaceId === workspaceId) {
+      setActiveWorkspaceId(nextWorkspaces[Math.min(targetIndex, nextWorkspaces.length - 1)].id);
+    }
+    setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
+    setPaperPanelOpen(false);
+    setToast(`Đã xóa ${targetLabel} và note liên quan`);
+  };
+
+  const deleteActiveDocument = async () => {
+    if (!activeDocument) return;
+    if (activeWorkspace.documents.length === 1) {
+      await deleteWorkspace(activeWorkspace.id);
+      return;
+    }
+    if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
+
+    await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
+    const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);
+    const nextDocuments = activeWorkspace.documents.filter((document) => document.id !== activeDocument.id);
+    const nextActiveDocument = nextDocuments[Math.min(index, nextDocuments.length - 1)];
+    updateActiveWorkspace((workspace) => ({
+      ...workspace,
+      documents: nextDocuments,
+      activeDocumentId: nextActiveDocument.id,
+      sourcePage: 1,
+    }));
+    setToast("Đã xóa tài liệu khỏi cụm; note vẫn được giữ lại");
   };
 
   const commitStrokes = (next: Stroke[], previous: Stroke[]) => {
@@ -1269,10 +1378,13 @@ export default function Home() {
               {workspaces.map((workspace) => {
                 const pageCount = workspace.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
                 return (
-                  <button key={workspace.id} className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
-                    <span className="library-icon"><FileText size={19} /></span>
-                    <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
-                  </button>
+                  <div className="library-row" key={workspace.id}>
+                    <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
+                      <span className="library-icon"><FileText size={19} /></span>
+                      <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
+                    </button>
+                    {workspace.kind !== "empty" && <button className="library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa tài liệu và note liên quan"><Trash2 size={17} /></button>}
+                  </div>
                 );
               })}
             </div>
@@ -1301,13 +1413,16 @@ export default function Home() {
               </select>
             ) : <span className="current-document-label">{activeDocument?.name ?? "Tài liệu mẫu"}</span>}
             <div className="toolbar-spacer" />
+            {activeDocument && <button className="icon-button compact danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void deleteActiveDocument(); }}><Trash2 size={17} /></button>}
             <div className="zoom-control"><button aria-label="Thu nhỏ" onClick={() => setSourceZoom((zoom) => Math.max(.6, zoom - .1))}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" onClick={() => setSourceZoom((zoom) => Math.min(2, zoom + .1))}><Plus size={15} /></button></div>
-            <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(currentPdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>
+            {activeWorkspace.kind !== "empty" && <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(currentPdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>}
           </div>
           <div className="document-stage">
             {currentPdfDocument ? <PdfPageCanvas key={`${activeDocument?.id}-${sourcePage}`} document={currentPdfDocument} page={sourcePage} zoom={sourceZoom} /> : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
-            ) : <DemoDocument page={sourcePage} />}
+            ) : activeWorkspace.kind === "demo" ? <DemoDocument page={sourcePage} /> : (
+              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Thêm PDF để đọc và tạo ghi chú đi kèm.</span><button className="primary-button" onClick={() => fileInputRef.current?.click()}>Thêm tài liệu</button></div>
+            )}
           </div>
         </section>
 
@@ -1317,6 +1432,7 @@ export default function Home() {
           <div className="note-toolbar" role="toolbar" aria-label="Công cụ ghi chú">
             <button className="note-create-button primary" onClick={addNotePage}><Plus size={17} /><span>Trang mới</span></button>
             <button className="note-create-button" onClick={addNotebook}><FileText size={16} /><span>Sổ mới</span></button>
+            <button className="note-create-button danger" onClick={deleteNotebook}><Trash2 size={15} /><span>Xóa sổ</span></button>
             <span className="toolbar-divider" />
             {tools.map(({ id, label, icon: Icon }) => <button key={id} className={`tool-button ${activeTool === id ? "active" : ""}`} onClick={() => setActiveTool(id)} aria-label={label} title={label}><Icon size={20} /></button>)}
             {activeTool === "shape" && (
@@ -1330,7 +1446,7 @@ export default function Home() {
             <span className="toolbar-divider" />
             <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
             <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
-            <button className="icon-button compact delete-tool" aria-label="Xóa trang" onClick={deleteNotePage}><Trash2 size={18} /></button>
+            <button className="note-create-button danger" aria-label="Xóa trang note" onClick={deleteNotePage}><Trash2 size={15} /><span>Xóa trang</span></button>
             <span className="toolbar-divider" />
             {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
             <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
@@ -1385,10 +1501,10 @@ export default function Home() {
         </section>
 
         <aside className="note-thumbnails" aria-label="Trang ghi chú">
-          <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
+          <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-delete" aria-label="Xóa sổ note" title="Xóa sổ note" onClick={deleteNotebook}><Trash2 size={14} /></button><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
           {notePages.map((page, index) => {
             const paperColor = PAPER_COLORS.find((color) => color.id === page.paper.color)?.swatch;
-            return <button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} key={page.id} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>;
+            return <div className="note-thumb-wrap" key={page.id}><button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>{page.id === activeNote.id && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={deleteNotePage}><Trash2 size={13} /></button>}</div>;
           })}
           <button className="new-page" onClick={addNotePage}><Plus size={21} /><span>Trang mới</span></button>
         </aside>
