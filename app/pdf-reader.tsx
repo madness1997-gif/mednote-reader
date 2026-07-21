@@ -326,6 +326,9 @@ export function PdfPageView({
 
       textContainer.replaceChildren();
       textContainer.style.setProperty("--scale-factor", `${nextViewport.scale}`);
+      textContainer.style.setProperty("--total-scale-factor", `${nextViewport.scale}`);
+      textContainer.style.setProperty("--scale-round-x", "1px");
+      textContainer.style.setProperty("--scale-round-y", "1px");
       const [{ TextLayer }, textContent] = await Promise.all([
         import("pdfjs-dist"),
         pdfPage.getTextContent(),
@@ -335,6 +338,10 @@ export function PdfPageView({
       textLayer = layer;
       await layer.render();
       if (disposed) return;
+      textContainer.querySelectorAll<HTMLElement>("span.markedContent").forEach((element) => {
+        element.style.top = "0";
+        element.style.height = "0";
+      });
       const query = searchQuery.trim().toLocaleLowerCase();
       if (query) {
         layer.textDivs.forEach((element, index) => {
