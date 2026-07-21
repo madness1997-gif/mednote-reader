@@ -271,38 +271,56 @@ function PdfPageCanvas({ document, page, zoom }: { document: PDFDocumentProxy; p
   useEffect(() => {
     let disposed = false;
     let renderTask: PDFRenderTask | null = null;
+    let requestNumber = 0;
+    let rendering = false;
     const wrapper = wrapRef.current;
     const canvas = canvasRef.current;
     if (!wrapper || !canvas) return;
 
-    const render = async () => {
-      renderTask?.cancel();
-      const pdfPage = await document.getPage(page);
-      if (disposed) return;
-      const base = pdfPage.getViewport({ scale: 1 });
-      const available = Math.max(260, wrapper.clientWidth - 2);
-      const scale = (available / base.width) * zoom;
-      const viewport = pdfPage.getViewport({ scale });
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
-      try {
-        await renderTask.promise;
-        if (!disposed) setLoading(false);
-      } catch (error) {
-        if (!disposed && (error as Error).name !== "RenderingCancelledException") throw error;
+    const drainRenderQueue = async () => {
+      if (rendering) return;
+      rendering = true;
+      while (!disposed) {
+        const currentRequest = requestNumber;
+        const pdfPage = await document.getPage(page);
+        if (disposed) break;
+        if (currentRequest !== requestNumber) continue;
+        const base = pdfPage.getViewport({ scale: 1 });
+        const available = Math.max(260, wrapper.clientWidth - 2);
+        const scale = (available / base.width) * zoom;
+        const viewport = pdfPage.getViewport({ scale });
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(viewport.width * ratio);
+        canvas.height = Math.floor(viewport.height * ratio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        const context = canvas.getContext("2d");
+        if (!context) break;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
+        try {
+          await renderTask.promise;
+        } catch (error) {
+          if (!disposed && (error as Error).name !== "RenderingCancelledException") throw error;
+        } finally {
+          renderTask = null;
+        }
+        if (currentRequest === requestNumber) {
+          if (!disposed) setLoading(false);
+          break;
+        }
       }
+      rendering = false;
     };
 
-    const observer = new ResizeObserver(() => void render());
+    const requestRender = () => {
+      requestNumber += 1;
+      renderTask?.cancel();
+      void drainRenderQueue();
+    };
+
+    const observer = new ResizeObserver(requestRender);
     observer.observe(wrapper);
-    void render();
     return () => {
       disposed = true;
       observer.disconnect();
@@ -458,8 +476,9 @@ export default function Home() {
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace()]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
   const [redoStrokes, setRedoStrokes] = useState<Record<string, Stroke[]>>({});
-  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
   const [readerShare, setReaderShare] = useState(50);
   const [toast, setToast] = useState("Đã tự lưu");
@@ -472,9 +491,10 @@ export default function Home() {
   const notePages = activeNotebook.pages;
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
+  const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const sourcePage = activeWorkspace.sourcePage;
   const documentName = activeWorkspace.name;
-  const totalPages = pdfDocument?.numPages ?? (activeDocument ? 1 : 482);
+  const totalPages = currentPdfDocument?.numPages ?? (activeDocument ? 1 : 482);
 
   const updateActiveWorkspace = (updater: (workspace: WorkspaceItem) => WorkspaceItem) => {
     setWorkspaces((items) => items.map((workspace) => workspace.id === activeWorkspaceId ? updater(workspace) : workspace));
@@ -499,12 +519,12 @@ export default function Home() {
   };
 
   const sourcePages = useMemo(() => {
-    if (!pdfDocument) return activeDocument ? [sourcePage] : DEMO_PAGES;
-    const count = pdfDocument.numPages;
+    if (!currentPdfDocument) return activeDocument ? [sourcePage] : DEMO_PAGES;
+    const count = currentPdfDocument.numPages;
     if (count <= 8) return Array.from({ length: count }, (_, index) => index + 1);
     const start = Math.min(Math.max(1, sourcePage - 3), count - 7);
     return Array.from({ length: 8 }, (_, index) => start + index);
-  }, [activeDocument, pdfDocument, sourcePage]);
+  }, [activeDocument, currentPdfDocument, sourcePage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -586,8 +606,9 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
-    setPdfBlob(null);
+    setPdfSource(null);
     setPdfDocument(null);
+    setLoadedDocumentId(null);
     if (!activeDocument) {
       setPdfStatus("idle");
       return;
@@ -599,22 +620,23 @@ export default function Home() {
         setPdfStatus("error");
         return;
       }
-      setPdfBlob(stored.blob);
+      setPdfSource({ blob: stored.blob, documentId: activeDocument.id });
     }).catch(() => !cancelled && setPdfStatus("error"));
     return () => { cancelled = true; };
   }, [activeDocument?.id, ready]);
 
   useEffect(() => {
-    if (!pdfBlob) return undefined;
+    if (!pdfSource) return undefined;
     let disposed = false;
     let document: PDFDocumentProxy | null = null;
-    void pdfBlob.arrayBuffer().then(async (buffer) => {
+    void pdfSource.blob.arrayBuffer().then(async (buffer) => {
       const pdfjs = await import("pdfjs-dist");
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
       document = await task.promise;
       if (!disposed) {
         setPdfDocument(document);
+        setLoadedDocumentId(pdfSource.documentId);
         setSourcePage((page) => Math.min(Math.max(1, page), document!.numPages));
         setPdfStatus("idle");
         setToast(`Đã mở ${document.numPages} trang`);
@@ -626,7 +648,7 @@ export default function Home() {
       }
     });
     return () => { disposed = true; void document?.destroy(); };
-  }, [pdfBlob]);
+  }, [pdfSource]);
 
   useEffect(() => {
     if (!toast || toast === "Đã tự lưu") return;
@@ -796,8 +818,8 @@ export default function Home() {
         <aside className="pdf-thumbnails" aria-label="Trang tài liệu">
           <div className="rail-heading"><FileText size={16} /><button className="icon-button compact" aria-label="Thu gọn" onClick={() => setShowPdfRail(false)}><ChevronLeft size={17} /></button></div>
           <div className="thumb-list">
-            {sourcePages.map((page) => pdfDocument ? (
-              <PdfThumbnail key={page} document={pdfDocument} page={page} active={page === sourcePage} onClick={() => setSourcePage(page)} />
+            {sourcePages.map((page) => currentPdfDocument ? (
+              <PdfThumbnail key={`${activeDocument?.id}-${page}`} document={currentPdfDocument} page={page} active={page === sourcePage} onClick={() => setSourcePage(page)} />
             ) : (
               <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => setSourcePage(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
             ))}
@@ -814,10 +836,10 @@ export default function Home() {
             ) : <span className="current-document-label">{activeDocument?.name ?? "Tài liệu mẫu"}</span>}
             <div className="toolbar-spacer" />
             <div className="zoom-control"><button aria-label="Thu nhỏ" onClick={() => setSourceZoom((zoom) => Math.max(.6, zoom - .1))}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" onClick={() => setSourceZoom((zoom) => Math.min(2, zoom + .1))}><Plus size={15} /></button></div>
-            <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(pdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>
+            <div className="page-control"><button aria-label="Trang trước" onClick={() => setSourcePage((page) => Math.max(currentPdfDocument ? 1 : 123, page - 1))}><ChevronLeft size={14} /></button><span>{sourcePage} / {totalPages}</span><button aria-label="Trang sau" onClick={() => setSourcePage((page) => Math.min(totalPages, page + 1))}><ChevronRight size={14} /></button></div>
           </div>
           <div className="document-stage">
-            {pdfDocument ? <PdfPageCanvas document={pdfDocument} page={sourcePage} zoom={sourceZoom} /> : activeDocument ? (
+            {currentPdfDocument ? <PdfPageCanvas key={`${activeDocument?.id}-${sourcePage}`} document={currentPdfDocument} page={sourcePage} zoom={sourceZoom} /> : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
             ) : <DemoDocument page={sourcePage} />}
           </div>
