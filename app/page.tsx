@@ -1,19 +1,24 @@
 "use client";
 
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eraser,
   FileText,
   FolderOpen,
   Highlighter,
+  Lasso,
   Menu,
   Minus,
   MousePointer2,
+  NotebookTabs,
   PenTool,
   Plus,
   Redo2,
+  Shapes,
   TextCursorInput,
   Trash2,
   Undo2,
@@ -23,15 +28,27 @@ import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-type Tool = "pointer" | "pen" | "highlight" | "eraser" | "text";
-type InkTool = "pen" | "highlight";
+type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
+type InkTool = "pen" | "highlight" | "shape";
+type ShapeKind = "line" | "arrow" | "rectangle" | "ellipse";
+type PaperSize = "a4" | "a5" | "b5" | "letter" | "square";
+type PaperOrientation = "portrait" | "landscape";
+type PaperTemplate = "blank" | "ruled" | "grid" | "dotted" | "cornell";
+type PaperColor = "white" | "ivory" | "yellow" | "mint" | "blue" | "dark";
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
   id: string;
   tool: InkTool;
+  shape?: ShapeKind;
   color: string;
   width: number;
   points: Point[];
+};
+type PaperSettings = {
+  size: PaperSize;
+  orientation: PaperOrientation;
+  template: PaperTemplate;
+  color: PaperColor;
 };
 type NotePage = {
   id: string;
@@ -39,6 +56,7 @@ type NotePage = {
   body: string;
   citationPage: number | null;
   strokes: Stroke[];
+  paper: PaperSettings;
 };
 
 type Notebook = {
@@ -79,17 +97,47 @@ type LegacyNotebookState = {
   readerShare?: number;
 };
 
+type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
+
 const STORAGE_KEY = "mednote-library-v2";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
 const DB_NAME = "mednote-local";
 const DB_STORE = "documents";
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
+const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
+
+const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
+  a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
+  a5: { label: "A5", dimensions: "148 × 210 mm", width: 148, height: 210, maxWidth: 590 },
+  b5: { label: "B5", dimensions: "176 × 250 mm", width: 176, height: 250, maxWidth: 650 },
+  letter: { label: "Letter", dimensions: "216 × 279 mm", width: 216, height: 279, maxWidth: 740 },
+  square: { label: "Vuông", dimensions: "210 × 210 mm", width: 210, height: 210, maxWidth: 720 },
+};
+
+const PAPER_TEMPLATES: { id: PaperTemplate; label: string }[] = [
+  { id: "blank", label: "Trắng" },
+  { id: "ruled", label: "Dòng kẻ" },
+  { id: "grid", label: "Ô vuông" },
+  { id: "dotted", label: "Chấm" },
+  { id: "cornell", label: "Cornell" },
+];
+
+const PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[] = [
+  { id: "white", label: "Trắng", swatch: "#ffffff" },
+  { id: "ivory", label: "Kem", swatch: "#fffaf0" },
+  { id: "yellow", label: "Vàng nhạt", swatch: "#fff8cf" },
+  { id: "mint", label: "Xanh bạc hà", swatch: "#eefaf3" },
+  { id: "blue", label: "Xanh nhạt", swatch: "#eef7fc" },
+  { id: "dark", label: "Tối", swatch: "#263139" },
+];
 
 const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "pointer", label: "Chọn", icon: MousePointer2 },
   { id: "pen", label: "Bút", icon: PenTool },
   { id: "highlight", label: "Tô sáng", icon: Highlighter },
-  { id: "eraser", label: "Tẩy nét", icon: Eraser },
+  { id: "eraser", label: "Tẩy chính xác", icon: Eraser },
+  { id: "lasso", label: "Khoanh chọn", icon: Lasso },
+  { id: "shape", label: "Hình học", icon: Shapes },
   { id: "text", label: "Nhập chữ", icon: TextCursorInput },
 ];
 
@@ -127,6 +175,7 @@ const initialPages: NotePage[] = [
       "CƠ CHẾ BỆNH SINH\n\n• Tăng đường huyết mạn tính.\n• Hoạt hóa con đường polyol → tích lũy sorbitol.\n• Sản phẩm glycat hóa nâng cao (AGEs) → tổn thương thần kinh.\n• Stress oxy hóa → tổn thương ty thể và tế bào Schwann.\n• Thiếu máu vi mạch nuôi thần kinh.\n\nĐIỂM CẦN NHỚ\n\n• Thần kinh ngoại biên thường gặp nhất: đa dây thần kinh đối xứng.\n• Biểu hiện: tê bì, kiến bò, đau rát, giảm cảm giác.\n• Đánh giá: monofilament 10 g, âm thoa 128 Hz.\n• Điều trị: kiểm soát đường huyết, giảm đau và chăm sóc bàn chân.",
     citationPage: 126,
     strokes: starterStrokes,
+    paper: DEFAULT_PAPER,
   },
 ];
 
@@ -143,13 +192,37 @@ function stableId(value: string) {
   return Math.abs(hash >>> 0).toString(36);
 }
 
-function createBlankPage(citationPage = 1, index = 1): NotePage {
+function normalizePaper(paper?: Partial<PaperSettings>): PaperSettings {
+  return { ...DEFAULT_PAPER, ...paper };
+}
+
+function normalizePage(page: NotePage): NotePage {
+  return {
+    ...page,
+    body: page.body ?? "",
+    strokes: Array.isArray(page.strokes) ? page.strokes : [],
+    paper: normalizePaper(page.paper),
+  };
+}
+
+function normalizeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
+  return {
+    ...workspace,
+    notebooks: workspace.notebooks.map((notebook) => ({
+      ...notebook,
+      pages: notebook.pages.map(normalizePage),
+    })),
+  };
+}
+
+function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEFAULT_PAPER): NotePage {
   return {
     id: uid("page"),
     title: `GHI CHÚ ${index}`,
     body: "",
     citationPage,
     strokes: [],
+    paper: { ...paper },
   };
 }
 
@@ -358,111 +431,472 @@ function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocume
 
 function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stroke: Stroke) {
   if (!stroke.points.length) return;
+  const canvasWidth = canvas.clientWidth;
+  const canvasHeight = canvas.clientHeight;
+  const first = stroke.points[0];
+  const last = stroke.points.at(-1)!;
+  const startX = first.x * canvasWidth;
+  const startY = first.y * canvasHeight;
+  const endX = last.x * canvasWidth;
+  const endY = last.y * canvasHeight;
   context.save();
   context.globalAlpha = stroke.tool === "highlight" ? 0.3 : 1;
   context.strokeStyle = stroke.color;
+  context.fillStyle = stroke.color;
+  context.lineWidth = stroke.width;
   context.lineCap = "round";
   context.lineJoin = "round";
-  const first = stroke.points[0];
+
+  if (stroke.tool === "shape") {
+    context.beginPath();
+    if (stroke.shape === "rectangle") {
+      context.rect(startX, startY, endX - startX, endY - startY);
+    } else if (stroke.shape === "ellipse") {
+      context.ellipse((startX + endX) / 2, (startY + endY) / 2, Math.abs(endX - startX) / 2, Math.abs(endY - startY) / 2, 0, 0, Math.PI * 2);
+    } else {
+      context.moveTo(startX, startY);
+      context.lineTo(endX, endY);
+    }
+    context.stroke();
+    if (stroke.shape === "arrow") {
+      const angle = Math.atan2(endY - startY, endX - startX);
+      const head = Math.max(10, stroke.width * 4.5);
+      context.beginPath();
+      context.moveTo(endX, endY);
+      context.lineTo(endX - head * Math.cos(angle - Math.PI / 7), endY - head * Math.sin(angle - Math.PI / 7));
+      context.moveTo(endX, endY);
+      context.lineTo(endX - head * Math.cos(angle + Math.PI / 7), endY - head * Math.sin(angle + Math.PI / 7));
+      context.stroke();
+    }
+    context.restore();
+    return;
+  }
+
+  if (stroke.points.length === 1) {
+    context.beginPath();
+    context.arc(startX, startY, Math.max(1, stroke.width / 2), 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+    return;
+  }
+
   context.beginPath();
-  context.moveTo(first.x * canvas.clientWidth, first.y * canvas.clientHeight);
+  context.moveTo(startX, startY);
   for (let index = 1; index < stroke.points.length; index += 1) {
     const point = stroke.points[index];
     const previous = stroke.points[index - 1];
     context.lineWidth = stroke.width * (0.7 + point.pressure * 0.5);
-    const midX = ((previous.x + point.x) / 2) * canvas.clientWidth;
-    const midY = ((previous.y + point.y) / 2) * canvas.clientHeight;
-    context.quadraticCurveTo(previous.x * canvas.clientWidth, previous.y * canvas.clientHeight, midX, midY);
+    const midX = ((previous.x + point.x) / 2) * canvasWidth;
+    const midY = ((previous.y + point.y) / 2) * canvasHeight;
+    context.quadraticCurveTo(previous.x * canvasWidth, previous.y * canvasHeight, midX, midY);
   }
   context.stroke();
   context.restore();
 }
 
-function InkCanvas({ tool, color, width, strokes, onChange }: { tool: Tool; color: string; width: number; strokes: Stroke[]; onChange: (strokes: Stroke[]) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const currentStroke = useRef<Stroke | null>(null);
-  const drawing = useRef(false);
+function pointsForStroke(stroke: Stroke): Point[] {
+  if (stroke.tool !== "shape" || stroke.points.length < 2) return stroke.points;
+  const start = stroke.points[0];
+  const end = stroke.points.at(-1)!;
+  if (stroke.shape === "rectangle") {
+    return [start, { x: end.x, y: start.y, pressure: .5 }, end, { x: start.x, y: end.y, pressure: .5 }, start];
+  }
+  if (stroke.shape === "ellipse") {
+    return Array.from({ length: 41 }, (_, index) => {
+      const angle = (index / 40) * Math.PI * 2;
+      return {
+        x: (start.x + end.x) / 2 + Math.cos(angle) * Math.abs(end.x - start.x) / 2,
+        y: (start.y + end.y) / 2 + Math.sin(angle) * Math.abs(end.y - start.y) / 2,
+        pressure: .5,
+      };
+    });
+  }
+  return [start, end];
+}
 
-  const redraw = useCallback(() => {
+function boundsForStrokes(strokes: Stroke[]) {
+  const points = strokes.flatMap(pointsForStroke);
+  if (!points.length) return null;
+  return {
+    left: Math.min(...points.map((point) => point.x)),
+    right: Math.max(...points.map((point) => point.x)),
+    top: Math.min(...points.map((point) => point.y)),
+    bottom: Math.max(...points.map((point) => point.y)),
+  };
+}
+
+function pointInPolygon(point: Point, polygon: Point[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const a = polygon[current];
+    const b = polygon[previous];
+    const crosses = (a.y > point.y) !== (b.y > point.y)
+      && point.x < ((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || Number.EPSILON) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToSegmentPixels(point: Point, start: Point, end: Point, canvas: HTMLCanvasElement) {
+  const px = point.x * canvas.clientWidth;
+  const py = point.y * canvas.clientHeight;
+  const ax = start.x * canvas.clientWidth;
+  const ay = start.y * canvas.clientHeight;
+  const bx = end.x * canvas.clientWidth;
+  const by = end.y * canvas.clientHeight;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  const ratio = lengthSquared ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)) : 0;
+  return Math.hypot(px - (ax + ratio * dx), py - (ay + ratio * dy));
+}
+
+function eraseStrokeAtPoint(stroke: Stroke, point: Point, canvas: HTMLCanvasElement, radius: number): Stroke[] {
+  const samples = pointsForStroke(stroke);
+  if (stroke.tool === "shape") {
+    const hit = samples.length === 1
+      ? Math.hypot((samples[0].x - point.x) * canvas.clientWidth, (samples[0].y - point.y) * canvas.clientHeight) <= radius
+      : samples.slice(1).some((sample, index) => distanceToSegmentPixels(point, samples[index], sample, canvas) <= radius + stroke.width / 2);
+    return hit ? [] : [stroke];
+  }
+  if (stroke.points.length === 1) {
+    return Math.hypot((stroke.points[0].x - point.x) * canvas.clientWidth, (stroke.points[0].y - point.y) * canvas.clientHeight) <= radius ? [] : [stroke];
+  }
+
+  const parts: Point[][] = [];
+  let currentPart: Point[] = [];
+  let touched = false;
+  for (let index = 0; index < stroke.points.length - 1; index += 1) {
+    const start = stroke.points[index];
+    const end = stroke.points[index + 1];
+    if (distanceToSegmentPixels(point, start, end, canvas) <= radius + stroke.width / 2) {
+      touched = true;
+      if (currentPart.length > 1) parts.push(currentPart);
+      currentPart = [];
+    } else {
+      if (!currentPart.length) currentPart.push(start);
+      currentPart.push(end);
+    }
+  }
+  if (currentPart.length > 1) parts.push(currentPart);
+  if (!touched) return [stroke];
+  return parts.map((points, index) => ({ ...stroke, id: index === 0 ? stroke.id : uid("stroke-part"), points }));
+}
+
+type InkCanvasProps = {
+  tool: Tool;
+  color: string;
+  width: number;
+  shape: ShapeKind;
+  strokes: Stroke[];
+  onCommit: (next: Stroke[], previous: Stroke[]) => void;
+};
+
+function InkCanvas({ tool, color, width, shape, strokes, onCommit }: InkCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const strokesRef = useRef(strokes);
+  const workingStrokes = useRef(strokes);
+  const currentStroke = useRef<Stroke | null>(null);
+  const beforeStrokes = useRef<Stroke[]>(strokes);
+  const lassoPath = useRef<Point[]>([]);
+  const interaction = useRef<"idle" | "draw" | "erase" | "lasso" | "move" | "resize">("idle");
+  const gestureStart = useRef<Point | null>(null);
+  const lastEraserPoint = useRef<Point | null>(null);
+  const baseSelectionBounds = useRef<ReturnType<typeof boundsForStrokes>>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectedIdsRef = useRef(selectedIds);
+
+  const renderCanvas = useCallback((displayStrokes: Stroke[] = workingStrokes.current) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(canvas.clientWidth * ratio);
-    canvas.height = Math.floor(canvas.clientHeight * ratio);
+    if (canvas.width !== Math.floor(canvas.clientWidth * ratio) || canvas.height !== Math.floor(canvas.clientHeight * ratio)) {
+      canvas.width = Math.floor(canvas.clientWidth * ratio);
+      canvas.height = Math.floor(canvas.clientHeight * ratio);
+    }
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    strokes.forEach((stroke) => drawStroke(context, canvas, stroke));
-  }, [strokes]);
+    displayStrokes.forEach((stroke) => drawStroke(context, canvas, stroke));
+
+    const selected = displayStrokes.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
+    const bounds = boundsForStrokes(selected);
+    if (bounds) {
+      const left = bounds.left * canvas.clientWidth;
+      const top = bounds.top * canvas.clientHeight;
+      const boxWidth = Math.max(12, (bounds.right - bounds.left) * canvas.clientWidth);
+      const boxHeight = Math.max(12, (bounds.bottom - bounds.top) * canvas.clientHeight);
+      context.save();
+      context.strokeStyle = "#0e6b70";
+      context.fillStyle = "#ffffff";
+      context.lineWidth = 1.5;
+      context.setLineDash([6, 4]);
+      context.strokeRect(left - 5, top - 5, boxWidth + 10, boxHeight + 10);
+      context.setLineDash([]);
+      context.fillRect(left + boxWidth + 1, top + boxHeight + 1, 9, 9);
+      context.strokeRect(left + boxWidth + 1, top + boxHeight + 1, 9, 9);
+      context.restore();
+    }
+
+    if (lassoPath.current.length > 1) {
+      context.save();
+      context.strokeStyle = "#0e6b70";
+      context.fillStyle = "rgba(14,107,112,.06)";
+      context.lineWidth = 1.5;
+      context.setLineDash([6, 4]);
+      context.beginPath();
+      context.moveTo(lassoPath.current[0].x * canvas.clientWidth, lassoPath.current[0].y * canvas.clientHeight);
+      lassoPath.current.slice(1).forEach((point) => context.lineTo(point.x * canvas.clientWidth, point.y * canvas.clientHeight));
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.restore();
+    }
+  }, []);
 
   useEffect(() => {
-    redraw();
+    strokesRef.current = strokes;
+    workingStrokes.current = strokes;
+    selectedIdsRef.current = selectedIdsRef.current.filter((id) => strokes.some((stroke) => stroke.id === id));
+    if (selectedIdsRef.current.length !== selectedIds.length) setSelectedIds(selectedIdsRef.current);
+    renderCanvas(strokes);
+  }, [renderCanvas, selectedIds.length, strokes]);
+
+  useEffect(() => {
+    if (tool !== "lasso" && selectedIdsRef.current.length) {
+      selectedIdsRef.current = [];
+      setSelectedIds([]);
+      renderCanvas();
+    }
+  }, [renderCanvas, tool]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const observer = new ResizeObserver(redraw);
+    renderCanvas();
+    const observer = new ResizeObserver(() => renderCanvas());
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [redraw]);
+  }, [renderCanvas]);
 
-  const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>): Point => {
-    const rect = event.currentTarget.getBoundingClientRect();
+  const pointFromClient = (clientX: number, clientY: number, pressure = .5): Point => {
+    const rect = canvasRef.current!.getBoundingClientRect();
     return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
-      pressure: event.pressure || 0.5,
+      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+      pressure: pressure || .5,
     };
   };
 
-  const eraseAt = (point: Point) => {
-    const threshold = 0.025;
-    const next = strokes.filter((stroke) => !stroke.points.some((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) < threshold));
-    if (next.length !== strokes.length) onChange(next);
+  const replaceSelection = (ids: string[]) => {
+    selectedIdsRef.current = ids;
+    setSelectedIds(ids);
+  };
+
+  const eraseBetween = (from: Point, to: Point) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const distance = Math.hypot((to.x - from.x) * canvas.clientWidth, (to.y - from.y) * canvas.clientHeight);
+    const steps = Math.max(1, Math.ceil(distance / 6));
+    for (let step = 1; step <= steps; step += 1) {
+      const sample: Point = {
+        x: from.x + (to.x - from.x) * step / steps,
+        y: from.y + (to.y - from.y) * step / steps,
+        pressure: .5,
+      };
+      workingStrokes.current = workingStrokes.current.flatMap((stroke) => eraseStrokeAtPoint(stroke, sample, canvas, 13));
+    }
+    renderCanvas(workingStrokes.current);
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (tool !== "pen" && tool !== "highlight" && tool !== "eraser") return;
+    if (!["pen", "highlight", "eraser", "lasso", "shape"].includes(tool)) return;
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    drawing.current = true;
-    const point = pointFromEvent(event);
+    const point = pointFromClient(event.clientX, event.clientY, event.pressure);
+    beforeStrokes.current = strokesRef.current;
+    workingStrokes.current = strokesRef.current;
+    gestureStart.current = point;
+
     if (tool === "eraser") {
-      eraseAt(point);
+      interaction.current = "erase";
+      lastEraserPoint.current = point;
+      eraseBetween(point, point);
       return;
     }
-    currentStroke.current = { id: uid("stroke"), tool, color, width: tool === "highlight" ? width * 4 : width, points: [point] };
+
+    if (tool === "lasso") {
+      const selected = strokesRef.current.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
+      const bounds = boundsForStrokes(selected);
+      if (bounds && canvasRef.current) {
+        const handleDistance = Math.hypot((point.x - bounds.right) * canvasRef.current.clientWidth, (point.y - bounds.bottom) * canvasRef.current.clientHeight);
+        if (handleDistance <= 22) {
+          interaction.current = "resize";
+          baseSelectionBounds.current = bounds;
+          return;
+        }
+        const paddingX = 10 / canvasRef.current.clientWidth;
+        const paddingY = 10 / canvasRef.current.clientHeight;
+        if (point.x >= bounds.left - paddingX && point.x <= bounds.right + paddingX && point.y >= bounds.top - paddingY && point.y <= bounds.bottom + paddingY) {
+          interaction.current = "move";
+          baseSelectionBounds.current = bounds;
+          return;
+        }
+      }
+      interaction.current = "lasso";
+      replaceSelection([]);
+      lassoPath.current = [point];
+      renderCanvas();
+      return;
+    }
+
+    interaction.current = "draw";
+    currentStroke.current = {
+      id: uid("stroke"),
+      tool: tool === "shape" ? "shape" : tool === "highlight" ? "highlight" : "pen",
+      shape: tool === "shape" ? shape : undefined,
+      color,
+      width: tool === "highlight" ? width * 4 : width,
+      points: [point],
+    };
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
-    const point = pointFromEvent(event);
-    if (tool === "eraser") {
-      eraseAt(point);
+    if (interaction.current === "idle") return;
+    event.preventDefault();
+    const point = pointFromClient(event.clientX, event.clientY, event.pressure);
+
+    if (interaction.current === "erase") {
+      const previous = lastEraserPoint.current ?? point;
+      eraseBetween(previous, point);
+      lastEraserPoint.current = point;
       return;
     }
+
+    if (interaction.current === "lasso") {
+      lassoPath.current.push(point);
+      renderCanvas();
+      return;
+    }
+
+    if (interaction.current === "move" && gestureStart.current && baseSelectionBounds.current) {
+      const bounds = baseSelectionBounds.current;
+      const dx = Math.max(-bounds.left, Math.min(1 - bounds.right, point.x - gestureStart.current.x));
+      const dy = Math.max(-bounds.top, Math.min(1 - bounds.bottom, point.y - gestureStart.current.y));
+      workingStrokes.current = beforeStrokes.current.map((stroke) => selectedIdsRef.current.includes(stroke.id)
+        ? { ...stroke, points: stroke.points.map((item) => ({ ...item, x: item.x + dx, y: item.y + dy })) }
+        : stroke);
+      renderCanvas(workingStrokes.current);
+      return;
+    }
+
+    if (interaction.current === "resize" && baseSelectionBounds.current) {
+      const bounds = baseSelectionBounds.current;
+      const baseDistance = Math.hypot(bounds.right - bounds.left, bounds.bottom - bounds.top) || .01;
+      const nextDistance = Math.hypot(point.x - bounds.left, point.y - bounds.top);
+      const maxScaleX = (1 - bounds.left) / Math.max(.001, bounds.right - bounds.left);
+      const maxScaleY = (1 - bounds.top) / Math.max(.001, bounds.bottom - bounds.top);
+      const scale = Math.max(.2, Math.min(4, maxScaleX, maxScaleY, nextDistance / baseDistance));
+      workingStrokes.current = beforeStrokes.current.map((stroke) => selectedIdsRef.current.includes(stroke.id)
+        ? { ...stroke, points: stroke.points.map((item) => ({ ...item, x: bounds.left + (item.x - bounds.left) * scale, y: bounds.top + (item.y - bounds.top) * scale })) }
+        : stroke);
+      renderCanvas(workingStrokes.current);
+      return;
+    }
+
     if (!currentStroke.current) return;
-    currentStroke.current.points.push(point);
-    redraw();
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (canvas && context) drawStroke(context, canvas, currentStroke.current);
+    if (currentStroke.current.tool === "shape") {
+      currentStroke.current.points = [currentStroke.current.points[0], point];
+    } else {
+      const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
+      coalesced.forEach((sample) => currentStroke.current?.points.push(pointFromClient(sample.clientX, sample.clientY, sample.pressure)));
+    }
+    renderCanvas([...beforeStrokes.current, currentStroke.current]);
   };
 
-  const finishStroke = () => {
-    drawing.current = false;
-    if (currentStroke.current && currentStroke.current.points.length > 1) onChange([...strokes, currentStroke.current]);
-    currentStroke.current = null;
+  const finishInteraction = () => {
+    const mode = interaction.current;
+    interaction.current = "idle";
+    if (mode === "draw" && currentStroke.current) {
+      const minimumPoints = currentStroke.current.tool === "shape" ? 2 : 1;
+      if (currentStroke.current.points.length >= minimumPoints) {
+        const next = [...beforeStrokes.current, currentStroke.current];
+        strokesRef.current = next;
+        workingStrokes.current = next;
+        onCommit(next, beforeStrokes.current);
+      }
+      currentStroke.current = null;
+    } else if (mode === "erase" || mode === "move" || mode === "resize") {
+      const next = workingStrokes.current;
+      if (next !== beforeStrokes.current) {
+        strokesRef.current = next;
+        onCommit(next, beforeStrokes.current);
+      }
+    } else if (mode === "lasso") {
+      const polygon = lassoPath.current;
+      const ids = polygon.length > 2
+        ? strokesRef.current.filter((stroke) => pointsForStroke(stroke).some((point) => pointInPolygon(point, polygon))).map((stroke) => stroke.id)
+        : [];
+      lassoPath.current = [];
+      replaceSelection(ids);
+      workingStrokes.current = strokesRef.current;
+      renderCanvas();
+    }
+    lastEraserPoint.current = null;
+    gestureStart.current = null;
+    baseSelectionBounds.current = null;
+    renderCanvas();
+  };
+
+  const selectionBounds = useMemo(() => boundsForStrokes(strokes.filter((stroke) => selectedIds.includes(stroke.id))), [selectedIds, strokes]);
+
+  const duplicateSelection = () => {
+    const selected = strokesRef.current.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
+    if (!selected.length) return;
+    const copies = selected.map((stroke) => ({
+      ...stroke,
+      id: uid("stroke-copy"),
+      points: stroke.points.map((point) => ({ ...point, x: Math.min(1, point.x + .025), y: Math.min(1, point.y + .025) })),
+    }));
+    const next = [...strokesRef.current, ...copies];
+    onCommit(next, strokesRef.current);
+    strokesRef.current = next;
+    workingStrokes.current = next;
+    replaceSelection(copies.map((stroke) => stroke.id));
+    renderCanvas(next);
+  };
+
+  const deleteSelection = () => {
+    if (!selectedIdsRef.current.length) return;
+    const previous = strokesRef.current;
+    const next = previous.filter((stroke) => !selectedIdsRef.current.includes(stroke.id));
+    onCommit(next, previous);
+    strokesRef.current = next;
+    workingStrokes.current = next;
+    replaceSelection([]);
+    renderCanvas(next);
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`ink-canvas tool-${tool}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={finishStroke}
-      onPointerCancel={finishStroke}
-      aria-label="Lớp viết tay"
-    />
+    <div className={`ink-surface tool-${tool}`}>
+      <canvas
+        ref={canvasRef}
+        className="ink-canvas"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finishInteraction}
+        onPointerCancel={finishInteraction}
+        aria-label="Lớp viết tay"
+      />
+      {tool === "lasso" && selectionBounds && (
+        <div className="lasso-menu" style={{ left: `${Math.min(.82, Math.max(.18, (selectionBounds.left + selectionBounds.right) / 2)) * 100}%`, top: `${Math.max(.1, selectionBounds.top) * 100}%` }}>
+          <span>Kéo để di chuyển · nút vuông để đổi cỡ</span>
+          <button onPointerDown={(event) => event.stopPropagation()} onClick={duplicateSelection}><Copy size={14} /> Nhân đôi</button>
+          <button className="danger" onPointerDown={(event) => event.stopPropagation()} onClick={deleteSelection}><Trash2 size={14} /> Xóa</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -472,10 +906,11 @@ export default function Home() {
   const [activeTool, setActiveTool] = useState<Tool>("pen");
   const [inkColor, setInkColor] = useState("#2465a8");
   const [inkWidth, setInkWidth] = useState(2);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [sourceZoom, setSourceZoom] = useState(1);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace()]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
-  const [redoStrokes, setRedoStrokes] = useState<Record<string, Stroke[]>>({});
+  const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});
   const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
@@ -485,6 +920,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
+  const [paperPanelOpen, setPaperPanelOpen] = useState(false);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
@@ -534,7 +970,8 @@ export default function Home() {
         if (stored) {
           const parsed = JSON.parse(stored) as PersistedLibrary;
           if (parsed.workspaces?.length && !cancelled) {
-            setWorkspaces(parsed.workspaces);
+            const normalized = parsed.workspaces.map(normalizeWorkspace);
+            setWorkspaces(normalized);
             setActiveWorkspaceId(parsed.activeWorkspaceId || parsed.workspaces[0].id);
             setReaderShare(parsed.readerShare || 50);
             setReady(true);
@@ -549,7 +986,7 @@ export default function Home() {
         if (stored) legacy = JSON.parse(stored) as LegacyNotebookState;
       } catch { /* keep demo data */ }
 
-      const legacyPages = legacy?.pages?.length ? legacy.pages : initialPages;
+      const legacyPages = (legacy?.pages?.length ? legacy.pages : initialPages).map(normalizePage);
       let restoredWorkspace = createDemoWorkspace(legacyPages);
       restoredWorkspace.notebooks[0].activePageId = legacyPages.some((page) => page.id === legacy?.activeNoteId)
         ? legacy!.activeNoteId!
@@ -715,10 +1152,10 @@ export default function Home() {
   };
 
   const addNotePage = () => {
-    const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1);
+    const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1, activeNote.paper);
     updateActiveNotebook((notebook) => ({ ...notebook, pages: [...notebook.pages, next], activePageId: next.id }));
     setActiveTool("text");
-    setToast("Đã thêm trang A4");
+    setToast(`Đã thêm trang ${PAPER_SIZES[next.paper.size].label}`);
   };
 
   const addNotebook = () => {
@@ -741,19 +1178,41 @@ export default function Home() {
     setToast("Đã xóa trang");
   };
 
+  const commitStrokes = (next: Stroke[], previous: Stroke[]) => {
+    const unchanged = next.length === previous.length && next.every((stroke, index) => stroke === previous[index]);
+    if (unchanged) return;
+    setStrokeHistory((state) => {
+      const history = state[activeNote.id] ?? { undo: [], redo: [] };
+      return { ...state, [activeNote.id]: { undo: [...history.undo, previous].slice(-60), redo: [] } };
+    });
+    updateActiveNote({ strokes: next });
+  };
+
   const undo = () => {
-    const last = activeNote.strokes.at(-1);
-    if (!last) return;
-    updateActiveNote({ strokes: activeNote.strokes.slice(0, -1) });
-    setRedoStrokes((state) => ({ ...state, [activeNote.id]: [...(state[activeNote.id] ?? []), last] }));
+    const history = strokeHistory[activeNote.id];
+    const previous = history?.undo.at(-1);
+    if (!previous) return;
+    updateActiveNote({ strokes: previous });
+    setStrokeHistory((state) => ({
+      ...state,
+      [activeNote.id]: { undo: history.undo.slice(0, -1), redo: [...history.redo, activeNote.strokes].slice(-60) },
+    }));
   };
 
   const redo = () => {
-    const stack = redoStrokes[activeNote.id] ?? [];
-    const stroke = stack.at(-1);
-    if (!stroke) return;
-    updateActiveNote({ strokes: [...activeNote.strokes, stroke] });
-    setRedoStrokes((state) => ({ ...state, [activeNote.id]: stack.slice(0, -1) }));
+    const history = strokeHistory[activeNote.id];
+    const next = history?.redo.at(-1);
+    if (!next) return;
+    updateActiveNote({ strokes: next });
+    setStrokeHistory((state) => ({
+      ...state,
+      [activeNote.id]: { undo: [...history.undo, activeNote.strokes].slice(-60), redo: history.redo.slice(0, -1) },
+    }));
+  };
+
+  const updatePaper = (changes: Partial<PaperSettings>) => {
+    updateActiveNote({ paper: { ...activeNote.paper, ...changes } });
+    setToast("Đã lưu mẫu giấy cho trang này");
   };
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -777,6 +1236,13 @@ export default function Home() {
   const gridStyle = {
     "--reader-share": `${readerShare}fr`,
     "--notes-share": `${100 - readerShare}fr`,
+  } as React.CSSProperties;
+  const selectedPaperSize = PAPER_SIZES[activeNote.paper.size];
+  const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;
+  const paperHeight = activeNote.paper.orientation === "portrait" ? selectedPaperSize.height : selectedPaperSize.width;
+  const paperStyle = {
+    "--paper-ratio": `${paperWidth} / ${paperHeight}`,
+    "--paper-max-width": `${activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32)}px`,
   } as React.CSSProperties;
 
   return (
@@ -853,33 +1319,77 @@ export default function Home() {
             <button className="note-create-button" onClick={addNotebook}><FileText size={16} /><span>Sổ mới</span></button>
             <span className="toolbar-divider" />
             {tools.map(({ id, label, icon: Icon }) => <button key={id} className={`tool-button ${activeTool === id ? "active" : ""}`} onClick={() => setActiveTool(id)} aria-label={label} title={label}><Icon size={20} /></button>)}
+            {activeTool === "shape" && (
+              <select className="shape-select" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)} aria-label="Loại hình">
+                <option value="line">Đường thẳng</option>
+                <option value="arrow">Mũi tên</option>
+                <option value="rectangle">Chữ nhật</option>
+                <option value="ellipse">Bầu dục</option>
+              </select>
+            )}
             <span className="toolbar-divider" />
-            <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!activeNote.strokes.length}><Undo2 size={19} /></button>
-            <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(redoStrokes[activeNote.id]?.length)}><Redo2 size={19} /></button>
+            <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
+            <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
             <button className="icon-button compact delete-tool" aria-label="Xóa trang" onClick={deleteNotePage}><Trash2 size={18} /></button>
             <span className="toolbar-divider" />
             {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
             <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
+            <span className="toolbar-divider" />
+            <button className={`paper-button ${paperPanelOpen ? "active" : ""}`} onClick={() => setPaperPanelOpen((open) => !open)} aria-expanded={paperPanelOpen}><NotebookTabs size={17} /><span>Giấy</span></button>
           </div>
 
+          {paperPanelOpen && (
+            <div className="paper-panel" role="dialog" aria-label="Cài đặt giấy">
+              <div className="paper-panel-heading"><div><strong>Mẫu giấy</strong><span>Áp dụng riêng cho trang hiện tại</span></div><button className="icon-button compact" onClick={() => setPaperPanelOpen(false)} aria-label="Đóng"><X size={17} /></button></div>
+              <section>
+                <label>Khổ giấy</label>
+                <div className="paper-size-grid">
+                  {(Object.keys(PAPER_SIZES) as PaperSize[]).map((size) => {
+                    const option = PAPER_SIZES[size];
+                    return <button key={size} className={activeNote.paper.size === size ? "selected" : ""} onClick={() => updatePaper({ size })}><b>{option.label}</b><small>{option.dimensions}</small>{activeNote.paper.size === size && <Check size={14} />}</button>;
+                  })}
+                </div>
+              </section>
+              <section>
+                <label>Hướng giấy</label>
+                <div className="segmented-control"><button className={activeNote.paper.orientation === "portrait" ? "selected" : ""} onClick={() => updatePaper({ orientation: "portrait" })}>Dọc</button><button className={activeNote.paper.orientation === "landscape" ? "selected" : ""} onClick={() => updatePaper({ orientation: "landscape" })}>Ngang</button></div>
+              </section>
+              <section>
+                <label>Dòng kẻ</label>
+                <div className="template-grid">
+                  {PAPER_TEMPLATES.map((template) => <button key={template.id} className={activeNote.paper.template === template.id ? "selected" : ""} onClick={() => updatePaper({ template: template.id })}><span className={`template-preview template-${template.id}`} /><b>{template.label}</b></button>)}
+                </div>
+              </section>
+              <section>
+                <label>Màu giấy</label>
+                <div className="paper-color-row">
+                  {PAPER_COLORS.map((paperColor) => <button key={paperColor.id} className={activeNote.paper.color === paperColor.id ? "selected" : ""} onClick={() => updatePaper({ color: paperColor.id })} title={paperColor.label} aria-label={paperColor.label}><span style={{ background: paperColor.swatch }} />{activeNote.paper.color === paperColor.id && <Check size={13} />}</button>)}
+                </div>
+              </section>
+            </div>
+          )}
+
           <div className="note-stage">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""}`}>
-              <div className="ruled-lines" />
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle}>
+              <div className="paper-background" />
               <div className="typed-layer">
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
                 <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
                 {activeNote.citationPage && <button className="citation-chip" onClick={() => { setSourcePage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
-              <InkCanvas tool={activeTool} color={inkColor} width={inkWidth} strokes={activeNote.strokes} onChange={(strokes) => { updateActiveNote({ strokes }); setRedoStrokes((state) => ({ ...state, [activeNote.id]: [] })); }} />
+              <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={inkWidth} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Chế độ nhập chữ</div>}
             </article>
-            <div className="paper-size">A4 (210 × 297 mm) · {activeTool === "text" ? "Chạm vào trang để nhập chữ" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "text" ? "Chạm vào trang để nhập chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
 
         <aside className="note-thumbnails" aria-label="Trang ghi chú">
           <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
-          {notePages.map((page, index) => <button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} key={page.id} onClick={() => setActiveNoteId(page.id)}><span className="mini-note"><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>)}
+          {notePages.map((page, index) => {
+            const paperColor = PAPER_COLORS.find((color) => color.id === page.paper.color)?.swatch;
+            return <button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} key={page.id} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>;
+          })}
           <button className="new-page" onClick={addNotePage}><Plus size={21} /><span>Trang mới</span></button>
         </aside>
       </section>
