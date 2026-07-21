@@ -1446,7 +1446,7 @@ export default function Home() {
             <span className="toolbar-divider" />
             <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
             <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
-            <button className="note-create-button danger" aria-label="Xóa trang note" onClick={deleteNotePage}><Trash2 size={15} /><span>Xóa trang</span></button>
+            <button className="icon-button compact delete-tool" aria-label="Xóa trang note" title="Xóa trang" onClick={deleteNotePage}><Trash2 size={18} /></button>
             <span className="toolbar-divider" />
             {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
             <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
