@@ -1613,6 +1613,7 @@ export default function Home() {
           const content = await page.getTextContent();
           const text = content.items.map((item) => "str" in item ? item.str : "").join(" ").replace(/\s+/g, " ").trim();
           const lower = text.toLocaleLowerCase();
+          if (pageNumber % 12 === 0) await new Promise((resolve) => window.setTimeout(resolve, 0));
           let index = lower.indexOf(normalizedQuery);
           if (index < 0) continue;
           let occurrences = 0;
@@ -1630,7 +1631,6 @@ export default function Home() {
             snippet: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
             occurrences,
           });
-          if (pageNumber % 12 === 0) await new Promise((resolve) => window.setTimeout(resolve, 0));
         }
       } catch { /* keep results from the remaining documents */ }
       finally { if (temporary) void proxy?.destroy(); }
