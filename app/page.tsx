@@ -61,6 +61,7 @@ import {
 
 type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
 type InkTool = "pen" | "highlight" | "shape";
+type PenStyle = "ballpoint" | "fountain" | "pencil" | "brush";
 type ShapeKind = "line" | "arrow" | "rectangle" | "ellipse";
 type PaperSize = "a4" | "a5" | "b5" | "letter" | "square";
 type PaperOrientation = "portrait" | "landscape";
@@ -70,6 +71,7 @@ type Point = { x: number; y: number; pressure: number };
 type Stroke = {
   id: string;
   tool: InkTool;
+  penStyle?: PenStyle;
   shape?: ShapeKind;
   color: string;
   width: number;
@@ -190,6 +192,13 @@ const PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[] = [
   { id: "mint", label: "Xanh bạc hà", swatch: "#eefaf3" },
   { id: "blue", label: "Xanh nhạt", swatch: "#eef7fc" },
   { id: "dark", label: "Tối", swatch: "#263139" },
+];
+
+const PEN_STYLES: { id: PenStyle; label: string }[] = [
+  { id: "ballpoint", label: "Bút bi" },
+  { id: "fountain", label: "Bút máy" },
+  { id: "pencil", label: "Bút chì" },
+  { id: "brush", label: "Bút cọ" },
 ];
 
 const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
@@ -636,7 +645,8 @@ function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement
   const endX = last.x * canvasWidth;
   const endY = last.y * canvasHeight;
   context.save();
-  context.globalAlpha = stroke.tool === "highlight" ? 0.3 : 1;
+  const penStyle = stroke.penStyle ?? "ballpoint";
+  context.globalAlpha = stroke.tool === "highlight" ? 0.3 : penStyle === "pencil" ? 0.58 : 1;
   context.strokeStyle = stroke.color;
   context.fillStyle = stroke.color;
   context.lineWidth = stroke.width;
@@ -676,17 +686,22 @@ function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement
     return;
   }
 
-  context.beginPath();
-  context.moveTo(startX, startY);
+  const widthForPoint = (point: Point) => {
+    if (stroke.tool === "highlight") return stroke.width;
+    if (penStyle === "fountain") return stroke.width * (0.48 + point.pressure * 1.02);
+    if (penStyle === "brush") return stroke.width * (0.35 + point.pressure * 1.5);
+    if (penStyle === "pencil") return stroke.width * (0.72 + point.pressure * 0.28);
+    return stroke.width * (0.9 + point.pressure * 0.18);
+  };
   for (let index = 1; index < stroke.points.length; index += 1) {
     const point = stroke.points[index];
     const previous = stroke.points[index - 1];
-    context.lineWidth = stroke.width * (0.7 + point.pressure * 0.5);
-    const midX = ((previous.x + point.x) / 2) * canvasWidth;
-    const midY = ((previous.y + point.y) / 2) * canvasHeight;
-    context.quadraticCurveTo(previous.x * canvasWidth, previous.y * canvasHeight, midX, midY);
+    context.beginPath();
+    context.moveTo(previous.x * canvasWidth, previous.y * canvasHeight);
+    context.lineWidth = widthForPoint(point);
+    context.lineTo(point.x * canvasWidth, point.y * canvasHeight);
+    context.stroke();
   }
-  context.stroke();
   context.restore();
 }
 
@@ -783,12 +798,13 @@ type InkCanvasProps = {
   tool: Tool;
   color: string;
   width: number;
+  penStyle: PenStyle;
   shape: ShapeKind;
   strokes: Stroke[];
   onCommit: (next: Stroke[], previous: Stroke[]) => void;
 };
 
-function InkCanvas({ tool, color, width, shape, strokes, onCommit }: InkCanvasProps) {
+function InkCanvas({ tool, color, width, penStyle, shape, strokes, onCommit }: InkCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef(strokes);
   const workingStrokes = useRef(strokes);
@@ -951,6 +967,7 @@ function InkCanvas({ tool, color, width, shape, strokes, onCommit }: InkCanvasPr
     currentStroke.current = {
       id: uid("stroke"),
       tool: tool === "shape" ? "shape" : tool === "highlight" ? "highlight" : "pen",
+      penStyle: tool === "pen" ? penStyle : undefined,
       shape: tool === "shape" ? shape : undefined,
       color,
       width: tool === "highlight" ? width * 4 : width,
@@ -1104,6 +1121,7 @@ export default function Home() {
   const [activeTool, setActiveTool] = useState<Tool>("pen");
   const [inkColor, setInkColor] = useState("#2465a8");
   const [inkWidth, setInkWidth] = useState(2);
+  const [penStyle, setPenStyle] = useState<PenStyle>("ballpoint");
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
   const [pdfTool, setPdfTool] = useState<PdfTool>("select");
@@ -1960,6 +1978,10 @@ export default function Home() {
   const paperStyle = {
     "--paper-ratio": `${paperWidth} / ${paperHeight}`,
     "--paper-max-width": `${activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32)}px`,
+    "--paper-line-step": `${(8 / paperHeight) * 100}%`,
+    "--paper-cell-x": `${(8 / paperWidth) * 100}%`,
+    "--paper-cell-y": `${(8 / paperHeight) * 100}%`,
+    "--cornell-header": `${(40 / paperHeight) * 100}%`,
   } as React.CSSProperties;
 
   return (
@@ -2109,12 +2131,13 @@ export default function Home() {
 
         <section className="notes-pane">
           <div className="note-toolbar" role="toolbar" aria-label="Công cụ ghi chú">
-            <button className="note-create-button primary" onClick={addNotePage}><Plus size={17} /><span>Trang mới</span></button>
+            <button className="note-create-button primary icon-only" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={18} /></button>
             <button className="note-create-button" onClick={addNotebook}><FileText size={16} /><span>Sổ mới</span></button>
             <button className="note-create-button danger" onClick={() => { void deleteNotebook(); }}><Trash2 size={15} /><span>Xóa sổ</span></button>
             <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
             <span className="toolbar-divider" />
             {tools.map(({ id, label, icon: Icon }) => <button key={id} className={`tool-button ${activeTool === id ? "active" : ""}`} onClick={() => setActiveTool(id)} aria-label={label} title={label}><Icon size={20} /></button>)}
+            {activeTool === "pen" && <select className="pen-style-select" value={penStyle} onChange={(event) => setPenStyle(event.target.value as PenStyle)} aria-label="Kiểu bút" title="Kiểu bút">{PEN_STYLES.map((style) => <option key={style.id} value={style.id}>{style.label}</option>)}</select>}
             {activeTool === "shape" && (
               <select className="shape-select" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)} aria-label="Loại hình">
                 <option value="line">Đường thẳng</option>
@@ -2128,7 +2151,8 @@ export default function Home() {
             <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
             <button className="icon-button compact delete-tool" aria-label="Xóa trang note" title="Xóa trang" onClick={() => { void deleteNotePage(); }}><Trash2 size={18} /></button>
             <span className="toolbar-divider" />
-            {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => { setInkColor(color); setActiveTool("pen"); }} aria-label={`Màu mực ${index + 1}`} />)}
+            {["#2465a8", "#c94b50", "#111111", "#f6d96b"].map((color, index) => <button key={color} className={`ink-dot ${inkColor === color ? "selected" : ""}`} style={{ background: color }} onClick={() => setInkColor(color)} aria-label={`Màu mực ${index + 1}`} title={`Màu mực ${index + 1}`} />)}
+            <input className="ink-color-picker" type="color" value={inkColor} onChange={(event) => setInkColor(event.target.value)} aria-label="Chọn màu mực tùy chỉnh" title="Màu tùy chỉnh" />
             <select className="stroke-width" value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))} aria-label="Độ dày nét"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option></select>
             <span className="toolbar-divider" />
             <button className={`paper-button ${paperPanelOpen ? "active" : ""}`} onClick={() => setPaperPanelOpen((open) => !open)} aria-expanded={paperPanelOpen}><NotebookTabs size={17} /><span>Giấy</span></button>
@@ -2185,7 +2209,7 @@ export default function Home() {
                 )}
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
-              <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={inkWidth} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
+              <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Chế độ nhập chữ</div>}
             </article>
             <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "text" ? "Chạm vào trang để nhập chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
@@ -2198,7 +2222,7 @@ export default function Home() {
             const paperColor = PAPER_COLORS.find((color) => color.id === page.paper.color)?.swatch;
             return <div className="note-thumb-wrap" key={page.id}><button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>{page.id === activeNote.id && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={() => { void deleteNotePage(); }}><Trash2 size={13} /></button>}</div>;
           })}
-          <button className="new-page" onClick={addNotePage}><Plus size={21} /><span>Trang mới</span></button>
+          <button className="new-page" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={19} /></button>
         </aside>
       </section>
     </main>
