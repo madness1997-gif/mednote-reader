@@ -2,6 +2,7 @@
 
 import {
   AlignCenter,
+  AlignJustify,
   AlignLeft,
   AlignRight,
   BookOpen,
@@ -30,6 +31,8 @@ import {
   Lasso,
   Layers2,
   Languages,
+  List,
+  ListOrdered,
   ListTree,
   Maximize2,
   Menu,
@@ -43,6 +46,7 @@ import {
   PenTool,
   Plus,
   Redo2,
+  RemoveFormatting,
   RefreshCw,
   RotateCw,
   Rows3,
@@ -121,7 +125,7 @@ type TextFont =
   | "courier"
   | "cascadia"
   | "mono";
-type TextAlign = "left" | "center" | "right";
+type TextAlign = "left" | "center" | "right" | "justify";
 type TextSettings = {
   font: TextFont;
   size: number;
@@ -130,6 +134,11 @@ type TextSettings = {
   italic: boolean;
   underline: boolean;
   align: TextAlign;
+};
+type TextToolbarState = TextSettings & {
+  strike: boolean;
+  unordered: boolean;
+  ordered: boolean;
 };
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
@@ -151,6 +160,7 @@ type NotePage = {
   id: string;
   title: string;
   body: string;
+  bodyHtml?: string;
   citationPage: number | null;
   strokes: Stroke[];
   paper: PaperSettings;
@@ -163,6 +173,7 @@ type NoteExcerpt = {
   kind: "text" | "image";
   sourceKind?: "pdf" | "manual";
   text?: string;
+  richText?: string;
   assetId?: string;
   documentId?: string;
   documentName?: string;
@@ -255,7 +266,7 @@ const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
 const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
-const DEFAULT_TEXT: TextSettings = { font: "handwriting", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
+const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
 const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
@@ -292,7 +303,7 @@ const PEN_STYLES: { id: PenStyle; label: string; icon: typeof PenTool }[] = [
 ];
 
 const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
-  { id: "handwriting", label: "Viết tay", family: '"Segoe Print", "Bradley Hand", cursive' },
+  { id: "times", label: "Times New Roman", family: '"Times New Roman", Times, serif' },
   { id: "segoe", label: "Segoe UI", family: '"Segoe UI", Arial, sans-serif' },
   { id: "arial", label: "Arial", family: 'Arial, "Helvetica Neue", sans-serif' },
   { id: "tahoma", label: "Tahoma", family: 'Tahoma, "Segoe UI", sans-serif' },
@@ -301,7 +312,6 @@ const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
   { id: "calibri", label: "Calibri", family: 'Calibri, Carlito, "Segoe UI", sans-serif' },
   { id: "aptos", label: "Aptos", family: 'Aptos, Calibri, "Segoe UI", sans-serif' },
   { id: "sans", label: "Không chân (hệ thống)", family: 'Inter, "Segoe UI", Arial, sans-serif' },
-  { id: "times", label: "Times New Roman", family: '"Times New Roman", Times, serif' },
   { id: "cambria", label: "Cambria", family: 'Cambria, Georgia, serif' },
   { id: "georgia", label: "Georgia", family: 'Georgia, "Times New Roman", serif' },
   { id: "palatino", label: "Palatino Linotype", family: '"Palatino Linotype", Palatino, serif' },
@@ -309,10 +319,43 @@ const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
   { id: "courier", label: "Courier New", family: '"Courier New", Courier, monospace' },
   { id: "cascadia", label: "Cascadia Mono", family: '"Cascadia Mono", Consolas, monospace' },
   { id: "mono", label: "Đơn cách (hệ thống)", family: '"Courier New", monospace' },
+  { id: "handwriting", label: "Viết tay", family: '"Segoe Print", "Bradley Hand", cursive' },
 ];
 
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
 const TEXT_COLORS = ["auto", "#111111", "#2465a8", "#c94b50", "#16836f"];
+
+function cssColorToHex(color: string) {
+  if (color.startsWith("#")) return color;
+  const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length < 3) return "#111111";
+  return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function textFontFromFamily(family: string): TextFont {
+  const normalized = family.toLocaleLowerCase().replace(/["']/g, "");
+  return TEXT_FONTS.find((font) => normalized.includes(font.family.split(",")[0].replace(/["']/g, "").toLocaleLowerCase()))?.id ?? "times";
+}
+
+function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextToolbarState {
+  const anchor = range?.startContainer ?? editor;
+  const element = anchor.nodeType === Node.ELEMENT_NODE ? anchor as Element : anchor.parentElement;
+  const style = window.getComputedStyle(element ?? editor);
+  const weight = Number(style.fontWeight);
+  const align: TextAlign = style.textAlign === "center" ? "center" : style.textAlign === "right" ? "right" : style.textAlign === "justify" ? "justify" : "left";
+  return {
+    font: textFontFromFamily(style.fontFamily),
+    size: Math.max(8, Math.min(96, Math.round(Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size))),
+    color: cssColorToHex(style.color),
+    bold: document.queryCommandState("bold") || weight >= 600 || style.fontWeight === "bold",
+    italic: document.queryCommandState("italic") || style.fontStyle === "italic",
+    underline: document.queryCommandState("underline") || style.textDecorationLine.includes("underline"),
+    align,
+    strike: document.queryCommandState("strikeThrough") || style.textDecorationLine.includes("line-through"),
+    unordered: document.queryCommandState("insertUnorderedList"),
+    ordered: document.queryCommandState("insertOrderedList"),
+  };
+}
 
 const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "pointer", label: "Chọn", icon: MousePointer2 },
@@ -423,16 +466,19 @@ function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, inde
 }
 
 function normalizePage(page: NotePage): NotePage {
+  const normalizedText = normalizeText(page.text);
   return {
     ...page,
     body: page.body ?? "",
+    bodyHtml: sanitizeRichTextHtml(page.bodyHtml ?? plainTextToRichHtml(page.body ?? "")),
     strokes: Array.isArray(page.strokes) ? page.strokes : [],
     paper: normalizePaper(page.paper),
-    text: normalizeText(page.text),
+    text: page.bodyHtml == null && normalizedText.font === "handwriting" ? { ...normalizedText, font: "times" } : normalizedText,
     excerpts: Array.isArray(page.excerpts)
       ? page.excerpts.map((excerpt, index) => ({
           ...excerpt,
           sourceKind: excerpt.sourceKind ?? "pdf",
+          richText: excerpt.kind === "text" ? sanitizeRichTextHtml(excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")) : undefined,
           layout: normalizeExcerptLayout(excerpt.layout, index, excerpt.kind),
         }))
       : [],
@@ -464,6 +510,7 @@ function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEF
     id: uid("page"),
     title: `GHI CHÚ ${index}`,
     body: "",
+    bodyHtml: "",
     citationPage,
     strokes: [],
     paper: { ...paper },
@@ -618,6 +665,136 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]!);
 }
 
+function plainTextToRichHtml(value: string) {
+  return escapeHtml(value).replace(/\r\n?|\n/g, "<br>");
+}
+
+function sanitizeRichTextHtml(value: string) {
+  const template = document.createElement("template");
+  template.innerHTML = value;
+  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "UL", "OL", "LI"]);
+  const allowedStyles = ["fontFamily", "fontSize", "color", "fontWeight", "fontStyle", "textDecoration", "textAlign"] as const;
+  Array.from(template.content.querySelectorAll<HTMLElement>("*")).forEach((element) => {
+    if (!allowedTags.has(element.tagName)) {
+      if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(element.tagName)) {
+        element.remove();
+        return;
+      }
+      const parent = element.parentNode;
+      while (parent && element.firstChild) parent.insertBefore(element.firstChild, element);
+      element.remove();
+      return;
+    }
+    const styles = Object.fromEntries(allowedStyles.map((property) => [property, element.style[property]]));
+    const face = element.tagName === "FONT" ? element.getAttribute("face") : null;
+    const color = element.tagName === "FONT" ? element.getAttribute("color") : null;
+    const size = element.tagName === "FONT" ? element.getAttribute("size") : null;
+    Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
+    allowedStyles.forEach((property) => {
+      const styleValue = styles[property];
+      if (styleValue) element.style[property] = styleValue;
+    });
+    if (face) element.setAttribute("face", face);
+    if (color) element.setAttribute("color", color);
+    if (size && /^[1-7]$/.test(size)) element.setAttribute("size", size);
+  });
+  return template.innerHTML;
+}
+
+function rangeBelongsToEditor(range: Range, editor: HTMLElement) {
+  const container = range.commonAncestorContainer;
+  return container === editor || editor.contains(container.nodeType === Node.ELEMENT_NODE ? container : container.parentNode);
+}
+
+type RichTextEditorProps = {
+  editorId: string;
+  className: string;
+  html: string;
+  editable: boolean;
+  placeholder?: string;
+  ariaLabel: string;
+  autoFocus?: boolean;
+  onChange: (html: string, text: string) => void;
+  onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
+  onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
+};
+
+function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || editor.innerHTML === html || document.activeElement === editor) return;
+    editor.innerHTML = html;
+  }, [html]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editable || !autoFocus || !editor) return;
+    const frame = window.requestAnimationFrame(() => {
+      editor.focus({ preventScroll: true });
+      const selection = window.getSelection();
+      if (!selection) return;
+      const currentRange = selection.rangeCount ? selection.getRangeAt(0) : null;
+      if (currentRange && rangeBelongsToEditor(currentRange, editor)) {
+        onActivate(editorId, editor, currentRange.cloneRange());
+        return;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      onActivate(editorId, editor, range);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, editable, editorId, onActivate]);
+
+  const captureSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    onActivate(editorId, editor!, range && rangeBelongsToEditor(range, editor!) ? range.cloneRange() : null);
+  };
+
+  const emitChange = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    onNormalizeInput(editorId, editor);
+    onChange(sanitizeRichTextHtml(editor.innerHTML), editor.innerText.replace(/\u00a0/g, " "));
+    captureSelection();
+  };
+
+  return (
+    <div
+      ref={editorRef}
+      className={`${className} rich-text-editor`}
+      data-rich-editor-id={editorId}
+      data-placeholder={placeholder}
+      contentEditable={editable}
+      suppressContentEditableWarning
+      role="textbox"
+      aria-multiline="true"
+      aria-label={ariaLabel}
+      spellCheck={false}
+      onFocus={captureSelection}
+      onMouseUp={captureSelection}
+      onKeyUp={captureSelection}
+      onInput={emitChange}
+      onPaste={(event) => {
+        if (!editable) return;
+        event.preventDefault();
+        document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+      }}
+      onDrop={(event) => {
+        if (!editable) return;
+        event.preventDefault();
+        document.execCommand("insertText", false, event.dataTransfer.getData("text/plain"));
+      }}
+    />
+  );
+}
+
 function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
   const [source, setSource] = useState<string | null>(null);
   useEffect(() => {
@@ -646,13 +823,14 @@ type DraggableExcerptProps = {
   onSelect: (excerptId: string) => void;
   onMove: (excerptId: string, layout: ExcerptLayout) => void;
   onEdit: (excerptId: string, changes: Partial<NoteExcerpt>) => void;
+  onTextActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
+  onNormalizeTextInput: (editorId: string, editor: HTMLElement) => void;
   onOpenSource: (excerpt: NoteExcerpt) => void;
   onDelete: (excerptId: string) => void;
 };
 
-function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
+function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const [layout, setLayout] = useState(savedLayout);
   const interactionRef = useRef<{
@@ -670,15 +848,6 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
   useEffect(() => {
     if (!interactionRef.current) setLayout(savedLayout);
   }, [savedLayout.contentScale, savedLayout.height, savedLayout.width, savedLayout.x, savedLayout.y]);
-
-  useEffect(() => {
-    if (!editable) return;
-    const frame = window.requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      if (excerpt.sourceKind === "manual" && !excerpt.text) textareaRef.current?.setSelectionRange(0, 0);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [editable, excerpt.sourceKind]);
 
   const startInteraction = (event: React.PointerEvent<HTMLButtonElement>, mode: "move" | "resize") => {
     if (!movable) return;
@@ -770,14 +939,17 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       )}
       <div className="excerpt-content">
         {excerpt.kind === "text" ? (
-          <textarea
-            ref={textareaRef}
-            value={excerpt.text ?? ""}
-            onChange={(event) => onEdit(excerpt.id, { text: event.target.value })}
-            readOnly={!editable}
-            spellCheck={false}
+          <RichTextEditor
+            editorId={`excerpt:${excerpt.id}`}
+            className="excerpt-rich-editor"
+            html={excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}
+            editable={editable}
+            autoFocus={editable}
             placeholder={excerpt.sourceKind === "manual" ? "Nhập nội dung…" : undefined}
-            aria-label={excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
+            ariaLabel={excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
+            onChange={(richText, text) => onEdit(excerpt.id, { richText, text })}
+            onActivate={onTextActivate}
+            onNormalizeInput={onNormalizeTextInput}
           />
         ) : excerpt.assetId ? (
           <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
@@ -1478,6 +1650,10 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
+  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false });
+  const activeTextEditorRef = useRef<{ id: string; editor: HTMLElement } | null>(null);
+  const savedTextRangeRef = useRef<Range | null>(null);
+  const pendingFontSizeRef = useRef(new Map<string, number>());
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
   const [drivePanelOpen, setDrivePanelOpen] = useState(false);
   const [desktopGoogleClientId, setDesktopGoogleClientId] = useState(() => {
@@ -1503,6 +1679,100 @@ export default function Home() {
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
+
+  const activateTextEditor = useCallback((editorId: string, editor: HTMLElement, range: Range | null) => {
+    activeTextEditorRef.current = { id: editorId, editor };
+    savedTextRangeRef.current = range && rangeBelongsToEditor(range, editor) ? range.cloneRange() : null;
+    setTextToolbar(textSettingsAtRange(editor, range));
+  }, []);
+
+  const normalizeTextEditorInput = useCallback((editorId: string, editor: HTMLElement) => {
+    const fontSize = pendingFontSizeRef.current.get(editorId);
+    if (!fontSize) return;
+    editor.querySelectorAll<HTMLElement>('font[size="7"]').forEach((font) => {
+      font.style.fontSize = `${fontSize}px`;
+      font.removeAttribute("size");
+    });
+    editor.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+      if (element.style.fontSize === "xxx-large") element.style.fontSize = `${fontSize}px`;
+    });
+  }, []);
+
+  const restoreTextSelection = useCallback(() => {
+    const target = activeTextEditorRef.current;
+    if (!target?.editor.isConnected) return null;
+    const selection = window.getSelection();
+    if (!selection) return null;
+    let range = savedTextRangeRef.current;
+    if (!range || !rangeBelongsToEditor(range, target.editor)) {
+      range = document.createRange();
+      range.selectNodeContents(target.editor);
+      range.collapse(false);
+    }
+    target.editor.focus({ preventScroll: true });
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return target;
+  }, []);
+
+  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "bold" | "italic" | "underline" | "strike" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào nội dung hoặc bôi chọn chữ trước khi định dạng");
+      return;
+    }
+    document.execCommand("styleWithCSS", false, "true");
+    if (command === "font") {
+      const font = TEXT_FONTS.find((option) => option.id === value) ?? TEXT_FONTS[0];
+      document.execCommand("fontName", false, font.family);
+    } else if (command === "size") {
+      const size = Number(value);
+      pendingFontSizeRef.current.set(target.id, size);
+      document.execCommand("fontSize", false, "7");
+      normalizeTextEditorInput(target.id, target.editor);
+    } else if (command === "color") {
+      document.execCommand("foreColor", false, String(value));
+    } else {
+      const browserCommand = {
+        bold: "bold",
+        italic: "italic",
+        underline: "underline",
+        strike: "strikeThrough",
+        left: "justifyLeft",
+        center: "justifyCenter",
+        right: "justifyRight",
+        justify: "justifyFull",
+        bullets: "insertUnorderedList",
+        numbering: "insertOrderedList",
+        clear: "removeFormat",
+      }[command];
+      document.execCommand(browserCommand, false);
+    }
+    target.editor.dispatchEvent(new Event("input", { bubbles: true }));
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    activateTextEditor(target.id, target.editor, range);
+    setToast("Đã định dạng phần chữ đang chọn");
+  }, [activateTextEditor, normalizeTextEditorInput, restoreTextSelection]);
+
+  const focusTypeEditor = useCallback((editorId: string) => {
+    const existing = activeTextEditorRef.current;
+    if (existing?.id === editorId && existing.editor.isConnected) {
+      restoreTextSelection();
+      activateTextEditor(existing.id, existing.editor, savedTextRangeRef.current);
+      return;
+    }
+    const editor = Array.from(document.querySelectorAll<HTMLElement>("[data-rich-editor-id]")).find((candidate) => candidate.dataset.richEditorId === editorId);
+    if (!editor) return;
+    editor.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    activateTextEditor(editorId, editor, range);
+  }, [activateTextEditor, restoreTextSelection]);
   const activeReader = activeDocument?.reader ?? demoReader;
   const sourcePage = activeDocument?.reader.page ?? demoReader.page;
   const sourceZoom = activeReader.zoom;
@@ -1799,6 +2069,9 @@ export default function Home() {
 
   useEffect(() => {
     setSelectedExcerptId(null);
+    activeTextEditorRef.current = null;
+    savedTextRangeRef.current = null;
+    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false });
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
   const updateActiveNote = (changes: Partial<NotePage>) => {
@@ -1817,6 +2090,10 @@ export default function Home() {
       setNotePanel((panel) => panel === "shape" && activeTool === tool ? null : "shape");
     } else if (tool === "text" || tool === "textbox") {
       setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
+      if (tool === "text") {
+        const editorId = selectedExcerpt?.kind === "text" ? `excerpt:${selectedExcerpt.id}` : `body:${activeNote.id}`;
+        window.requestAnimationFrame(() => focusTypeEditor(editorId));
+      }
     } else {
       setNotePanel(null);
     }
@@ -1980,6 +2257,7 @@ export default function Home() {
       kind: "text",
       sourceKind: "pdf",
       text: textOverride ?? selection.text,
+      richText: plainTextToRichHtml(textOverride ?? selection.text),
       documentId: activeDocument.id,
       documentName: activeDocument.name,
       page: selection.page,
@@ -2058,6 +2336,7 @@ export default function Home() {
       kind: "text",
       sourceKind: "manual",
       text: "",
+      richText: "",
       createdAt: Date.now(),
       layout: { x, y, width, height, contentScale: 1 },
     };
@@ -2366,7 +2645,7 @@ export default function Home() {
       const textStyle = `font-family:${font.family};font-size:${text.size}px;color:${text.color === "auto" ? "#24343c" : text.color};font-weight:${text.bold ? 700 : 400};font-style:${text.italic ? "italic" : "normal"};text-decoration:${text.underline ? "underline" : "none"};text-align:${text.align}`;
       const excerptsHtml: string[] = [];
       for (const excerpt of page.excerpts) {
-        let content = excerpt.kind === "text" ? `<blockquote>${escapeHtml(excerpt.text ?? "")}</blockquote>` : "";
+        let content = excerpt.kind === "text" ? `<blockquote>${excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}</blockquote>` : "";
         if (excerpt.kind === "image" && excerpt.assetId) {
           const blob = await readLocalAsset(excerpt.assetId);
           if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
@@ -2376,7 +2655,7 @@ export default function Home() {
           : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
         excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
-      pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${escapeHtml(page.body).replace(/\n/g, "<br>")}</div>${excerptsHtml.join("")}</section>`);
+      pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
     }
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(activeNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(activeNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
@@ -2688,7 +2967,8 @@ export default function Home() {
   const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;
   const paperHeight = activeNote.paper.orientation === "portrait" ? selectedPaperSize.height : selectedPaperSize.width;
   const lineStep = activeNote.paper.template === "ruled-dense" ? 5 : 8;
-  const selectedTextFont = TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? TEXT_FONTS[0];
+  const defaultTextFont = TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? TEXT_FONTS[0];
+  const selectedToolbarFont = TEXT_FONTS.find((font) => font.id === textToolbar.font) ?? TEXT_FONTS[0];
   const paperStyle = {
     "--paper-ratio": `${paperWidth} / ${paperHeight}`,
     "--paper-max-width": `${activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32)}px`,
@@ -2698,7 +2978,7 @@ export default function Home() {
     "--cornell-header": `${(40 / paperHeight) * 100}%`,
   } as React.CSSProperties;
   const textLayerStyle = {
-    "--text-font": selectedTextFont.family,
+    "--text-font": defaultTextFont.family,
     "--text-size": `${activeNote.text.size}px`,
     "--text-color": activeNote.text.color === "auto" ? "var(--paper-ink)" : activeNote.text.color,
     "--text-weight": activeNote.text.bold ? 700 : 400,
@@ -3014,13 +3294,17 @@ export default function Home() {
 
           {notePanel === "text" && (
             <div className="floating-tool-panel text-format-panel" role="dialog" aria-label="Định dạng chữ">
-              <div className="tool-panel-heading"><div><strong>Type</strong><span>Định dạng nội dung chữ trên trang này</span></div><button className="icon-button compact" onClick={() => setNotePanel(null)} aria-label="Đóng"><X size={17} /></button></div>
-              <div className="text-control-row"><label>Font</label><select value={activeNote.text.font} style={{ fontFamily: selectedTextFont.family }} onChange={(event) => updateText({ font: event.target.value as TextFont })}>{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select><label>Cỡ</label><select className="font-size-select" value={activeNote.text.size} onChange={(event) => updateText({ size: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 24, 28, 32].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
-              <div className="text-toolbar-row">
-                <div className="text-style-buttons" aria-label="Kiểu chữ"><button className={activeNote.text.bold ? "selected" : ""} onClick={() => updateText({ bold: !activeNote.text.bold })} title="Đậm"><Bold size={17} /></button><button className={activeNote.text.italic ? "selected" : ""} onClick={() => updateText({ italic: !activeNote.text.italic })} title="Nghiêng"><Italic size={17} /></button><button className={activeNote.text.underline ? "selected" : ""} onClick={() => updateText({ underline: !activeNote.text.underline })} title="Gạch chân"><Underline size={17} /></button></div>
-                <div className="text-style-buttons" aria-label="Căn chữ"><button className={activeNote.text.align === "left" ? "selected" : ""} onClick={() => updateText({ align: "left" })} title="Căn trái"><AlignLeft size={17} /></button><button className={activeNote.text.align === "center" ? "selected" : ""} onClick={() => updateText({ align: "center" })} title="Căn giữa"><AlignCenter size={17} /></button><button className={activeNote.text.align === "right" ? "selected" : ""} onClick={() => updateText({ align: "right" })} title="Căn phải"><AlignRight size={17} /></button></div>
+              <div className="tool-panel-heading"><div><strong>Type</strong><span>Bôi chọn ký tự để định dạng cục bộ, như trong Word</span></div><button className="icon-button compact" onClick={() => setNotePanel(null)} aria-label="Đóng"><X size={17} /></button></div>
+              <div className="text-control-row word-font-row"><label>Font</label><select value={textToolbar.font} style={{ fontFamily: selectedToolbarFont.family }} onChange={(event) => applyTextCommand("font", event.target.value)}>{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select><label>Cỡ</label><select className="font-size-select" value={textToolbar.size} onChange={(event) => applyTextCommand("size", Number(event.target.value))}>{[10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 48].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
+              <div className="text-toolbar-row word-toolbar-row">
+                <div className="text-style-buttons" aria-label="Kiểu chữ"><button className={textToolbar.bold ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bold")} title="Đậm"><Bold size={17} /></button><button className={textToolbar.italic ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("italic")} title="Nghiêng"><Italic size={17} /></button><button className={textToolbar.underline ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("underline")} title="Gạch chân"><Underline size={17} /></button><button className={textToolbar.strike ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("strike")} title="Gạch ngang"><Strikethrough size={17} /></button></div>
+                <div className="text-style-buttons" aria-label="Danh sách"><button className={textToolbar.unordered ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bullets")} title="Danh sách dấu đầu dòng"><List size={17} /></button><button className={textToolbar.ordered ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Danh sách đánh số"><ListOrdered size={17} /></button><button onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("clear")} title="Xóa định dạng"><RemoveFormatting size={17} /></button></div>
               </div>
-              <div className="panel-setting"><label>Màu chữ</label><div className="color-options text-colors">{TEXT_COLORS.map((color) => color === "auto" ? <button key={color} className={`auto-color ${activeNote.text.color === "auto" ? "selected" : ""}`} onClick={() => updateText({ color: "auto" })} title="Tự đổi theo màu giấy">A</button> : <button key={color} className={`color-swatch ${activeNote.text.color === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onClick={() => updateText({ color })} aria-label={`Chọn màu ${color}`} />)}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={activeNote.text.color === "auto" ? "#26343a" : activeNote.text.color} onChange={(event) => updateText({ color: event.target.value })} /><span>+</span></label></div></div>
+              <div className="text-toolbar-row word-toolbar-row">
+                <div className="text-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={17} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={17} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={17} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={17} /></button></div>
+                <span className="selection-format-hint">Chọn chữ · rồi định dạng</span>
+              </div>
+              <div className="panel-setting"><label>Màu chữ</label><div className="color-options text-colors">{TEXT_COLORS.map((color) => { const resolvedColor = color === "auto" ? (activeNote.paper.color === "dark" ? "#edf3f4" : "#26343a") : color; return color === "auto" ? <button key={color} className={`auto-color ${textToolbar.color === resolvedColor ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", resolvedColor)} title="Màu chữ theo màu giấy">A</button> : <button key={color} className={`color-swatch ${textToolbar.color === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", color)} aria-label={`Chọn màu ${color}`} />; })}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={textToolbar.color === "auto" ? "#26343a" : textToolbar.color} onChange={(event) => applyTextCommand("color", event.target.value)} /><span>+</span></label></div></div>
             </div>
           )}
 
@@ -3059,16 +3343,20 @@ export default function Home() {
             <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
+              if (!(event.target as HTMLElement).closest("[data-rich-editor-id]")) {
+                activeTextEditorRef.current = null;
+                savedTextRangeRef.current = null;
+              }
               if (activeTool === "textbox") addTextBoxAt(event);
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
-                <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
+                <RichTextEditor editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" && selected} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" && selected} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
                   })}
                 </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
