@@ -21,7 +21,6 @@ import {
   Download,
   DownloadCloud,
   Eraser,
-  ExternalLink,
   FileText,
   FolderOpen,
   Hand,
@@ -249,6 +248,8 @@ const DB_NAME = "mednote-local";
 const DB_STORE = "documents";
 const DRIVE_MANIFEST_ID = "manifest:v1";
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
+const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
+const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "handwriting", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
@@ -1432,6 +1433,7 @@ export default function Home() {
   const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
   const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
+  const dictionaryAbortRef = useRef<AbortController | null>(null);
   const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("pages");
   const [outline, setOutline] = useState<PdfOutlineEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1456,6 +1458,10 @@ export default function Home() {
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
   const [drivePanelOpen, setDrivePanelOpen] = useState(false);
+  const [desktopGoogleClientId, setDesktopGoogleClientId] = useState(() => {
+    if (!IS_DESKTOP_APP) return "";
+    try { return localStorage.getItem(DESKTOP_GOOGLE_CLIENT_ID_KEY)?.trim() ?? ""; } catch { return ""; }
+  });
   const [driveToken, setDriveToken] = useState<string | null>(null);
   const [driveUser, setDriveUser] = useState<DriveUser | null>(null);
   const [driveStatus, setDriveStatus] = useState<"disconnected" | "connecting" | "connected" | "syncing" | "error">("disconnected");
@@ -1831,27 +1837,31 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!pdfSelection?.text) {
-      setDictionaryLookup({ status: "idle", sourceText: "", result: null, error: null });
-      return;
-    }
-    const sourceText = pdfSelection.text.replace(/\s+/g, " ").trim();
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setDictionaryLookup({ status: "loading", sourceText, result: null, error: null });
-      void lookupEnglishVietnamese(sourceText, controller.signal).then((result) => {
-        if (!controller.signal.aborted) setDictionaryLookup({ status: "ready", sourceText, result, error: null });
-      }).catch((error) => {
-        if (!controller.signal.aborted && (error as Error).name !== "AbortError") {
-          setDictionaryLookup({ status: "error", sourceText, result: null, error: error instanceof Error ? error.message : "Chưa thể tra từ điển." });
-        }
-      });
-    }, 320);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
+    dictionaryAbortRef.current?.abort();
+    dictionaryAbortRef.current = null;
+    setDictionaryLookup({
+      status: "idle",
+      sourceText: pdfSelection?.text.replace(/\s+/g, " ").trim() ?? "",
+      result: null,
+      error: null,
+    });
   }, [pdfSelection?.text]);
+
+  const requestDictionaryLookup = () => {
+    if (!pdfSelection?.text || dictionaryLookup.status === "loading") return;
+    const sourceText = pdfSelection.text.replace(/\s+/g, " ").trim();
+    dictionaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    dictionaryAbortRef.current = controller;
+    setDictionaryLookup({ status: "loading", sourceText, result: null, error: null });
+    void lookupEnglishVietnamese(sourceText, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setDictionaryLookup({ status: "ready", sourceText, result, error: null });
+    }).catch((error) => {
+      if (!controller.signal.aborted && (error as Error).name !== "AbortError") {
+        setDictionaryLookup({ status: "error", sourceText, result: null, error: error instanceof Error ? error.message : "Chưa thể tra từ điển." });
+      }
+    });
+  };
 
   const playDictionaryAudio = () => {
     const audioUrl = dictionaryLookup.result?.dictionary?.audioUrl;
@@ -2147,16 +2157,20 @@ export default function Home() {
 
   const connectDrive = async () => {
     setDrivePanelOpen(true);
-    if (!GOOGLE_CLIENT_ID) {
+    const clientId = IS_DESKTOP_APP ? desktopGoogleClientId.trim() : GOOGLE_CLIENT_ID;
+    if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) {
       setDriveStatus("error");
-      setDriveError("Bản triển khai chưa có Google Client ID");
+      setDriveError(IS_DESKTOP_APP ? "Nhập OAuth Client ID loại Desktop app để kết nối Drive" : "Bản triển khai chưa có Google Client ID");
       setToast("Cần cấu hình Google Client ID để bật Drive");
       return;
+    }
+    if (IS_DESKTOP_APP) {
+      try { localStorage.setItem(DESKTOP_GOOGLE_CLIENT_ID_KEY, clientId); } catch { /* keep the public client ID in memory */ }
     }
     setDriveStatus("connecting");
     setDriveError(null);
     try {
-      const token = await requestDriveToken(GOOGLE_CLIENT_ID);
+      const token = await requestDriveToken(clientId);
       const [user, files] = await Promise.all([getDriveUser(token), listDriveAppFiles(token)]);
       setDriveToken(token);
       setDriveUser(user);
@@ -2667,7 +2681,8 @@ export default function Home() {
               {driveStatus === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
               <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
               <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
-              {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Thử kết nối lại</button>}
+              {IS_DESKTOP_APP && driveStatus !== "connecting" && <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Chỉ cần Client ID, không nhập Client Secret.</small></label>}
+              {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
             </div>
           )}
         </aside>
@@ -2697,17 +2712,19 @@ export default function Home() {
       )}
 
       {pdfSelection && (
-        <div className={`pdf-selection-menu placement-${pdfSelection.menuPlacement}`} style={{ left: pdfSelection.menuX, top: pdfSelection.menuY, maxHeight: pdfSelection.menuMaxHeight }} role="dialog" aria-label="Tra từ và thao tác với đoạn chữ đã chọn">
+        <div className={`pdf-selection-menu placement-${pdfSelection.menuPlacement} ${dictionaryLookup.status === "idle" ? "compact" : "translation-open"}`} style={{ left: pdfSelection.menuX, top: pdfSelection.menuY, maxHeight: pdfSelection.menuMaxHeight }} role="dialog" aria-label="Tra từ và thao tác với đoạn chữ đã chọn">
           <div className="pdf-selection-actions" role="toolbar" aria-label="Thao tác với đoạn chữ">
-            <button onClick={() => { void copyPdfSelection(); }}><Copy size={14} /> Sao chép</button>
-            <button onClick={() => addPdfMarkup("highlight")}><Highlighter size={14} /> Tô sáng</button>
-            <button onClick={() => addPdfMarkup("underline")}><Underline size={14} /> Gạch chân</button>
-            <button onClick={() => addPdfMarkup("strikeout")}><Strikethrough size={14} /> Gạch ngang</button>
-            <button className="send-note" onClick={() => addTextExcerpt()}><NotebookTabs size={14} /> Sang note</button>
+            <button onClick={() => { void copyPdfSelection(); }} aria-label="Sao chép" title="Sao chép"><Copy size={14} /> Chép</button>
+            <button onClick={requestDictionaryLookup} disabled={dictionaryLookup.status === "loading"} aria-label="Dịch Anh sang Việt" title="Dịch Anh sang Việt"><Languages size={14} /> Dịch</button>
+            <button onClick={() => addPdfMarkup("highlight")} aria-label="Tô sáng" title="Tô sáng"><Highlighter size={14} /> Tô</button>
+            <button onClick={() => addPdfMarkup("underline")} aria-label="Gạch chân" title="Gạch chân"><Underline size={14} /> Chân</button>
+            <button onClick={() => addPdfMarkup("strikeout")} aria-label="Gạch ngang" title="Gạch ngang"><Strikethrough size={14} /> Ngang</button>
+            <button className="send-note" onClick={() => addTextExcerpt()} aria-label="Đưa sang note" title="Đưa sang note"><NotebookTabs size={14} /> Note</button>
+            <button onClick={openOxfordLookup} aria-label="Tra Oxford" title="Tra Oxford"><BookOpen size={14} /> Oxford</button>
             <button className="close-selection" onClick={() => { setPdfSelection(null); window.getSelection()?.removeAllRanges(); }} aria-label="Đóng"><X size={14} /></button>
           </div>
-          <section className="selection-dictionary" aria-live="polite">
-            <header><span><Languages size={15} /><b>Anh → Việt</b></span><button className="oxford-link" onClick={openOxfordLookup}>Tra Oxford <ExternalLink size={12} /></button></header>
+          {dictionaryLookup.status !== "idle" && <section className="selection-dictionary" aria-live="polite">
+            <header><span><Languages size={15} /><b>Anh → Việt</b></span></header>
             <p className="dictionary-source-text">{dictionaryLookup.sourceText || pdfSelection.text}</p>
             {dictionaryLookup.status === "loading" && <div className="dictionary-loading"><RefreshCw size={14} /> Đang tìm nghĩa và đề xuất bản dịch…</div>}
             {dictionaryLookup.status === "error" && <p className="dictionary-error">{dictionaryLookup.error}</p>}
@@ -2724,7 +2741,7 @@ export default function Home() {
                     <small>Gợi ý dịch</small>
                     <strong>{dictionaryLookup.result.translation}</strong>
                     {dictionaryLookup.result.alternatives.length > 0 && <p>Khác: {dictionaryLookup.result.alternatives.join(" · ")}</p>}
-                    <div><button onClick={() => { void copyTranslation(); }}><Copy size={13} /> Sao chép nghĩa</button><button className="send-translation" onClick={addTranslationExcerpt}><NotebookTabs size={13} /> Đưa cả bản dịch sang note</button></div>
+                    <div><button onClick={() => { void copyTranslation(); }} aria-label="Sao chép bản dịch" title="Sao chép bản dịch"><Copy size={13} /> Chép</button><button className="send-translation" onClick={addTranslationExcerpt} aria-label="Đưa bản dịch sang note" title="Đưa bản dịch sang note"><NotebookTabs size={13} /> Note</button></div>
                   </div>
                 ) : <p className="dictionary-error">{dictionaryLookup.result.translationError ?? "Chưa tìm thấy gợi ý dịch phù hợp."}</p>}
                 {dictionaryLookup.result.dictionary?.meanings.length ? (
@@ -2736,7 +2753,7 @@ export default function Home() {
               </>
             )}
             <footer>Nghĩa mở: Wiktionary (CC BY-SA) · gợi ý dịch online: MyMemory. Oxford mở ở trang chính thức.</footer>
-          </section>
+          </section>}
         </div>
       )}
 

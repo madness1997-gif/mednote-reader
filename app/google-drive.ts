@@ -16,6 +16,11 @@ type TokenClient = {
 
 declare global {
   interface Window {
+    mednoteDesktop?: {
+      isDesktop: true;
+      authorizeDrive: (clientId: string) => Promise<string>;
+      revokeDrive: (token: string) => Promise<void>;
+    };
     google?: {
       accounts: {
         oauth2: {
@@ -69,6 +74,7 @@ function loadGoogleIdentityServices() {
 
 export async function requestDriveToken(clientId: string) {
   if (!clientId) throw new Error("Ứng dụng chưa được cấu hình Google Client ID");
+  if (window.mednoteDesktop?.isDesktop) return window.mednoteDesktop.authorizeDrive(clientId);
   await loadGoogleIdentityServices();
   return new Promise<string>((resolve, reject) => {
     const client = window.google!.accounts.oauth2.initTokenClient({
@@ -84,6 +90,10 @@ export async function requestDriveToken(clientId: string) {
 }
 
 export function revokeDriveToken(token: string) {
+  if (window.mednoteDesktop?.isDesktop) {
+    void window.mednoteDesktop.revokeDrive(token);
+    return;
+  }
   window.google?.accounts.oauth2.revoke(token);
 }
 

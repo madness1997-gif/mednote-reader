@@ -1,0 +1,26 @@
+name: Build MedNote for Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MedNote-Reader-Windows
+          path: release/MedNote-Reader-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
