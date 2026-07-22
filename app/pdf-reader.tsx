@@ -2,6 +2,7 @@
 
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PDFiumDocument } from "./pdfium-renderer";
 
 export type PdfTool = "pan" | "select" | "highlight" | "underline" | "strikeout" | "pen" | "eraser" | "crop";
 export type PdfFitMode = "width" | "page";
@@ -262,6 +263,7 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
 
 type PdfPageViewProps = {
   document: PDFDocumentProxy;
+  pdfiumDocument?: PDFiumDocument | null;
   page: number;
   zoom: number;
   fitMode: PdfFitMode;
@@ -280,6 +282,7 @@ type PdfPageViewProps = {
 
 export function PdfPageView({
   document,
+  pdfiumDocument = null,
   page,
   zoom,
   fitMode,
@@ -356,9 +359,50 @@ export function PdfPageView({
       canvas.style.height = `${nextViewport.height}px`;
       const context = canvas.getContext("2d");
       if (!context) return;
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      renderTask = pdfPage.render({ canvas, canvasContext: context, viewport: nextViewport });
-      await renderTask.promise;
+
+      let renderedWithPdfium = false;
+      if (pdfiumDocument) {
+        try {
+          const unrotatedViewport = pdfPage.getViewport({ scale, rotation: 0 });
+          const pdfiumPage = pdfiumDocument.getPage(page - 1);
+          const bitmap = await pdfiumPage.render({
+            width: Math.max(1, Math.round(unrotatedViewport.width * ratio)),
+            height: Math.max(1, Math.round(unrotatedViewport.height * ratio)),
+          });
+          if (disposed) return;
+          const source = window.document.createElement("canvas");
+          source.width = bitmap.width;
+          source.height = bitmap.height;
+          const sourceContext = source.getContext("2d");
+          if (!sourceContext) throw new Error("Không thể tạo canvas PDFium");
+          sourceContext.putImageData(new ImageData(new Uint8ClampedArray(bitmap.data), bitmap.width, bitmap.height), 0, 0);
+
+          context.save();
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          const normalizedRotation = ((rotation % 360) + 360) % 360;
+          if (normalizedRotation === 90) {
+            context.translate(canvas.width, 0);
+            context.rotate(Math.PI / 2);
+          } else if (normalizedRotation === 180) {
+            context.translate(canvas.width, canvas.height);
+            context.rotate(Math.PI);
+          } else if (normalizedRotation === 270) {
+            context.translate(0, canvas.height);
+            context.rotate(-Math.PI / 2);
+          }
+          context.drawImage(source, 0, 0);
+          context.restore();
+          renderedWithPdfium = true;
+        } catch {
+          // PDF.js remains a safe fallback if PDFium cannot open a specific page.
+        }
+      }
+      if (!renderedWithPdfium) {
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        renderTask = pdfPage.render({ canvas, canvasContext: context, viewport: nextViewport });
+        await renderTask.promise;
+      }
       if (disposed) return;
 
       textContainer.replaceChildren();
@@ -391,7 +435,7 @@ export function PdfPageView({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [continuous, document, fitMode, hostSize.height, hostSize.width, page, rotation, searchQuery, zoom]);
+  }, [continuous, document, fitMode, hostSize.height, hostSize.width, page, pdfiumDocument, rotation, searchQuery, zoom]);
 
   const pageAnnotations = useMemo(() => annotations.filter((annotation) => annotation.page === page), [annotations, page]);
   const inkAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfInkAnnotation => annotation.kind === "ink"), [pageAnnotations]);

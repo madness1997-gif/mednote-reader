@@ -93,8 +93,9 @@ import {
   type EnglishVietnameseLookup,
 } from "./dictionary";
 import { pdfDocumentOptions } from "./pdf-config";
+import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 
-type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
+type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox";
 type InkTool = "pen" | "highlight" | "shape";
 type PenStyle = "ballpoint" | "fountain" | "pencil" | "brush";
 type ShapeKind = "line" | "arrow" | "rectangle" | "ellipse" | "circle";
@@ -160,11 +161,12 @@ type NotePage = {
 type NoteExcerpt = {
   id: string;
   kind: "text" | "image";
+  sourceKind?: "pdf" | "manual";
   text?: string;
   assetId?: string;
-  documentId: string;
-  documentName: string;
-  page: number;
+  documentId?: string;
+  documentName?: string;
+  page?: number;
   rect?: PdfRect;
   createdAt: number;
   layout?: ExcerptLayout;
@@ -320,6 +322,7 @@ const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "lasso", label: "Khoanh chọn", icon: Lasso },
   { id: "shape", label: "Hình học", icon: Shapes },
   { id: "text", label: "Nhập chữ", icon: TextCursorInput },
+  { id: "textbox", label: "Tạo hộp chữ", icon: ScanText },
 ];
 
 const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof MousePointer2 }[] = [
@@ -427,7 +430,11 @@ function normalizePage(page: NotePage): NotePage {
     paper: normalizePaper(page.paper),
     text: normalizeText(page.text),
     excerpts: Array.isArray(page.excerpts)
-      ? page.excerpts.map((excerpt, index) => ({ ...excerpt, layout: normalizeExcerptLayout(excerpt.layout, index, excerpt.kind) }))
+      ? page.excerpts.map((excerpt, index) => ({
+          ...excerpt,
+          sourceKind: excerpt.sourceKind ?? "pdf",
+          layout: normalizeExcerptLayout(excerpt.layout, index, excerpt.kind),
+        }))
       : [],
   };
 }
@@ -633,6 +640,7 @@ type DraggableExcerptProps = {
   excerpt: NoteExcerpt;
   index: number;
   selected: boolean;
+  selectable: boolean;
   movable: boolean;
   editable: boolean;
   onSelect: (excerptId: string) => void;
@@ -642,8 +650,9 @@ type DraggableExcerptProps = {
   onDelete: (excerptId: string) => void;
 };
 
-function DraggableExcerpt({ excerpt, index, selected, movable, editable, onSelect, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
+function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const [layout, setLayout] = useState(savedLayout);
   const interactionRef = useRef<{
@@ -661,6 +670,15 @@ function DraggableExcerpt({ excerpt, index, selected, movable, editable, onSelec
   useEffect(() => {
     if (!interactionRef.current) setLayout(savedLayout);
   }, [savedLayout.contentScale, savedLayout.height, savedLayout.width, savedLayout.x, savedLayout.y]);
+
+  useEffect(() => {
+    if (!editable) return;
+    const frame = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      if (excerpt.sourceKind === "manual" && !excerpt.text) textareaRef.current?.setSelectionRange(0, 0);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editable, excerpt.sourceKind]);
 
   const startInteraction = (event: React.PointerEvent<HTMLButtonElement>, mode: "move" | "resize") => {
     if (!movable) return;
@@ -720,16 +738,16 @@ function DraggableExcerpt({ excerpt, index, selected, movable, editable, onSelec
   return (
     <article
       ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
-      style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%`, zIndex: index + 1 }}
+      className={`note-excerpt excerpt-${excerpt.kind} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
+      style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%`, zIndex: index + 1, "--excerpt-content-scale": layout.contentScale } as React.CSSProperties}
       onPointerDown={(event) => {
-        if (!movable) return;
+        if (!selectable) return;
         event.stopPropagation();
         onSelect(excerpt.id);
       }}
       aria-selected={selected}
     >
-      {(movable || editable) && (
+      {selected && (movable || editable) && (
         <div className="excerpt-object-controls">
           <button
             className="excerpt-drag-handle"
@@ -747,24 +765,26 @@ function DraggableExcerpt({ excerpt, index, selected, movable, editable, onSelec
             <button onClick={() => changeContentScale(.12)} disabled={!movable || layout.contentScale >= 2.4} title="Phóng to nội dung" aria-label="Phóng to nội dung"><Plus size={12} /></button>
           </span>
           {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : "Chữ"}</span>}
+          <button className="excerpt-delete-control" onClick={() => onDelete(excerpt.id)} aria-label="Xóa khung" title="Xóa khung"><Trash2 size={12} /></button>
         </div>
       )}
       <div className="excerpt-content">
         {excerpt.kind === "text" ? (
           <textarea
+            ref={textareaRef}
             value={excerpt.text ?? ""}
             onChange={(event) => onEdit(excerpt.id, { text: event.target.value })}
             readOnly={!editable}
             spellCheck={false}
-            style={{ fontSize: `${11 * layout.contentScale}px` }}
-            aria-label="Nội dung đoạn chữ đưa từ PDF"
+            placeholder={excerpt.sourceKind === "manual" ? "Nhập nội dung…" : undefined}
+            aria-label={excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
           />
         ) : excerpt.assetId ? (
-          <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName}, trang ${excerpt.page}`} /></div></div>
+          <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
         ) : <span>Không tìm thấy ảnh</span>}
       </div>
-      <div className="excerpt-source"><button onClick={() => onOpenSource(excerpt)} title="Quay lại đúng vị trí nguồn">{excerpt.kind === "image" ? <Image size={13} /> : <BookOpen size={13} />}<span>{excerpt.documentName} · trang {excerpt.page}</span></button><button className="delete-excerpt" onClick={() => onDelete(excerpt.id)} aria-label="Xóa trích dẫn"><X size={13} /></button></div>
-      {movable && <button
+      {excerpt.sourceKind !== "manual" && excerpt.documentId && excerpt.page && <div className="excerpt-source"><button onClick={() => onOpenSource(excerpt)} title="Quay lại đúng vị trí nguồn">{excerpt.kind === "image" ? <Image size={13} /> : <BookOpen size={13} />}<span>{excerpt.documentName} · trang {excerpt.page}</span></button></div>}
+      {selected && movable && <button
         className="excerpt-resize-handle"
         onPointerDown={(event) => startInteraction(event, "resize")}
         onPointerMove={updateInteraction}
@@ -1449,6 +1469,7 @@ export default function Home() {
   const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});
   const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [pdfiumDocument, setPdfiumDocument] = useState<PDFiumDocument | null>(null);
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
   const [readerShare, setReaderShare] = useState(50);
@@ -1665,6 +1686,7 @@ export default function Home() {
     let cancelled = false;
     setPdfSource(null);
     setPdfDocument(null);
+    setPdfiumDocument(null);
     setLoadedDocumentId(null);
     if (!activeDocument) {
       setPdfStatus("idle");
@@ -1686,13 +1708,25 @@ export default function Home() {
     if (!pdfSource) return undefined;
     let disposed = false;
     let document: PDFDocumentProxy | null = null;
+    let highFidelityDocument: PDFiumDocument | null = null;
     void pdfSource.blob.arrayBuffer().then(async (buffer) => {
       const pdfjs = await import("pdfjs-dist");
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-      const task = pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(buffer)));
-      document = await task.promise;
-      if (!disposed) {
+      const bytes = new Uint8Array(buffer);
+      const task = pdfjs.getDocument(pdfDocumentOptions(bytes.slice()));
+      const [pdfjsResult, pdfiumResult] = await Promise.allSettled([
+        task.promise,
+        loadPdfiumDocument(bytes),
+      ]);
+      if (pdfjsResult.status === "rejected") throw pdfjsResult.reason;
+      document = pdfjsResult.value;
+      highFidelityDocument = pdfiumResult.status === "fulfilled" ? pdfiumResult.value : null;
+      if (disposed) {
+        void document.destroy();
+        highFidelityDocument?.destroy();
+      } else {
         setPdfDocument(document);
+        setPdfiumDocument(highFidelityDocument);
         setLoadedDocumentId(pdfSource.documentId);
         setWorkspaces((items) => items.map((workspace) => ({
           ...workspace,
@@ -1712,7 +1746,13 @@ export default function Home() {
         setToast("Không thể mở PDF này");
       }
     });
-    return () => { disposed = true; void document?.destroy(); };
+    return () => {
+      disposed = true;
+      void document?.destroy();
+      // A PDFium render already in flight cannot be cancelled. Delay disposal
+      // slightly so a page being unmounted can finish its current bitmap pass.
+      if (highFidelityDocument) window.setTimeout(() => highFidelityDocument?.destroy(), 500);
+    };
   }, [pdfSource]);
 
   useEffect(() => {
@@ -1769,11 +1809,12 @@ export default function Home() {
 
   const chooseNoteTool = (tool: Tool) => {
     setActiveTool(tool);
+    if (tool !== "pointer" && tool !== "text") setSelectedExcerptId(null);
     if (tool === "pen" || tool === "highlight") {
       setNotePanel((panel) => panel === "ink" && activeTool === tool ? null : "ink");
     } else if (tool === "shape") {
       setNotePanel((panel) => panel === "shape" && activeTool === tool ? null : "shape");
-    } else if (tool === "text") {
+    } else if (tool === "text" || tool === "textbox") {
       setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
     } else {
       setNotePanel(null);
@@ -1936,6 +1977,7 @@ export default function Home() {
     const excerpt: NoteExcerpt = {
       id: uid("excerpt"),
       kind: "text",
+      sourceKind: "pdf",
       text: textOverride ?? selection.text,
       documentId: activeDocument.id,
       documentName: activeDocument.name,
@@ -1945,6 +1987,9 @@ export default function Home() {
       layout: defaultExcerptLayout(activeNote.excerpts.length, "text"),
     };
     updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: selection.page });
+    setSelectedExcerptId(excerpt.id);
+    setActiveTool("pointer");
+    setNotePanel(null);
     window.getSelection()?.removeAllRanges();
     setPdfSelection(null);
     setToast("Đã đưa đoạn trích sang note");
@@ -1964,6 +2009,7 @@ export default function Home() {
       const excerpt: NoteExcerpt = {
         id: uid("excerpt"),
         kind: "image",
+        sourceKind: "pdf",
         assetId,
         documentId: activeDocument.id,
         documentName: activeDocument.name,
@@ -1973,6 +2019,9 @@ export default function Home() {
         layout: defaultExcerptLayout(activeNote.excerpts.length, "image"),
       };
       updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: result.page });
+      setSelectedExcerptId(excerpt.id);
+      setActiveTool("pointer");
+      setNotePanel(null);
       setPdfTool("pan");
       setToast("Đã cắt hình và đưa sang note");
     } catch {
@@ -1995,6 +2044,29 @@ export default function Home() {
     updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, ...changes } : excerpt) });
   };
 
+  const addTextBoxAt = (event: React.PointerEvent<HTMLElement>) => {
+    const host = event.currentTarget.querySelector<HTMLElement>(".typed-layer");
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const width = .36;
+    const height = .18;
+    const x = Math.min(1 - width, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const y = Math.min(1 - height, Math.max(.065, (event.clientY - rect.top) / rect.height));
+    const excerpt: NoteExcerpt = {
+      id: uid("textbox"),
+      kind: "text",
+      sourceKind: "manual",
+      text: "",
+      createdAt: Date.now(),
+      layout: { x, y, width, height, contentScale: 1 },
+    };
+    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
+    setSelectedExcerptId(excerpt.id);
+    setActiveTool("text");
+    setNotePanel("text");
+    setToast("Đã tạo hộp chữ — nhập nội dung ngay");
+  };
+
   const shiftExcerptLayer = (direction: "forward" | "backward") => {
     if (!selectedExcerpt || selectedExcerptIndex < 0) return;
     const targetIndex = selectedExcerptIndex + (direction === "forward" ? 1 : -1);
@@ -2006,6 +2078,7 @@ export default function Home() {
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
+    if (excerpt.sourceKind === "manual" || !excerpt.documentId || !excerpt.page) return;
     if (!activeWorkspace.documents.some((document) => document.id === excerpt.documentId)) {
       setToast("Tài liệu nguồn đã bị xóa khỏi cụm");
       return;
@@ -2014,7 +2087,7 @@ export default function Home() {
       goToPage(excerpt.page);
       if (excerpt.rect) {
         setSourceFocus({ documentId: excerpt.documentId, page: excerpt.page, rect: excerpt.rect });
-        window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === excerpt.documentId && focus.page === excerpt.page ? null : focus), 3600);
+        window.setTimeout(() => setSourceFocus((focus) => focus && focus.documentId === excerpt.documentId && focus.page === excerpt.page ? null : focus), 3600);
       }
     } else {
       switchDocument(excerpt.documentId, excerpt.page, excerpt.rect);
@@ -2296,7 +2369,10 @@ export default function Home() {
           const blob = await readLocalAsset(excerpt.assetId);
           if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
         }
-        excerptsHtml.push(`<figure>${content}<figcaption>${escapeHtml(excerpt.documentName)} — trang ${excerpt.page}</figcaption></figure>`);
+        const caption = excerpt.sourceKind === "manual"
+          ? "Hộp chữ"
+          : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
+        excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
       pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${escapeHtml(page.body).replace(/\n/g, "<br>")}</div>${excerptsHtml.join("")}</section>`);
     }
@@ -2863,9 +2939,9 @@ export default function Home() {
           )}
 
           <div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
-            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
               <div className="continuous-pages">
-                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(page, next, previous)} onCrop={addImageExcerpt} />)}
+                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(page, next, previous)} onCrop={addImageExcerpt} />)}
               </div>
             ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
@@ -2897,9 +2973,9 @@ export default function Home() {
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster note-tool-cluster">
                 {tools.map(({ id, label, icon: Icon }) => {
-                  const hasPanel = ["pen", "highlight", "shape", "text"].includes(id);
-                  const shortLabel = id === "text" ? "Type" : label;
-                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
+                  const hasPanel = ["pen", "highlight", "shape", "text", "textbox"].includes(id);
+                  const shortLabel = id === "text" ? "Type" : id === "textbox" ? "Text box" : label;
+                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
                 })}
               </div>
               <span className="toolbar-spacer" />
@@ -2975,25 +3051,29 @@ export default function Home() {
           )}
 
           <div className="note-stage workspace-frame">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
-              if (activeTool === "pointer" && !(event.target as HTMLElement).closest(".note-excerpt")) setSelectedExcerptId(null);
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+              if ((event.target as HTMLElement).closest(".note-excerpt")) return;
+              setSelectedExcerptId(null);
+              if (activeTool === "textbox") addTextBoxAt(event);
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
                 <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
-                {activeNote.excerpts.length > 0 && (
-                  <div className="note-excerpts" aria-label="Trích dẫn từ PDF">
-                    {activeNote.excerpts.map((excerpt, index) => <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={excerpt.id === selectedExcerptId} movable={activeTool === "pointer"} editable={activeTool === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />)}
-                  </div>
-                )}
+                <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
+                  {activeNote.excerpts.map((excerpt, index) => {
+                    const selected = excerpt.id === selectedExcerptId;
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" && selected} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                  })}
+                </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
               <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
+              {activeTool === "textbox" && <div className="mode-hint">Bấm vị trí muốn đặt hộp chữ</div>}
               {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo để di chuyển · kéo góc để đổi khung</div>}
             </article>
-            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Kéo khung để di chuyển, kéo góc dưới phải để đổi kích thước" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Kéo khung để di chuyển, kéo góc dưới phải để đổi kích thước" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
 

@@ -16,5 +16,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "app/page.tsx", "app/pdf-worker.d.ts", "vite.github.config.ts", "vite.desktop.config.ts", "vite.pdf-assets.ts"]
+  "include": ["src", "app/page.tsx", "app/pdf-reader.tsx", "app/pdfium-renderer.ts", "app/pdf-worker.d.ts", "vite.github.config.ts", "vite.desktop.config.ts", "vite.pdf-assets.ts"]
 }

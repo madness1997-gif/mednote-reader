@@ -433,6 +433,7 @@ body {
 .note-excerpts { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
 .note-excerpt { position: absolute; min-width: 118px; min-height: 96px; display: flex; flex-direction: column; overflow: visible; border: 1px solid color-mix(in srgb, var(--paper-accent) 30%, var(--paper-line)); border-radius: 9px; background: color-mix(in srgb, var(--paper-bg) 90%, white); box-shadow: 0 2px 7px rgba(24,50,74,.09); pointer-events: none; }
 .note-paper.object-mode .note-excerpt { pointer-events: auto; }
+.note-paper:has(.ink-surface.tool-textbox) { cursor: text; }
 .note-excerpt.movable { border-color: color-mix(in srgb, var(--paper-accent) 68%, var(--paper-line)); box-shadow: 0 4px 13px rgba(24,50,74,.16); }
 .note-excerpt.selected { border-color: var(--paper-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper-accent) 24%, transparent), 0 6px 17px rgba(24,50,74,.2); }
 .note-excerpt.editable { border-color: color-mix(in srgb, var(--paper-accent) 52%, var(--paper-line)); }
@@ -447,8 +448,13 @@ body {
 .excerpt-scale-controls button:disabled { color: #aeb9bd; cursor: default; }
 .excerpt-scale-controls b { min-width: 34px; color: var(--muted); font-size: 8px; text-align: center; }
 .excerpt-edit-indicator { display: inline-flex; align-items: center; gap: 3px; padding: 0 3px; color: var(--paper-accent); font-size: 8px; font-weight: 700; }
+.excerpt-delete-control { width: 22px; height: 21px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #aa555b; cursor: pointer; }
+.excerpt-delete-control:hover { background: #fff0f0; }
 .excerpt-content { flex: 1; min-height: 0; padding: 10px; overflow: hidden; border-radius: 8px 8px 0 0; }
-.excerpt-content textarea { width: 100%; height: 100%; display: block; resize: none; padding: 0; overflow: auto; border: 0; outline: 0; background: transparent; color: var(--paper-ink); font-family: Georgia, "Times New Roman", serif; font-style: italic; line-height: 1.45; }
+.excerpt-content textarea { width: 100%; height: 100%; display: block; resize: none; padding: 0; overflow: auto; border: 0; outline: 0; background: transparent; color: var(--paper-ink); font-family: Georgia, "Times New Roman", serif; font-size: calc(11px * var(--excerpt-content-scale, 1)); font-style: italic; line-height: 1.45; }
+.excerpt-manual .excerpt-content { padding: 8px; border-radius: 8px; }
+.excerpt-manual .excerpt-content textarea { color: var(--text-color, var(--paper-ink)); font-family: var(--text-font, "Segoe UI", sans-serif); font-size: calc(var(--text-size, 15px) * var(--excerpt-content-scale, 1)); font-style: var(--text-style, normal); font-weight: var(--text-weight, 400); line-height: 1.45; text-align: var(--text-align, left); text-decoration: var(--text-decoration, none); }
+.excerpt-manual .excerpt-content textarea::placeholder { color: color-mix(in srgb, var(--paper-ink) 45%, transparent); }
 .excerpt-content textarea:read-only { cursor: default; }
 .excerpt-content textarea:not(:read-only) { border-radius: 5px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper-accent) 28%, transparent); padding: 5px; cursor: text; }
 .excerpt-image-viewport, .excerpt-image-viewport > div { width: 100%; height: 100%; }
@@ -456,14 +462,13 @@ body {
 .excerpt-image-viewport > div { transform-origin: center; transition: transform .12s ease; }
 .excerpt-content img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .excerpt-image-loading { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: 9px; }
-.excerpt-source { height: 30px; flex: 0 0 30px; display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; overflow: hidden; border-top: 1px solid var(--paper-line); border-radius: 0 0 8px 8px; background: color-mix(in srgb, var(--paper-accent) 8%, transparent); }
-.excerpt-source button { min-width: 0; height: 100%; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--paper-accent); font-size: 8px; font-weight: 700; cursor: pointer; }
+.excerpt-source { height: 30px; flex: 0 0 30px; display: block; overflow: hidden; border-top: 1px solid var(--paper-line); border-radius: 0 0 8px 8px; background: color-mix(in srgb, var(--paper-accent) 8%, transparent); }
+.excerpt-source button { min-width: 0; width: 100%; height: 100%; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--paper-accent); font-size: 8px; font-weight: 700; cursor: pointer; }
 .excerpt-source button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.excerpt-source .delete-excerpt { justify-content: center; padding: 0; color: #a46b6f; }
 .excerpt-source button:hover { background: color-mix(in srgb, var(--paper-accent) 10%, transparent); }
 .excerpt-resize-handle { position: absolute; right: -8px; bottom: -8px; z-index: 6; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--paper-accent); color: white; box-shadow: 0 2px 7px rgba(24,50,74,.25); cursor: nwse-resize; touch-action: none; }
 .ink-surface { position: absolute; inset: 0; z-index: 2; touch-action: none; }
-.ink-surface.tool-text, .ink-surface.tool-pointer { pointer-events: none; }
+.ink-surface.tool-text, .ink-surface.tool-textbox, .ink-surface.tool-pointer { pointer-events: none; }
 .ink-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .ink-surface.tool-eraser .ink-canvas { cursor: cell; }
 .ink-surface.tool-lasso .ink-canvas { cursor: crosshair; }
