@@ -40,6 +40,8 @@ import {
   MousePointer2,
   Move,
   NotebookTabs,
+  Omega,
+  PaintBucket,
   PanelLeftOpen,
   Pencil,
   PenLine,
@@ -54,8 +56,10 @@ import {
   Search,
   Settings2,
   Shapes,
+  Sigma,
   Square,
   Strikethrough,
+  Table2,
   TextSelect,
   TextCursorInput,
   Trash2,
@@ -126,6 +130,9 @@ type TextFont =
   | "cascadia"
   | "mono";
 type TextAlign = "left" | "center" | "right" | "justify";
+type TextLineHeight = "1" | "1.15" | "1.5" | "1.8" | "2";
+type BulletStyle = "disc" | "circle" | "square" | "dash";
+type TableBorderStyle = "solid" | "dashed" | "dotted" | "double";
 type TextSettings = {
   font: TextFont;
   size: number;
@@ -139,7 +146,12 @@ type TextToolbarState = TextSettings & {
   strike: boolean;
   unordered: boolean;
   ordered: boolean;
+  backgroundColor: string;
+  lineHeight: TextLineHeight;
+  bulletStyle: BulletStyle;
 };
+type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
+type TextInsertPopover = "symbols" | "equation" | "table" | null;
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
   id: string;
@@ -323,13 +335,46 @@ const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
 ];
 
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
-const TEXT_COLORS = ["auto", "#111111", "#2465a8", "#c94b50", "#16836f"];
+const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ccebf3", "#d8f1dc", "#f7d5dd"];
+const SYMBOL_GROUPS = [
+  { label: "Toán", symbols: ["±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "√", "∑", "∫", "∆"] },
+  { label: "Hy Lạp", symbols: ["α", "β", "γ", "δ", "θ", "λ", "μ", "π", "σ", "φ", "Ω"] },
+  { label: "Y học", symbols: ["°", "‰", "µ", "→", "←", "↔", "↑", "↓", "♂", "♀", "®", "©"] },
+];
+const EQUATION_PRESETS = ["x² + y² = z²", "x₁ + x₂", "a⁄b", "√x", "∑ᵢ₌₁ⁿ xᵢ", "∫ₐᵇ f(x)dx", "Δx⁄Δt", "μ ± σ"];
 
 function cssColorToHex(color: string) {
   if (color.startsWith("#")) return color;
   const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
   if (!channels || channels.length < 3) return "#111111";
   return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function cssBackgroundColor(color: string) {
+  return color === "transparent" || color === "rgba(0, 0, 0, 0)" ? "transparent" : cssColorToHex(color);
+}
+
+function closestElementFromNode(node: Node | null) {
+  return node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement ?? null;
+}
+
+function closestWithin<T extends Element>(node: Node | null, selector: string, editor: HTMLElement) {
+  const element = closestElementFromNode(node)?.closest<T>(selector) ?? null;
+  return element && editor.contains(element) ? element : null;
+}
+
+function normalizedLineHeight(style: CSSStyleDeclaration): TextLineHeight {
+  const fontSize = Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size;
+  const raw = Number.parseFloat(style.lineHeight);
+  if (!Number.isFinite(raw)) return "1.15";
+  const ratio = style.lineHeight.endsWith("px") ? raw / fontSize : raw;
+  return (["1", "1.15", "1.5", "1.8", "2"] as TextLineHeight[]).reduce((nearest, option) => Math.abs(Number(option) - ratio) < Math.abs(Number(nearest) - ratio) ? option : nearest, "1.15");
+}
+
+function normalizedBulletStyle(value: string): BulletStyle {
+  if (value === "circle" || value === "square") return value;
+  if (value.includes("–") || value.includes("-") || value === "none") return "dash";
+  return "disc";
 }
 
 function textFontFromFamily(family: string): TextFont {
@@ -343,6 +388,7 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
   const style = window.getComputedStyle(element ?? editor);
   const weight = Number(style.fontWeight);
   const align: TextAlign = style.textAlign === "center" ? "center" : style.textAlign === "right" ? "right" : style.textAlign === "justify" ? "justify" : "left";
+  const list = closestWithin<HTMLUListElement>(anchor, "ul", editor);
   return {
     font: textFontFromFamily(style.fontFamily),
     size: Math.max(8, Math.min(96, Math.round(Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size))),
@@ -354,6 +400,9 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
     strike: document.queryCommandState("strikeThrough") || style.textDecorationLine.includes("line-through"),
     unordered: document.queryCommandState("insertUnorderedList"),
     ordered: document.queryCommandState("insertOrderedList"),
+    backgroundColor: cssBackgroundColor(style.backgroundColor),
+    lineHeight: normalizedLineHeight(style),
+    bulletStyle: normalizedBulletStyle(list ? window.getComputedStyle(list).listStyleType : "disc"),
   };
 }
 
@@ -672,8 +721,8 @@ function plainTextToRichHtml(value: string) {
 function sanitizeRichTextHtml(value: string) {
   const template = document.createElement("template");
   template.innerHTML = value;
-  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "UL", "OL", "LI"]);
-  const allowedStyles = ["fontFamily", "fontSize", "color", "fontWeight", "fontStyle", "textDecoration", "textAlign"] as const;
+  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD"]);
+  const allowedStyles = ["fontFamily", "fontSize", "color", "backgroundColor", "fontWeight", "fontStyle", "textDecoration", "textAlign", "lineHeight", "listStyleType", "borderCollapse", "borderColor", "borderStyle", "borderWidth", "width", "minWidth", "padding", "verticalAlign"] as const;
   Array.from(template.content.querySelectorAll<HTMLElement>("*")).forEach((element) => {
     if (!allowedTags.has(element.tagName)) {
       if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(element.tagName)) {
@@ -1650,7 +1699,12 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
-  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false });
+  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc" });
+  const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
+  const [equationDraft, setEquationDraft] = useState("y = ax² + b");
+  const [tableRows, setTableRows] = useState(3);
+  const [tableColumns, setTableColumns] = useState(3);
+  const [tableBorder, setTableBorder] = useState<TableBorderSettings>({ style: "solid", width: 1, color: "#60737d" });
   const activeTextEditorRef = useRef<{ id: string; editor: HTMLElement } | null>(null);
   const savedTextRangeRef = useRef<Range | null>(null);
   const pendingFontSizeRef = useRef(new Map<string, number>());
@@ -1671,6 +1725,10 @@ export default function Home() {
   const localSavedAtRef = useRef(Date.now());
   const driveSyncingRef = useRef(false);
 
+  useEffect(() => {
+    if (notePanel !== "text") setTextInsertPopover(null);
+  }, [notePanel]);
+
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
   const notePages = activeNotebook.pages;
@@ -1684,6 +1742,13 @@ export default function Home() {
     activeTextEditorRef.current = { id: editorId, editor };
     savedTextRangeRef.current = range && rangeBelongsToEditor(range, editor) ? range.cloneRange() : null;
     setTextToolbar(textSettingsAtRange(editor, range));
+    const table = closestWithin<HTMLTableElement>(range?.startContainer ?? null, "table", editor);
+    const cell = table?.querySelector<HTMLElement>("th,td");
+    if (cell) {
+      const style = window.getComputedStyle(cell);
+      const borderStyle = (["solid", "dashed", "dotted", "double"] as TableBorderStyle[]).includes(style.borderTopStyle as TableBorderStyle) ? style.borderTopStyle as TableBorderStyle : "solid";
+      setTableBorder({ style: borderStyle, width: Math.max(1, Math.min(6, Math.round(Number.parseFloat(style.borderTopWidth) || 1))), color: cssColorToHex(style.borderTopColor) });
+    }
   }, []);
 
   const normalizeTextEditorInput = useCallback((editorId: string, editor: HTMLElement) => {
@@ -1715,7 +1780,15 @@ export default function Home() {
     return target;
   }, []);
 
-  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "bold" | "italic" | "underline" | "strike" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
+  const finishTextCommand = useCallback((target: { id: string; editor: HTMLElement }, message: string) => {
+    target.editor.dispatchEvent(new Event("input", { bubbles: true }));
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    activateTextEditor(target.id, target.editor, range);
+    setToast(message);
+  }, [activateTextEditor]);
+
+  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "background" | "bold" | "italic" | "underline" | "strike" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
     const target = restoreTextSelection();
     if (!target) {
       setToast("Bấm vào nội dung hoặc bôi chọn chữ trước khi định dạng");
@@ -1732,6 +1805,8 @@ export default function Home() {
       normalizeTextEditorInput(target.id, target.editor);
     } else if (command === "color") {
       document.execCommand("foreColor", false, String(value));
+    } else if (command === "background") {
+      document.execCommand("backColor", false, String(value));
     } else {
       const browserCommand = {
         bold: "bold",
@@ -1748,12 +1823,111 @@ export default function Home() {
       }[command];
       document.execCommand(browserCommand, false);
     }
-    target.editor.dispatchEvent(new Event("input", { bubbles: true }));
+    finishTextCommand(target, "Đã định dạng phần chữ đang chọn");
+  }, [finishTextCommand, normalizeTextEditorInput, restoreTextSelection]);
+
+  const applyTextLineHeight = useCallback((lineHeight: TextLineHeight) => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào đoạn văn trước khi chỉnh giãn dòng");
+      return;
+    }
+    let selection = window.getSelection();
+    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range) return;
+    const blocks = Array.from(target.editor.querySelectorAll<HTMLElement>("div,p,li,td,th")).filter((element) => {
+      try { return range!.intersectsNode(element); } catch { return false; }
+    });
+    if (!blocks.length) {
+      document.execCommand("formatBlock", false, "div");
+      selection = window.getSelection();
+      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const block = closestWithin<HTMLElement>(range?.startContainer ?? null, "div,p,li,td,th", target.editor);
+      if (block) blocks.push(block);
+    }
+    blocks.forEach((block) => { block.style.lineHeight = lineHeight; });
+    finishTextCommand(target, `Đã đặt giãn dòng ${lineHeight}`);
+  }, [finishTextCommand, restoreTextSelection]);
+
+  const applyBulletStyle = useCallback((bulletStyle: BulletStyle) => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào đoạn văn trước khi tạo danh sách");
+      return;
+    }
+    let selection = window.getSelection();
+    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    let lists = range ? [closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor)].filter(Boolean) as HTMLUListElement[] : [];
+    if (!lists.length) {
+      document.execCommand("insertUnorderedList", false);
+      selection = window.getSelection();
+      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const list = range ? closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor) : null;
+      if (list) lists = [list];
+    }
+    if (range) {
+      target.editor.querySelectorAll<HTMLUListElement>("ul").forEach((list) => {
+        try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* ignore detached nodes */ }
+      });
+    }
+    lists.forEach((list) => { list.style.listStyleType = bulletStyle === "dash" ? '"–  "' : bulletStyle; });
+    finishTextCommand(target, "Đã đổi kiểu dấu đầu dòng");
+  }, [finishTextCommand, restoreTextSelection]);
+
+  const insertTextAtSelection = useCallback((text: string, message = "Đã chèn ký hiệu") => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào vị trí cần chèn trước");
+      return;
+    }
+    document.execCommand("insertText", false, text);
+    finishTextCommand(target, message);
+  }, [finishTextCommand, restoreTextSelection]);
+
+  const insertEquation = useCallback((equation = equationDraft) => {
+    const target = restoreTextSelection();
+    const trimmed = equation.trim();
+    if (!target || !trimmed) {
+      setToast(target ? "Nhập công thức trước khi chèn" : "Bấm vào vị trí cần chèn công thức trước");
+      return;
+    }
+    document.execCommand("insertHTML", false, `<span style="font-family:Cambria Math,STIX Two Math,Times New Roman,serif;font-style:normal">${escapeHtml(trimmed)}</span>&nbsp;`);
+    finishTextCommand(target, "Đã chèn công thức");
+    setTextInsertPopover(null);
+  }, [equationDraft, finishTextCommand, restoreTextSelection]);
+
+  const insertTable = useCallback(() => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào vị trí cần chèn bảng trước");
+      return;
+    }
+    const cellStyle = `border-style:${tableBorder.style};border-width:${tableBorder.width}px;border-color:${tableBorder.color};padding:6px;min-width:44px;vertical-align:top`;
+    const rows = Array.from({ length: tableRows }, () => `<tr>${Array.from({ length: tableColumns }, () => `<td style="${cellStyle}">&nbsp;</td>`).join("")}</tr>`).join("");
+    document.execCommand("insertHTML", false, `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table><div><br></div>`);
+    finishTextCommand(target, `Đã chèn bảng ${tableRows} × ${tableColumns}`);
+    setTextInsertPopover(null);
+  }, [finishTextCommand, restoreTextSelection, tableBorder, tableColumns, tableRows]);
+
+  const updateTableBorder = useCallback((changes: Partial<TableBorderSettings>) => {
+    const next = { ...tableBorder, ...changes };
+    setTableBorder(next);
+    const target = restoreTextSelection();
+    if (!target) return;
     const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
-    activateTextEditor(target.id, target.editor, range);
-    setToast("Đã định dạng phần chữ đang chọn");
-  }, [activateTextEditor, normalizeTextEditorInput, restoreTextSelection]);
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const table = closestWithin<HTMLTableElement>(range?.startContainer ?? null, "table", target.editor);
+    if (!table) {
+      setToast("Thiết lập đường kẻ sẽ dùng cho bảng mới");
+      return;
+    }
+    table.querySelectorAll<HTMLElement>("th,td").forEach((cell) => {
+      cell.style.borderStyle = next.style;
+      cell.style.borderWidth = `${next.width}px`;
+      cell.style.borderColor = next.color;
+    });
+    finishTextCommand(target, "Đã cập nhật đường kẻ bảng");
+  }, [finishTextCommand, restoreTextSelection, tableBorder]);
 
   const focusTypeEditor = useCallback((editorId: string) => {
     const existing = activeTextEditorRef.current;
@@ -2071,7 +2245,8 @@ export default function Home() {
     setSelectedExcerptId(null);
     activeTextEditorRef.current = null;
     savedTextRangeRef.current = null;
-    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false });
+    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc" });
+    setTextInsertPopover(null);
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
   const updateActiveNote = (changes: Partial<NotePage>) => {
@@ -3239,7 +3414,7 @@ export default function Home() {
         <div className="split-divider" aria-label="Điều chỉnh độ rộng" onPointerDown={startResize}><span>•••</span></div>
 
         <section className="notes-pane">
-          <div className="note-toolbar two-row-toolbar" role="toolbar" aria-label="Công cụ ghi chú">
+          <div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
                 <button className="note-create-button primary icon-only" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={18} /></button>
@@ -3270,7 +3445,46 @@ export default function Home() {
                 <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === activeNote.excerpts.length - 1} onClick={() => shiftExcerptLayer("forward")} aria-label="Đưa đối tượng lên một lớp" title="Đưa lên một lớp"><ChevronUp size={18} /></button>
               </div>
             </div>
+            {notePanel === "text" && <>
+              <div className="toolbar-row text-command-row text-character-row" aria-label="Định dạng ký tự">
+                <span className="type-row-label">Type</span>
+                <select className="word-font-select" value={textToolbar.font} style={{ fontFamily: selectedToolbarFont.family }} onChange={(event) => applyTextCommand("font", event.target.value)} aria-label="Font chữ">{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select>
+                <select className="word-size-select" value={textToolbar.size} onChange={(event) => applyTextCommand("size", Number(event.target.value))} aria-label="Cỡ chữ">{[8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 48, 60, 72].map((size) => <option key={size} value={size}>{size}</option>)}</select>
+                <div className="text-style-buttons compact-style-buttons" aria-label="Kiểu chữ"><button className={textToolbar.bold ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bold")} title="Đậm"><Bold size={16} /></button><button className={textToolbar.italic ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("italic")} title="Nghiêng"><Italic size={16} /></button><button className={textToolbar.underline ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("underline")} title="Gạch chân"><Underline size={16} /></button><button className={textToolbar.strike ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("strike")} title="Gạch ngang"><Strikethrough size={16} /></button></div>
+                <span className="toolbar-mini-divider" />
+                <button className="word-command-button auto-text-color" onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", activeNote.paper.color === "dark" ? "#edf3f4" : "#26343a")} title="Màu chữ tự động"><span>A</span><i /></button>
+                <label className="word-color-picker" title="Màu chữ tùy chỉnh"><span className="color-letter" style={{ borderBottomColor: textToolbar.color }}>A</span><input type="color" value={textToolbar.color === "auto" ? "#26343a" : textToolbar.color} onChange={(event) => applyTextCommand("color", event.target.value)} /></label>
+                <div className="inline-swatch-group" aria-label="Màu nền chữ">
+                  <PaintBucket size={15} />
+                  {TEXT_BACKGROUND_COLORS.map((color) => <button key={color} className={`inline-color-swatch ${textToolbar.backgroundColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("background", color)} title={color === "transparent" ? "Bỏ màu nền chữ" : `Màu nền ${color}`} />)}
+                  <label className="inline-custom-color" title="Màu nền chữ tùy chỉnh"><input type="color" value={textToolbar.backgroundColor === "transparent" ? "#fff2a8" : textToolbar.backgroundColor} onChange={(event) => applyTextCommand("background", event.target.value)} /><span>+</span></label>
+                </div>
+                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("clear")} title="Xóa định dạng"><RemoveFormatting size={16} /></button>
+              </div>
+              <div className="toolbar-row text-command-row text-paragraph-row" aria-label="Định dạng đoạn, ký hiệu và bảng">
+                <div className="text-style-buttons compact-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={16} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={16} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={16} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={16} /></button></div>
+                <label className="word-select-with-icon" title="Khoảng cách dòng"><Rows3 size={15} /><select value={textToolbar.lineHeight} onChange={(event) => applyTextLineHeight(event.target.value as TextLineHeight)} aria-label="Khoảng cách dòng"><option value="1">1,0</option><option value="1.15">1,15</option><option value="1.5">1,5</option><option value="1.8">1,8</option><option value="2">2,0</option></select></label>
+                <label className="word-select-with-icon bullet-style-select" title="Kiểu dấu đầu dòng"><List size={15} /><select value={textToolbar.bulletStyle} onChange={(event) => applyBulletStyle(event.target.value as BulletStyle)} aria-label="Kiểu dấu đầu dòng"><option value="disc">• Tròn đặc</option><option value="circle">○ Tròn rỗng</option><option value="square">▪ Hình vuông</option><option value="dash">– Gạch ngang</option></select></label>
+                <button className={`word-command-button ${textToolbar.ordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Danh sách đánh số"><ListOrdered size={16} /></button>
+                <span className="toolbar-mini-divider" />
+                <button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "symbols" ? null : "symbols")} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>
+                <button className={`word-command-button labeled ${textInsertPopover === "equation" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "equation" ? null : "equation")} title="Chèn công thức"><Sigma size={16} /><span>Công thức</span></button>
+                <button className={`word-command-button labeled ${textInsertPopover === "table" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "table" ? null : "table")} title="Chèn bảng"><Table2 size={16} /><span>Bảng</span></button>
+                <span className="toolbar-mini-divider" />
+                <span className="table-border-label">Đường kẻ</span>
+                <select className="border-style-select" value={tableBorder.style} onChange={(event) => updateTableBorder({ style: event.target.value as TableBorderStyle })} aria-label="Loại đường kẻ bảng"><option value="solid">Liền</option><option value="dashed">Gạch</option><option value="dotted">Chấm</option><option value="double">Đôi</option></select>
+                <select className="border-width-select" value={tableBorder.width} onChange={(event) => updateTableBorder({ width: Number(event.target.value) })} aria-label="Độ dày đường kẻ bảng">{[1, 2, 3, 4, 6].map((width) => <option key={width} value={width}>{width}px</option>)}</select>
+                <label className="table-border-color" title="Màu đường kẻ bảng"><span style={{ background: tableBorder.color }} /><input type="color" value={tableBorder.color} onChange={(event) => updateTableBorder({ color: event.target.value })} /></label>
+                <span className="selection-format-hint">Bôi chọn chữ để định dạng cục bộ</span>
+              </div>
+            </>}
           </div>
+
+          {notePanel === "text" && textInsertPopover === "symbols" && <div className="text-insert-popover symbol-popover" role="dialog" aria-label="Chèn ký hiệu"><header><strong>Ký hiệu</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>{SYMBOL_GROUPS.map((group) => <section key={group.label}><label>{group.label}</label><div>{group.symbols.map((symbol) => <button key={symbol} onPointerDown={(event) => event.preventDefault()} onClick={() => insertTextAtSelection(symbol)}>{symbol}</button>)}</div></section>)}</div>}
+
+          {notePanel === "text" && textInsertPopover === "equation" && <div className="text-insert-popover equation-popover" role="dialog" aria-label="Chèn công thức"><header><strong>Công thức</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><label className="equation-input-label">Nhập công thức bằng ký hiệu Unicode<input value={equationDraft} onChange={(event) => setEquationDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") insertEquation(); }} autoFocus /></label><div className="equation-presets">{EQUATION_PRESETS.map((equation) => <button key={equation} onClick={() => setEquationDraft(equation)}>{equation}</button>)}</div><button className="insert-confirm-button" onClick={() => insertEquation()}><Sigma size={15} /> Chèn công thức</button></div>}
+
+          {notePanel === "text" && textInsertPopover === "table" && <div className="text-insert-popover table-popover" role="dialog" aria-label="Chèn bảng"><header><strong>Chèn bảng</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><div className="table-size-controls"><label>Hàng<input type="number" min="1" max="12" value={tableRows} onChange={(event) => setTableRows(Math.max(1, Math.min(12, Number(event.target.value))))} /></label><span>×</span><label>Cột<input type="number" min="1" max="10" value={tableColumns} onChange={(event) => setTableColumns(Math.max(1, Math.min(10, Number(event.target.value))))} /></label></div><div className="table-preview-grid" style={{ gridTemplateColumns: `repeat(${tableColumns}, 12px)` }} aria-hidden="true">{Array.from({ length: tableRows * tableColumns }, (_, index) => <i key={index} style={{ borderStyle: tableBorder.style, borderWidth: `${Math.min(tableBorder.width, 3)}px`, borderColor: tableBorder.color }} />)}</div><button className="insert-confirm-button" onClick={insertTable}><Table2 size={15} /> Chèn bảng {tableRows} × {tableColumns}</button></div>}
 
           {notePanel === "ink" && (
             <div className="floating-tool-panel note-ink-panel" role="dialog" aria-label="Cài đặt bút">
@@ -3289,22 +3503,6 @@ export default function Home() {
               </div>
               <div className="panel-setting"><label>Màu nét</label><div className="color-options">{INK_COLORS.map((color) => <button key={color} className={`color-swatch ${inkColor === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onClick={() => setInkColor(color)} aria-label={`Chọn màu ${color}`} />)}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={inkColor} onChange={(event) => setInkColor(event.target.value)} /><span>+</span></label></div></div>
               <div className="panel-setting"><label>Độ dày</label><div className="width-options">{[1, 2, 3, 5].map((width) => <button key={width} className={inkWidth === width ? "selected" : ""} onClick={() => setInkWidth(width)}><i style={{ height: width }} />{width}</button>)}</div></div>
-            </div>
-          )}
-
-          {notePanel === "text" && (
-            <div className="floating-tool-panel text-format-panel" role="dialog" aria-label="Định dạng chữ">
-              <div className="tool-panel-heading"><div><strong>Type</strong><span>Bôi chọn ký tự để định dạng cục bộ, như trong Word</span></div><button className="icon-button compact" onClick={() => setNotePanel(null)} aria-label="Đóng"><X size={17} /></button></div>
-              <div className="text-control-row word-font-row"><label>Font</label><select value={textToolbar.font} style={{ fontFamily: selectedToolbarFont.family }} onChange={(event) => applyTextCommand("font", event.target.value)}>{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select><label>Cỡ</label><select className="font-size-select" value={textToolbar.size} onChange={(event) => applyTextCommand("size", Number(event.target.value))}>{[10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 48].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
-              <div className="text-toolbar-row word-toolbar-row">
-                <div className="text-style-buttons" aria-label="Kiểu chữ"><button className={textToolbar.bold ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bold")} title="Đậm"><Bold size={17} /></button><button className={textToolbar.italic ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("italic")} title="Nghiêng"><Italic size={17} /></button><button className={textToolbar.underline ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("underline")} title="Gạch chân"><Underline size={17} /></button><button className={textToolbar.strike ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("strike")} title="Gạch ngang"><Strikethrough size={17} /></button></div>
-                <div className="text-style-buttons" aria-label="Danh sách"><button className={textToolbar.unordered ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bullets")} title="Danh sách dấu đầu dòng"><List size={17} /></button><button className={textToolbar.ordered ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Danh sách đánh số"><ListOrdered size={17} /></button><button onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("clear")} title="Xóa định dạng"><RemoveFormatting size={17} /></button></div>
-              </div>
-              <div className="text-toolbar-row word-toolbar-row">
-                <div className="text-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={17} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={17} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={17} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={17} /></button></div>
-                <span className="selection-format-hint">Chọn chữ · rồi định dạng</span>
-              </div>
-              <div className="panel-setting"><label>Màu chữ</label><div className="color-options text-colors">{TEXT_COLORS.map((color) => { const resolvedColor = color === "auto" ? (activeNote.paper.color === "dark" ? "#edf3f4" : "#26343a") : color; return color === "auto" ? <button key={color} className={`auto-color ${textToolbar.color === resolvedColor ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", resolvedColor)} title="Màu chữ theo màu giấy">A</button> : <button key={color} className={`color-swatch ${textToolbar.color === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", color)} aria-label={`Chọn màu ${color}`} />; })}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={textToolbar.color === "auto" ? "#26343a" : textToolbar.color} onChange={(event) => applyTextCommand("color", event.target.value)} /><span>+</span></label></div></div>
             </div>
           )}
 
