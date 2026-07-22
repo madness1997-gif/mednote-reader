@@ -57,7 +57,7 @@ function normalizeRect(rect: PdfRect): PdfRect {
   };
 }
 
-function mergeSelectionClientRects(rects: DOMRect[], clip: DOMRect) {
+function selectionClientRects(rects: DOMRect[], clip: DOMRect) {
   const clipped = rects
     .map((rect) => ({
       left: Math.max(clip.left, rect.left),
@@ -68,24 +68,18 @@ function mergeSelectionClientRects(rects: DOMRect[], clip: DOMRect) {
     .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
     .sort((a, b) => Math.abs(a.top - b.top) < 2 ? a.left - b.left : a.top - b.top);
 
-  return clipped.reduce<typeof clipped>((lines, rect) => {
-    const height = rect.bottom - rect.top;
-    const current = lines.at(-1);
-    if (!current) return [rect];
-    const currentHeight = current.bottom - current.top;
-    const verticalOverlap = Math.min(current.bottom, rect.bottom) - Math.max(current.top, rect.top);
-    const sameLine = verticalOverlap >= Math.min(height, currentHeight) * .58;
-    const closeEnough = rect.left - current.right <= Math.max(5, Math.min(height, currentHeight) * .45);
-    if (sameLine && closeEnough) {
-      current.left = Math.min(current.left, rect.left);
-      current.top = Math.min(current.top, rect.top);
-      current.right = Math.max(current.right, rect.right);
-      current.bottom = Math.max(current.bottom, rect.bottom);
-    } else {
-      lines.push(rect);
-    }
-    return lines;
-  }, []);
+  // Keep the browser's character-accurate range rectangles. Merging neighbouring
+  // PDF.js text runs into a single line box makes short selections look like a
+  // large rectangular block and can paint across columns or inline gaps.
+  return clipped.filter((rect, index, all) => !all.some((other, otherIndex) => (
+    otherIndex !== index
+    && other.left <= rect.left + .5
+    && other.top <= rect.top + .5
+    && other.right >= rect.right - .5
+    && other.bottom >= rect.bottom - .5
+    && (other.right - other.left) * (other.bottom - other.top)
+      < (rect.right - rect.left) * (rect.bottom - rect.top) * 1.05
+  )));
 }
 
 function viewportRect(viewport: PageViewport, rect: PdfRect) {
@@ -358,6 +352,9 @@ export function PdfPageView({
 
       textContainer.replaceChildren();
       textContainer.style.setProperty("--scale-factor", `${nextViewport.scale}`);
+      textContainer.style.setProperty("--total-scale-factor", `${nextViewport.scale}`);
+      textContainer.style.setProperty("--scale-round-x", "1px");
+      textContainer.style.setProperty("--scale-round-y", "1px");
       const [{ TextLayer }, textContent] = await Promise.all([
         import("pdfjs-dist"),
         pdfPage.getTextContent(),
@@ -412,7 +409,7 @@ export function PdfPageView({
         viewport.width,
         viewport.height,
       );
-      const clientRects = mergeSelectionClientRects(Array.from(range.getClientRects()), contentRect);
+      const clientRects = selectionClientRects(Array.from(range.getClientRects()), contentRect);
       const rects = clientRects.map((rect) => {
         const [x1, y1] = viewport.convertToPdfPoint(rect.left - contentRect.left, rect.top - contentRect.top);
         const [x2, y2] = viewport.convertToPdfPoint(rect.right - contentRect.left, rect.bottom - contentRect.top);

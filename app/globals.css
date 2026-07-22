@@ -242,10 +242,14 @@ body {
 .pdf-markup-strikeout::after { content: ""; position: absolute; top: 52%; right: 0; left: 0; height: 2px; border-radius: 2px; background: var(--markup-color); }
 .pdf-source-focus { position: absolute; border: 2px solid #0e8e96; border-radius: 5px; background: rgba(14,142,150,.12); box-shadow: 0 0 0 5px rgba(14,142,150,.1); animation: source-pulse 1s ease-in-out 3; }
 @keyframes source-pulse { 50% { box-shadow: 0 0 0 11px rgba(14,142,150,.04); } }
-.textLayer { --min-font-size: 1; --scale-factor: 1; --calc-round: 1px; --canvas-scale-factor: 1; position: absolute; inset: 0; z-index: 2; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; }
+.textLayer { --scale-factor: 1; --total-scale-factor: var(--scale-factor); --scale-round-x: 1px; --scale-round-y: 1px; position: absolute; inset: 0; z-index: 2; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; caret-color: CanvasText; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; }
 .textLayer :is(span, br) { position: absolute; color: transparent; white-space: pre; transform-origin: 0 0; }
-.textLayer .markedContent { display: contents; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { z-index: 1; }
+.textLayer span.markedContent { top: 0; height: 0; }
 .textLayer span[role="img"] { cursor: default; user-select: none; }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
 .pdf-text-layer { pointer-events: none; user-select: none; }
 .pdf-text-layer.selectable { pointer-events: auto; -webkit-user-select: text; user-select: text; touch-action: pan-x pan-y; }
 .pdf-text-layer.selectable span { cursor: text; }

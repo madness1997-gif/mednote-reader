@@ -1396,14 +1396,14 @@ export default function Home() {
   const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
-  const [activeTool, setActiveTool] = useState<Tool>("pen");
+  const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [inkColor, setInkColor] = useState("#2465a8");
   const [inkWidth, setInkWidth] = useState(2);
   const [highlighterWidth, setHighlighterWidth] = useState(14);
   const [penStyle, setPenStyle] = useState<PenStyle>("ballpoint");
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
-  const [pdfTool, setPdfTool] = useState<PdfTool>("select");
+  const [pdfTool, setPdfTool] = useState<PdfTool>("pan");
   const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
   const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
   const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("pages");
@@ -1879,7 +1879,7 @@ export default function Home() {
         layout: defaultExcerptLayout(activeNote.excerpts.length, "image"),
       };
       updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: result.page });
-      setPdfTool("select");
+      setPdfTool("pan");
       setToast("Đã cắt hình và đưa sang note");
     } catch {
       setToast("Không thể lưu hình cắt trên thiết bị này");
