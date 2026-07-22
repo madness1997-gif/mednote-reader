@@ -1484,6 +1484,7 @@ export default function Home() {
     if (!IS_DESKTOP_APP) return "";
     try { return localStorage.getItem(DESKTOP_GOOGLE_CLIENT_ID_KEY)?.trim() ?? ""; } catch { return ""; }
   });
+  const [desktopGoogleClientSecret, setDesktopGoogleClientSecret] = useState("");
   const [driveToken, setDriveToken] = useState<string | null>(null);
   const [driveUser, setDriveUser] = useState<DriveUser | null>(null);
   const [driveStatus, setDriveStatus] = useState<"disconnected" | "connecting" | "connected" | "syncing" | "error">("disconnected");
@@ -2244,7 +2245,8 @@ export default function Home() {
     setDriveStatus("connecting");
     setDriveError(null);
     try {
-      const token = await requestDriveToken(clientId);
+      const token = await requestDriveToken(clientId, IS_DESKTOP_APP ? desktopGoogleClientSecret.trim() : "");
+      if (IS_DESKTOP_APP) setDesktopGoogleClientSecret("");
       const [user, files] = await Promise.all([getDriveUser(token), listDriveAppFiles(token)]);
       setDriveToken(token);
       setDriveUser(user);
@@ -2758,7 +2760,10 @@ export default function Home() {
               {driveStatus === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
               <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
               <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
-              {IS_DESKTOP_APP && driveStatus !== "connecting" && <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Chỉ cần Client ID, không nhập Client Secret.</small></label>}
+              {IS_DESKTOP_APP && driveStatus !== "connecting" && <>
+                <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
+                <label className="drive-client-id"><span>Client Secret (nếu Google cấp)</span><input type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Lấy cùng Client ID trong tệp JSON của OAuth Desktop; được lưu mã hóa sau khi kết nối.</small></label>
+              </>}
               {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
             </div>
           )}

@@ -18,7 +18,7 @@ declare global {
   interface Window {
     mednoteDesktop?: {
       isDesktop: true;
-      authorizeDrive: (clientId: string) => Promise<string>;
+      authorizeDrive: (clientId: string, clientSecret?: string) => Promise<string>;
       revokeDrive: (token: string) => Promise<void>;
     };
     google?: {
@@ -72,9 +72,9 @@ function loadGoogleIdentityServices() {
   return gisPromise;
 }
 
-export async function requestDriveToken(clientId: string) {
+export async function requestDriveToken(clientId: string, clientSecret = "") {
   if (!clientId) throw new Error("Ứng dụng chưa được cấu hình Google Client ID");
-  if (window.mednoteDesktop?.isDesktop) return window.mednoteDesktop.authorizeDrive(clientId);
+  if (window.mednoteDesktop?.isDesktop) return window.mednoteDesktop.authorizeDrive(clientId, clientSecret);
   await loadGoogleIdentityServices();
   return new Promise<string>((resolve, reject) => {
     const client = window.google!.accounts.oauth2.initTokenClient({

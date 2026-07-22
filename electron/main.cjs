@@ -94,6 +94,9 @@ function oauthErrorMessage(error) {
   if (/invalid_client/i.test(message)) {
     return "OAuth Client ID không đúng loại Desktop app. Hãy tạo Client ID loại Desktop app trong Google Cloud rồi dán lại vào MedNote.";
   }
+  if (/client_secret.*missing|missing.*client_secret/i.test(message)) {
+    return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại MedNote, nhập Client Secret được cấp cùng Client ID rồi kết nối lại.";
+  }
   if (/redirect_uri_mismatch/i.test(message)) {
     return "OAuth Client ID không hỗ trợ địa chỉ callback của ứng dụng desktop. Hãy dùng Client ID loại Desktop app.";
   }
@@ -129,16 +132,18 @@ async function tokenRequest(parameters) {
   return payload;
 }
 
-async function refreshAccessToken(clientId, refreshToken) {
-  const payload = await tokenRequest({
+async function refreshAccessToken(clientId, refreshToken, clientSecret = "") {
+  const parameters = {
     client_id: clientId,
     refresh_token: refreshToken,
     grant_type: "refresh_token",
-  });
+  };
+  if (clientSecret) parameters.client_secret = clientSecret;
+  const payload = await tokenRequest(parameters);
   return payload.access_token;
 }
 
-async function authorizeWithSystemBrowser(clientId) {
+async function authorizeWithSystemBrowser(clientId, clientSecret = "") {
   const verifier = base64Url(crypto.randomBytes(48));
   const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
   const state = base64Url(crypto.randomBytes(24));
@@ -171,14 +176,16 @@ async function authorizeWithSystemBrowser(clientId) {
       try {
         const address = server.address();
         const redirectUri = `http://127.0.0.1:${address.port}/oauth2/callback`;
-        const payload = await tokenRequest({
+        const tokenParameters = {
           client_id: clientId,
           code,
           code_verifier: verifier,
           grant_type: "authorization_code",
           redirect_uri: redirectUri,
-        });
-        if (payload.refresh_token) await saveCredential({ clientId, refreshToken: payload.refresh_token });
+        };
+        if (clientSecret) tokenParameters.client_secret = clientSecret;
+        const payload = await tokenRequest(tokenParameters);
+        if (payload.refresh_token) await saveCredential({ clientId, clientSecret, refreshToken: payload.refresh_token });
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end(callbackPage("Đã kết nối Google Drive", "MedNote đã nhận quyền truy cập và lưu phiên đăng nhập an toàn trên máy.", true));
         finish(null, payload.access_token);
@@ -215,18 +222,26 @@ async function authorizeWithSystemBrowser(clientId) {
   });
 }
 
-async function authorizeDrive(clientId) {
+async function authorizeDrive(clientId, clientSecret = "") {
   const normalizedClientId = String(clientId || "").trim();
+  const normalizedClientSecret = String(clientSecret || "").trim();
   if (!CLIENT_ID_PATTERN.test(normalizedClientId)) throw new Error("OAuth Client ID không hợp lệ");
+  if (normalizedClientSecret.length > 512) throw new Error("OAuth Client Secret không hợp lệ");
   const credential = await readCredential();
+  let effectiveClientSecret = normalizedClientSecret;
   if (credential?.clientId === normalizedClientId && credential.refreshToken) {
+    effectiveClientSecret ||= String(credential.clientSecret || "").trim();
     try {
-      return await refreshAccessToken(normalizedClientId, credential.refreshToken);
+      const accessToken = await refreshAccessToken(normalizedClientId, credential.refreshToken, effectiveClientSecret);
+      if (effectiveClientSecret !== credential.clientSecret) {
+        await saveCredential({ ...credential, clientSecret: effectiveClientSecret });
+      }
+      return accessToken;
     } catch {
       await clearCredential();
     }
   }
-  return authorizeWithSystemBrowser(normalizedClientId);
+  return authorizeWithSystemBrowser(normalizedClientId, effectiveClientSecret);
 }
 
 async function revokeDrive(token) {
@@ -271,9 +286,9 @@ function createWindow() {
   else void mainWindow.loadFile(path.join(__dirname, "..", "dist-electron", "index.html"));
 }
 
-ipcMain.handle("drive:authorize", async (_event, clientId) => {
+ipcMain.handle("drive:authorize", async (_event, credentials = {}) => {
   if (activeAuthorization) return activeAuthorization;
-  activeAuthorization = authorizeDrive(clientId).finally(() => { activeAuthorization = null; });
+  activeAuthorization = authorizeDrive(credentials.clientId, credentials.clientSecret).finally(() => { activeAuthorization = null; });
   return activeAuthorization;
 });
 ipcMain.handle("drive:revoke", (_event, token) => revokeDrive(token));
