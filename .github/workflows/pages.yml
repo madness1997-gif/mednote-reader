@@ -28,7 +28,9 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build:pages
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          # OAuth client IDs are public identifiers. Never add the client secret
+          # to this workflow: this browser-only app uses Google Identity Services.
+          VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com
       - uses: actions/configure-pages@v5
         with:
           enablement: true
