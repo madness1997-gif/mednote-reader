@@ -7,7 +7,7 @@
   "scripts": {
     "build:pages": "vite build --config vite.github.config.ts",
     "build:desktop": "vite build --config vite.desktop.config.ts",
-    "dist:win": "npm run build:desktop && electron-builder --win nsis"
+    "dist:win": "npm run build:desktop && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "lucide-react": "0.468.0",
