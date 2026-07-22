@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const http = require("node:http");
@@ -11,11 +11,45 @@ const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/;
 
+protocol.registerSchemesAsPrivileged([{
+  scheme: "mednote-assets",
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+}]);
+
 let mainWindow = null;
 let activeAuthorization = null;
 
 function credentialPath() {
   return path.join(app.getPath("userData"), "google-drive-token.bin");
+}
+
+function assetContentType(filePath) {
+  if (filePath.endsWith(".ttf")) return "font/ttf";
+  if (filePath.endsWith(".wasm")) return "application/wasm";
+  return "application/octet-stream";
+}
+
+function registerAssetProtocol() {
+  const publicRoot = path.resolve(__dirname, "..", "dist-electron");
+  protocol.handle("mednote-assets", async (request) => {
+    try {
+      const requestUrl = new URL(request.url);
+      const relativePath = decodeURIComponent(requestUrl.pathname).replace(/^\/+/, "");
+      const target = path.resolve(publicRoot, relativePath);
+      if (target !== publicRoot && !target.startsWith(`${publicRoot}${path.sep}`)) {
+        return new Response("Not found", { status: 404 });
+      }
+      const data = await fs.readFile(target);
+      return new Response(data, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": assetContentType(target),
+        },
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+  });
 }
 
 function base64Url(buffer) {
@@ -254,6 +288,7 @@ else {
     }
   });
   app.whenReady().then(() => {
+    registerAssetProtocol();
     createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });

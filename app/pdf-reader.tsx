@@ -312,16 +312,25 @@ export function PdfPageView({
     if (!host) return;
     const update = () => {
       const stage = host.closest(".document-stage") as HTMLElement | null;
+      const stageStyle = stage ? window.getComputedStyle(stage) : null;
+      const horizontalPadding = stageStyle
+        ? Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight)
+        : 0;
+      const verticalPadding = stageStyle
+        ? Number.parseFloat(stageStyle.paddingTop) + Number.parseFloat(stageStyle.paddingBottom)
+        : 0;
       setHostSize({
-        width: Math.max(280, host.clientWidth - 2),
-        height: Math.max(420, (stage?.clientHeight ?? host.clientHeight) - 18),
+        width: Math.max(280, (stage?.clientWidth ?? host.clientWidth) - horizontalPadding - 2),
+        // Leave room for the page-number chip. This makes “Vừa toàn trang” a
+        // true whole-page view instead of hiding the bottom edge below scroll.
+        height: Math.max(320, (stage?.clientHeight ?? host.clientHeight) - verticalPadding - 28),
       });
     };
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(host);
     const stage = host.closest(".document-stage");
     if (stage) observer.observe(stage);
+    else observer.observe(host);
     return () => observer.disconnect();
   }, []);
 

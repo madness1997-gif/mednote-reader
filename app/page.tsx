@@ -92,6 +92,7 @@ import {
   oxfordLookupUrl,
   type EnglishVietnameseLookup,
 } from "./dictionary";
+import { pdfDocumentOptions } from "./pdf-config";
 
 type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
 type InkTool = "pen" | "highlight" | "shape";
@@ -253,7 +254,7 @@ const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDe
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "handwriting", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
-const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "width", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
+const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
   a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
@@ -594,7 +595,7 @@ async function loadStoredPdfDocument(documentId: string) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   const buffer = await stored.blob.arrayBuffer();
-  return pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  return pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(buffer))).promise;
 }
 
 function blobToDataUrl(blob: Blob) {
@@ -1688,7 +1689,7 @@ export default function Home() {
     void pdfSource.blob.arrayBuffer().then(async (buffer) => {
       const pdfjs = await import("pdfjs-dist");
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-      const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+      const task = pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(buffer)));
       document = await task.promise;
       if (!disposed) {
         setPdfDocument(document);
@@ -2847,7 +2848,7 @@ export default function Home() {
                 <button className={fitMode === "width" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "width", zoom: 1 }))}><Rows3 size={18} /><span>Vừa chiều rộng</span></button>
                 <button className={fitMode === "page" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "page", zoom: 1 }))}><Square size={18} /><span>Vừa toàn trang</span></button>
                 <button onClick={() => updateReader((reader) => ({ ...reader, rotation: (reader.rotation + 90) % 360 }))}><RotateCw size={18} /><span>Xoay 90°</span></button>
-                <button className={viewMode === "continuous" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, viewMode: reader.viewMode === "single" ? "continuous" : "single", fitMode: reader.viewMode === "single" ? "width" : reader.fitMode }))}>{viewMode === "single" ? <Rows3 size={18} /> : <Square size={18} />}<span>{viewMode === "single" ? "Cuộn liên tục" : "Từng trang"}</span></button>
+                <button className={viewMode === "continuous" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, viewMode: reader.viewMode === "single" ? "continuous" : "single", fitMode: reader.viewMode === "single" ? "width" : "page", zoom: 1 }))}>{viewMode === "single" ? <Rows3 size={18} /> : <Square size={18} />}<span>{viewMode === "single" ? "Cuộn liên tục" : "Từng trang"}</span></button>
                 <button className={readerFocus ? "selected" : ""} onClick={() => setReaderFocus((focus) => !focus)}><Maximize2 size={18} /><span>{readerFocus ? "Trở lại chia đôi" : "Tập trung đọc"}</span></button>
               </div>
             </div>
