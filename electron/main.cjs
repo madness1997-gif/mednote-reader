@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, net, safeStorage, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const http = require("node:http");
@@ -43,13 +43,52 @@ async function clearCredential() {
   try { await fs.unlink(credentialPath()); } catch { /* already signed out */ }
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function oauthErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error || "Lỗi không xác định");
+  if (/fetch failed|network|certificate|socket|connect|proxy/i.test(message)) {
+    return "MedNote không kết nối được tới máy chủ Google. Hãy kiểm tra mạng, VPN, proxy hoặc tường lửa rồi thử lại.";
+  }
+  if (/invalid_client/i.test(message)) {
+    return "OAuth Client ID không đúng loại Desktop app. Hãy tạo Client ID loại Desktop app trong Google Cloud rồi dán lại vào MedNote.";
+  }
+  if (/redirect_uri_mismatch/i.test(message)) {
+    return "OAuth Client ID không hỗ trợ địa chỉ callback của ứng dụng desktop. Hãy dùng Client ID loại Desktop app.";
+  }
+  if (/invalid_grant|code verifier/i.test(message)) {
+    return "Phiên đăng nhập đã hết hạn hoặc không còn hợp lệ. Hãy quay lại MedNote và kết nối lại.";
+  }
+  return message;
+}
+
+function callbackPage(title, message, success = false) {
+  const color = success ? "#0f766e" : "#b42318";
+  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#f4f7f7;color:#17252a}main{max-width:560px;margin:10vh auto;padding:28px;border:1px solid #d8e1e3;border-radius:16px;background:white;box-shadow:0 10px 30px #17343d14}h1{margin:0 0 12px;font-size:24px;color:${color}}p{margin:0;line-height:1.55}.hint{margin-top:16px;color:#52656b;font-size:14px}</style></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p class="hint">Bạn có thể đóng cửa sổ này và quay lại MedNote.</p></main></body></html>`;
+}
+
 async function tokenRequest(parameters) {
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+  // Electron's network stack respects the Windows proxy and certificate store.
+  // That is more reliable for an installed app than Node's standalone fetch.
+  const response = await net.fetch(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(parameters),
   });
-  const payload = await response.json();
+  const responseText = await response.text();
+  let payload = {};
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    throw new Error(`Google trả về phản hồi không hợp lệ (HTTP ${response.status})`);
+  }
   if (!response.ok || !payload.access_token) {
     throw new Error(payload.error_description || payload.error || "Google không cấp quyền truy cập Drive");
   }
@@ -90,8 +129,9 @@ async function authorizeWithSystemBrowser(clientId) {
       const code = requestUrl.searchParams.get("code");
       if (error || returnedState !== state || !code) {
         response.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-        response.end("<h2>MedNote chưa được cấp quyền.</h2><p>Bạn có thể đóng cửa sổ này và thử lại trong ứng dụng.</p>");
-        finish(new Error(error || "Phản hồi đăng nhập Google không hợp lệ"));
+        const authorizationError = new Error(error || "Phản hồi đăng nhập Google không hợp lệ");
+        response.end(callbackPage("MedNote chưa được cấp quyền", oauthErrorMessage(authorizationError)));
+        finish(authorizationError);
         return;
       }
       try {
@@ -106,12 +146,13 @@ async function authorizeWithSystemBrowser(clientId) {
         });
         if (payload.refresh_token) await saveCredential({ clientId, refreshToken: payload.refresh_token });
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        response.end("<h2>Đã kết nối MedNote với Google Drive.</h2><p>Bạn có thể đóng cửa sổ này và quay lại MedNote.</p>");
+        response.end(callbackPage("Đã kết nối Google Drive", "MedNote đã nhận quyền truy cập và lưu phiên đăng nhập an toàn trên máy.", true));
         finish(null, payload.access_token);
       } catch (exchangeError) {
+        const friendlyMessage = oauthErrorMessage(exchangeError);
         response.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-        response.end("<h2>Không thể hoàn tất đăng nhập.</h2><p>Hãy đóng cửa sổ này và thử lại trong MedNote.</p>");
-        finish(exchangeError);
+        response.end(callbackPage("Không thể hoàn tất đăng nhập", friendlyMessage));
+        finish(new Error(friendlyMessage));
       }
     });
 
@@ -158,7 +199,7 @@ async function revokeDrive(token) {
   await clearCredential();
   if (!token) return;
   try {
-    await fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(token)}`, {
+    await net.fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
