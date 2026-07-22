@@ -38,6 +38,8 @@ export type PdfSelection = {
   rects: PdfRect[];
   menuX: number;
   menuY: number;
+  menuPlacement: "above" | "below";
+  menuMaxHeight: number;
 };
 
 export type PdfCropResult = {
@@ -417,12 +419,18 @@ export function PdfPageView({
       });
       if (!rects.length) return;
       const anchor = clientRects.at(-1)!;
+      const menuHalfWidth = Math.min(190, Math.max(0, window.innerWidth / 2 - 10));
+      const availableAbove = Math.max(0, anchor.top - 20);
+      const availableBelow = Math.max(0, window.innerHeight - anchor.bottom - 20);
+      const menuPlacement = availableAbove >= availableBelow ? "above" : "below";
       onSelection({
         page,
         text,
         rects,
-        menuX: Math.min(window.innerWidth - 14, Math.max(14, (anchor.left + anchor.right) / 2)),
-        menuY: Math.max(62, anchor.top - 10),
+        menuX: Math.min(window.innerWidth - menuHalfWidth, Math.max(menuHalfWidth, (anchor.left + anchor.right) / 2)),
+        menuY: menuPlacement === "above" ? anchor.top - 10 : anchor.bottom + 10,
+        menuPlacement,
+        menuMaxHeight: Math.max(180, Math.min(520, menuPlacement === "above" ? availableAbove : availableBelow)),
       });
     }, delay);
   }, [onSelection, page, tool, viewport]);

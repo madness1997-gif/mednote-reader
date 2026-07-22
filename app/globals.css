@@ -263,11 +263,41 @@ body {
 .pdf-interaction-layer.pan:active { cursor: grabbing; }
 .pdf-interaction-layer.crop { cursor: crosshair; }
 .pdf-crop-box { position: absolute; border: 1.5px solid white; outline: 1.5px solid var(--teal); background: rgba(14,107,112,.1); box-shadow: 0 0 0 9999px rgba(11,31,42,.28); }
-.pdf-selection-menu { position: fixed; z-index: 60; display: flex; align-items: center; gap: 3px; max-width: calc(100vw - 20px); padding: 5px; overflow-x: auto; border: 1px solid #c8d6da; border-radius: 9px; background: rgba(255,255,255,.98); box-shadow: 0 12px 34px rgba(24,50,74,.24); transform: translate(-50%, -100%); white-space: nowrap; }
-.pdf-selection-menu button { height: 29px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: #40535d; font-size: 10px; font-weight: 650; cursor: pointer; }
+.pdf-selection-menu { position: fixed; z-index: 60; width: min(390px, calc(100vw - 20px)); display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; border: 1px solid #c8d6da; border-radius: 12px; background: rgba(255,255,255,.99); box-shadow: 0 14px 38px rgba(24,50,74,.25); white-space: normal; }
+.pdf-selection-menu.placement-above { transform: translate(-50%, -100%); }
+.pdf-selection-menu.placement-below { transform: translate(-50%, 0); }
+.pdf-selection-menu button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: #40535d; font-size: 10px; font-weight: 650; cursor: pointer; }
 .pdf-selection-menu button:hover { background: #edf3f4; }
 .pdf-selection-menu .send-note { background: var(--selected); color: var(--teal); }
 .pdf-selection-menu .close-selection { width: 27px; padding: 0; justify-content: center; color: #8b999f; }
+.pdf-selection-actions { min-width: 0; display: flex; align-items: center; gap: 3px; padding: 5px; overflow-x: auto; border-bottom: 1px solid #e1e8ea; white-space: nowrap; scrollbar-width: thin; }
+.selection-dictionary { padding: 10px 11px 9px; color: #31464f; }
+.selection-dictionary > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.selection-dictionary > header > span { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-size: 11px; }
+.selection-dictionary .oxford-link { height: 25px; padding: 0 6px; border: 1px solid #d9e2e4; color: #405c85; font-size: 9px; }
+.dictionary-source-text { display: -webkit-box; margin: 7px 0 6px; overflow: hidden; color: #273a43; font-size: 11px; font-weight: 700; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.dictionary-loading, .dictionary-error { margin: 7px 0; color: #788890; font-size: 10px; line-height: 1.4; }
+.dictionary-loading { display: flex; align-items: center; gap: 6px; }
+.dictionary-loading svg { animation: dictionary-spin 1s linear infinite; }
+@keyframes dictionary-spin { to { transform: rotate(360deg); } }
+.dictionary-error { color: #9a5d61; }
+.dictionary-headword { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0 5px; padding-top: 7px; border-top: 1px solid #e9eef0; }
+.dictionary-headword > span { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.dictionary-headword strong { color: var(--navy); font-size: 14px; }
+.dictionary-headword em { color: #72838b; font-size: 10px; font-style: normal; }
+.dictionary-headword button { width: 29px; flex: 0 0 29px; padding: 0; color: var(--teal); }
+.translation-suggestion { padding: 8px; border: 1px solid #b9d7d8; border-radius: 8px; background: #eff8f7; }
+.translation-suggestion > small { display: block; margin-bottom: 3px; color: #698086; font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.translation-suggestion > strong { display: block; color: #164f54; font-size: 13px; line-height: 1.35; }
+.translation-suggestion > p { margin: 4px 0 0; color: #587077; font-size: 9px; line-height: 1.35; }
+.translation-suggestion > div { display: flex; gap: 4px; margin-top: 7px; }
+.translation-suggestion > div button { border: 1px solid #c7dcdd; background: white; color: var(--teal); }
+.translation-suggestion > div .send-translation { background: var(--teal); color: white; }
+.english-definitions { margin-top: 7px; font-size: 9px; }
+.english-definitions summary { color: #526970; font-weight: 700; cursor: pointer; }
+.english-definitions > div { display: grid; grid-template-columns: 62px 1fr; gap: 5px; margin-top: 5px; color: #65777e; line-height: 1.35; }
+.english-definitions > div b { color: #405860; font-style: italic; }
+.selection-dictionary > footer { margin-top: 8px; color: #89979c; font-size: 8px; line-height: 1.3; }
 .demo-reader-hint { width: min(100%, 710px); display: flex; align-items: center; gap: 8px; margin: 0 auto 10px; padding: 9px 11px; border: 1px solid #b9d4d5; border-radius: 8px; background: var(--selected); color: var(--teal); font-size: 10px; }
 .figure-card { margin-top: 14px; border: 1px solid #7f898d; border-radius: 8px; padding: 12px; }
 .mechanism-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
@@ -513,7 +543,10 @@ body {
   .pdf-toolbar-button span { display: none; }
   .pdf-toolbar { gap: 2px; }
   .floating-tool-panel { position: fixed; top: 150px; right: 8px; left: 8px; width: auto; max-height: calc(100vh - 160px); }
-  .pdf-selection-menu { left: 8px !important; right: 8px; max-width: none; transform: translateY(-100%); }
+  .pdf-selection-menu { left: 8px !important; right: 8px; width: auto; max-height: min(480px, calc(100vh - 20px)); overflow-y: auto; }
+  .pdf-selection-menu.placement-above { transform: translateY(-100%); }
+  .pdf-selection-menu.placement-below { transform: none; }
+  .selection-dictionary { padding: 9px; }
   .note-excerpts { inset: 0; }
   .note-file-actions .note-create-button:not(.icon-only) { width: 34px; padding: 0; justify-content: center; }
   .note-file-actions .note-create-button span, .tool-button .tool-label { display: none; }
