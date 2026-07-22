@@ -291,6 +291,10 @@ body {
 .tool-button.active .tool-label { display: inline; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .tool-button.show-label { width: auto; flex-basis: auto; padding: 0 8px; }
 .tool-button.expandable:not(.active) .tool-chevron { margin-left: -5px; }
+.object-layer-cluster { height: 32px; padding: 0 3px 0 7px; border: 1px solid var(--line); border-radius: 8px; background: #f7f9fa; color: #8a989e; }
+.object-layer-cluster.has-selection { border-color: #9fc2c4; background: var(--selected); color: var(--teal); }
+.layer-control-label { height: 100%; display: inline-flex; align-items: center; gap: 5px; padding-right: 5px; border-right: 1px solid var(--line); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.object-layer-cluster .icon-button { width: 27px; height: 27px; }
 .toolbar-divider { height: 24px; margin: 0 3px; flex: 0 0 1px; }
 .paper-button { height: 34px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: #40535d; font-size: 12px; font-weight: 700; cursor: pointer; }
 .paper-button.active, .paper-button:hover { border-color: #8cb7b9; background: var(--selected); color: var(--teal); }
@@ -393,6 +397,7 @@ body {
 .note-excerpt { position: absolute; min-width: 118px; min-height: 96px; display: flex; flex-direction: column; overflow: visible; border: 1px solid color-mix(in srgb, var(--paper-accent) 30%, var(--paper-line)); border-radius: 9px; background: color-mix(in srgb, var(--paper-bg) 90%, white); box-shadow: 0 2px 7px rgba(24,50,74,.09); pointer-events: none; }
 .note-paper.object-mode .note-excerpt { pointer-events: auto; }
 .note-excerpt.movable { border-color: color-mix(in srgb, var(--paper-accent) 68%, var(--paper-line)); box-shadow: 0 4px 13px rgba(24,50,74,.16); }
+.note-excerpt.selected { border-color: var(--paper-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper-accent) 24%, transparent), 0 6px 17px rgba(24,50,74,.2); }
 .note-excerpt.editable { border-color: color-mix(in srgb, var(--paper-accent) 52%, var(--paper-line)); }
 .excerpt-object-controls { position: absolute; top: -31px; left: -1px; z-index: 5; height: 29px; display: flex; align-items: center; gap: 3px; padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--paper-accent) 32%, var(--paper-line)); border-radius: 7px; background: color-mix(in srgb, var(--paper-bg) 95%, white); box-shadow: 0 3px 10px rgba(24,50,74,.14); white-space: nowrap; pointer-events: auto; }
 .excerpt-drag-handle { width: 24px; height: 23px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--paper-accent); opacity: .58; pointer-events: auto; touch-action: none; cursor: default; }
@@ -513,6 +518,8 @@ body {
   .note-file-actions .note-create-button:not(.icon-only) { width: 34px; padding: 0; justify-content: center; }
   .note-file-actions .note-create-button span, .tool-button .tool-label { display: none; }
   .tool-button.show-label { width: 38px; flex-basis: 38px; padding: 0; }
+  .layer-control-label span { display: none; }
+  .layer-control-label { padding-right: 4px; }
   .paper-button span { display: none; }
   .paper-panel { position: fixed; top: 150px; right: 8px; width: calc(100% - 16px); max-height: calc(100vh - 160px); }
   .paper-size-grid { grid-template-columns: repeat(2, 1fr); }

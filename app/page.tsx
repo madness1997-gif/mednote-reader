@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Cloud,
   CloudOff,
   Copy,
@@ -27,6 +28,7 @@ import {
   Image,
   Italic,
   Lasso,
+  Layers2,
   ListTree,
   Maximize2,
   Menu,
@@ -614,15 +616,17 @@ function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
 type DraggableExcerptProps = {
   excerpt: NoteExcerpt;
   index: number;
+  selected: boolean;
   movable: boolean;
   editable: boolean;
+  onSelect: (excerptId: string) => void;
   onMove: (excerptId: string, layout: ExcerptLayout) => void;
   onEdit: (excerptId: string, changes: Partial<NoteExcerpt>) => void;
   onOpenSource: (excerpt: NoteExcerpt) => void;
   onDelete: (excerptId: string) => void;
 };
 
-function DraggableExcerpt({ excerpt, index, movable, editable, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
+function DraggableExcerpt({ excerpt, index, selected, movable, editable, onSelect, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const [layout, setLayout] = useState(savedLayout);
@@ -700,8 +704,14 @@ function DraggableExcerpt({ excerpt, index, movable, editable, onMove, onEdit, o
   return (
     <article
       ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${movable ? "movable" : ""} ${editable ? "editable" : ""}`}
-      style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%` }}
+      className={`note-excerpt excerpt-${excerpt.kind} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
+      style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%`, zIndex: index + 1 }}
+      onPointerDown={(event) => {
+        if (!movable) return;
+        event.stopPropagation();
+        onSelect(excerpt.id);
+      }}
+      aria-selected={selected}
     >
       {(movable || editable) && (
         <div className="excerpt-object-controls">
@@ -1397,6 +1407,7 @@ export default function Home() {
   const documentStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
+  const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
   const [inkWidth, setInkWidth] = useState(2);
   const [highlighterWidth, setHighlighterWidth] = useState(14);
@@ -1444,6 +1455,8 @@ export default function Home() {
   const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
   const notePages = activeNotebook.pages;
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
+  const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
+  const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const activeReader = activeDocument?.reader ?? demoReader;
@@ -1721,6 +1734,10 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    setSelectedExcerptId(null);
+  }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
+
   const updateActiveNote = (changes: Partial<NotePage>) => {
     updateActiveNotebook((notebook) => ({
       ...notebook,
@@ -1888,6 +1905,7 @@ export default function Home() {
 
   const deleteExcerpt = (excerptId: string) => {
     updateActiveNote({ excerpts: activeNote.excerpts.filter((excerpt) => excerpt.id !== excerptId) });
+    if (selectedExcerptId === excerptId) setSelectedExcerptId(null);
     setToast("Đã xóa trích dẫn khỏi note");
   };
 
@@ -1898,6 +1916,16 @@ export default function Home() {
 
   const editExcerpt = (excerptId: string, changes: Partial<NoteExcerpt>) => {
     updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, ...changes } : excerpt) });
+  };
+
+  const shiftExcerptLayer = (direction: "forward" | "backward") => {
+    if (!selectedExcerpt || selectedExcerptIndex < 0) return;
+    const targetIndex = selectedExcerptIndex + (direction === "forward" ? 1 : -1);
+    if (targetIndex < 0 || targetIndex >= activeNote.excerpts.length) return;
+    const next = [...activeNote.excerpts];
+    [next[selectedExcerptIndex], next[targetIndex]] = [next[targetIndex], next[selectedExcerptIndex]];
+    updateActiveNote({ excerpts: next });
+    setToast(direction === "forward" ? "Đã đưa đối tượng lên một lớp" : "Đã đưa đối tượng xuống một lớp");
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
@@ -2757,6 +2785,12 @@ export default function Home() {
                   return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
                 })}
               </div>
+              <span className="toolbar-spacer" />
+              <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">
+                <span className="layer-control-label" title={selectedExcerpt ? "Đối tượng đang chọn" : "Chọn một khung chữ hoặc ảnh để sắp xếp lớp"}><Layers2 size={16} /><span>Lớp</span></span>
+                <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === 0} onClick={() => shiftExcerptLayer("backward")} aria-label="Đưa đối tượng xuống một lớp" title="Đưa xuống một lớp"><ChevronDown size={18} /></button>
+                <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === activeNote.excerpts.length - 1} onClick={() => shiftExcerptLayer("forward")} aria-label="Đưa đối tượng lên một lớp" title="Đưa lên một lớp"><ChevronUp size={18} /></button>
+              </div>
             </div>
           </div>
 
@@ -2824,14 +2858,16 @@ export default function Home() {
           )}
 
           <div className="note-stage workspace-frame">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle}>
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+              if (activeTool === "pointer" && !(event.target as HTMLElement).closest(".note-excerpt")) setSelectedExcerptId(null);
+            }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
                 <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
                 {activeNote.excerpts.length > 0 && (
                   <div className="note-excerpts" aria-label="Trích dẫn từ PDF">
-                    {activeNote.excerpts.map((excerpt, index) => <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} movable={activeTool === "pointer"} editable={activeTool === "text"} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />)}
+                    {activeNote.excerpts.map((excerpt, index) => <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={excerpt.id === selectedExcerptId} movable={activeTool === "pointer"} editable={activeTool === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />)}
                   </div>
                 )}
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
