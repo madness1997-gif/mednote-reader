@@ -47,11 +47,6 @@ export type PdfCropResult = {
 };
 
 type PageViewport = ReturnType<PDFPageProxy["getViewport"]>;
-type TextPosition = { node: Text; offset: number };
-type ClientBox = { left: number; top: number; right: number; bottom: number; width: number; height: number };
-type VisualBox = { left: number; top: number; width: number; height: number };
-
-const TEXT_SELECTION_TOOLS: PdfTool[] = ["select", "highlight", "underline", "strikeout"];
 
 function normalizeRect(rect: PdfRect): PdfRect {
   return {
@@ -60,6 +55,37 @@ function normalizeRect(rect: PdfRect): PdfRect {
     x2: Math.max(rect.x1, rect.x2),
     y2: Math.max(rect.y1, rect.y2),
   };
+}
+
+function mergeSelectionClientRects(rects: DOMRect[], clip: DOMRect) {
+  const clipped = rects
+    .map((rect) => ({
+      left: Math.max(clip.left, rect.left),
+      top: Math.max(clip.top, rect.top),
+      right: Math.min(clip.right, rect.right),
+      bottom: Math.min(clip.bottom, rect.bottom),
+    }))
+    .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
+    .sort((a, b) => Math.abs(a.top - b.top) < 2 ? a.left - b.left : a.top - b.top);
+
+  return clipped.reduce<typeof clipped>((lines, rect) => {
+    const height = rect.bottom - rect.top;
+    const current = lines.at(-1);
+    if (!current) return [rect];
+    const currentHeight = current.bottom - current.top;
+    const verticalOverlap = Math.min(current.bottom, rect.bottom) - Math.max(current.top, rect.top);
+    const sameLine = verticalOverlap >= Math.min(height, currentHeight) * .58;
+    const closeEnough = rect.left - current.right <= Math.max(5, Math.min(height, currentHeight) * .45);
+    if (sameLine && closeEnough) {
+      current.left = Math.min(current.left, rect.left);
+      current.top = Math.min(current.top, rect.top);
+      current.right = Math.max(current.right, rect.right);
+      current.bottom = Math.max(current.bottom, rect.bottom);
+    } else {
+      lines.push(rect);
+    }
+    return lines;
+  }, []);
 }
 
 function viewportRect(viewport: PageViewport, rect: PdfRect) {
@@ -113,168 +139,6 @@ function pointSegmentDistance(px: number, py: number, ax: number, ay: number, bx
   return Math.hypot(px - (ax + ratio * dx), py - (ay + ratio * dy));
 }
 
-function firstTextNode(node: Node | null): Text | null {
-  if (!node) return null;
-  if (node.nodeType === Node.TEXT_NODE) return node as Text;
-  const walker = node.ownerDocument?.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-  return (walker?.nextNode() as Text | null) ?? null;
-}
-
-function characterOffsetFromPoint(textNode: Text, x: number, y: number) {
-  const length = textNode.data.length;
-  if (!length) return 0;
-  const doc = textNode.ownerDocument;
-  let low = 0;
-  let high = length;
-
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    const probe = doc.createRange();
-    probe.setStart(textNode, 0);
-    probe.setEnd(textNode, Math.min(length, middle + 1));
-    const rects = Array.from(probe.getClientRects());
-    const rect = rects.at(-1) ?? probe.getBoundingClientRect();
-    const vertical = y >= rect.top - 4 && y <= rect.bottom + 4;
-    const afterCharacter = vertical ? x > rect.right : y > rect.bottom;
-    if (afterCharacter) low = middle + 1;
-    else high = middle;
-  }
-
-  if (low < length) {
-    const character = doc.createRange();
-    character.setStart(textNode, low);
-    character.setEnd(textNode, low + 1);
-    const rect = character.getBoundingClientRect();
-    if (x > rect.left + rect.width / 2) return low + 1;
-  }
-  return low;
-}
-
-function nearestTextPosition(root: HTMLElement, x: number, y: number): TextPosition | null {
-  const doc = root.ownerDocument;
-  const caretDoc = doc as Document & {
-    caretPositionFromPoint?: (clientX: number, clientY: number) => CaretPosition | null;
-    caretRangeFromPoint?: (clientX: number, clientY: number) => Range | null;
-  };
-
-  const caretPosition = caretDoc.caretPositionFromPoint?.(x, y);
-  if (caretPosition?.offsetNode && root.contains(caretPosition.offsetNode)) {
-    const node = firstTextNode(caretPosition.offsetNode);
-    if (node) {
-      const offset = caretPosition.offsetNode === node
-        ? Math.max(0, Math.min(node.data.length, caretPosition.offset))
-        : characterOffsetFromPoint(node, x, y);
-      return { node, offset };
-    }
-  }
-
-  const caretRange = caretDoc.caretRangeFromPoint?.(x, y);
-  if (caretRange?.startContainer && root.contains(caretRange.startContainer)) {
-    const node = firstTextNode(caretRange.startContainer);
-    if (node) {
-      const offset = caretRange.startContainer === node
-        ? Math.max(0, Math.min(node.data.length, caretRange.startOffset))
-        : characterOffsetFromPoint(node, x, y);
-      return { node, offset };
-    }
-  }
-
-  let nearest: { span: HTMLElement; distance: number } | null = null;
-  const spans = root.querySelectorAll<HTMLElement>("span");
-  for (const span of spans) {
-    if (!span.textContent) continue;
-    const rect = span.getBoundingClientRect();
-    if (!rect.width || !rect.height) continue;
-    const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
-    const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
-    const distance = Math.hypot(dx, dy);
-    if (!nearest || distance < nearest.distance) nearest = { span, distance };
-  }
-
-  if (!nearest || nearest.distance > 28) return null;
-  const node = firstTextNode(nearest.span);
-  return node ? { node, offset: characterOffsetFromPoint(node, x, y) } : null;
-}
-
-function orderedRange(start: TextPosition, end: TextPosition) {
-  const doc = start.node.ownerDocument;
-  const startProbe = doc.createRange();
-  startProbe.setStart(start.node, start.offset);
-  startProbe.collapse(true);
-  const endProbe = doc.createRange();
-  endProbe.setStart(end.node, end.offset);
-  endProbe.collapse(true);
-  const forward = startProbe.compareBoundaryPoints(Range.START_TO_START, endProbe) <= 0;
-  const range = doc.createRange();
-  range.setStart(forward ? start.node : end.node, forward ? start.offset : end.offset);
-  range.setEnd(forward ? end.node : start.node, forward ? end.offset : start.offset);
-  return range;
-}
-
-function mergeSelectionBoxes(range: Range): ClientBox[] {
-  const boxes = Array.from(range.getClientRects())
-    .filter((rect) => rect.width > .6 && rect.height > 1)
-    .map((rect) => {
-      const verticalInset = Math.min(1.4, rect.height * .07);
-      const top = rect.top + verticalInset;
-      const bottom = rect.bottom - verticalInset;
-      return {
-        left: rect.left,
-        top,
-        right: rect.right,
-        bottom,
-        width: rect.width,
-        height: Math.max(1, bottom - top),
-      };
-    })
-    .filter((box, index, all) => !all.some((other, otherIndex) => (
-      otherIndex !== index
-      && other.left <= box.left + .5
-      && other.right >= box.right - .5
-      && other.top <= box.top + .5
-      && other.bottom >= box.bottom - .5
-      && other.width * other.height < box.width * box.height * 1.08
-    )))
-    .sort((a, b) => Math.abs(a.top - b.top) < 2 ? a.left - b.left : a.top - b.top);
-
-  return boxes.reduce<ClientBox[]>((merged, box) => {
-    const previous = merged.at(-1);
-    if (!previous) return [box];
-    const sameLine = Math.abs((previous.top + previous.bottom) / 2 - (box.top + box.bottom) / 2)
-      <= Math.max(2.2, Math.min(previous.height, box.height) * .34);
-    const gap = box.left - previous.right;
-    if (!sameLine || gap > Math.max(4, Math.min(previous.height, box.height) * .42) || box.left < previous.left - 2) {
-      return [...merged, box];
-    }
-    const left = Math.min(previous.left, box.left);
-    const top = Math.min(previous.top, box.top);
-    const right = Math.max(previous.right, box.right);
-    const bottom = Math.max(previous.bottom, box.bottom);
-    merged[merged.length - 1] = { left, top, right, bottom, width: right - left, height: bottom - top };
-    return merged;
-  }, []);
-}
-
-function expandToWord(position: TextPosition) {
-  const text = position.node.data;
-  if (!text) return { start: position, end: position };
-  let cursor = Math.min(Math.max(position.offset, 0), text.length - 1);
-  const wordCharacter = (value: string) => /[\p{L}\p{N}_]/u.test(value);
-  if (!wordCharacter(text[cursor]) && cursor > 0 && wordCharacter(text[cursor - 1])) cursor -= 1;
-  let start = cursor;
-  let end = cursor;
-  if (wordCharacter(text[cursor])) {
-    while (start > 0 && wordCharacter(text[start - 1])) start -= 1;
-    while (end < text.length && wordCharacter(text[end])) end += 1;
-  } else {
-    end = Math.min(text.length, cursor + 1);
-  }
-  return {
-    start: { node: position.node, offset: start },
-    end: { node: position.node, offset: end },
-  };
-}
-
 type PdfInkLayerProps = {
   viewport: PageViewport;
   tool: PdfTool;
@@ -291,7 +155,7 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
   const currentRef = useRef<PdfInkAnnotation | null>(null);
   const modeRef = useRef<"idle" | "pen" | "eraser">("idle");
 
-  const render = useCallback((items: PdfInkAnnotation[] = workingRef.current) => {
+  const render = useCallback((items = workingRef.current) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -439,30 +303,13 @@ export function PdfPageView({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
-  const selectionStartRef = useRef<TextPosition | null>(null);
-  const selectionPointerRef = useRef<number | null>(null);
-  const selectionPointRef = useRef<{ x: number; y: number } | null>(null);
-  const selectionFrameRef = useRef<number | null>(null);
-  const selectionMovedRef = useRef(false);
   const [viewport, setViewport] = useState<PageViewport | null>(null);
   const [hostSize, setHostSize] = useState({ width: 700, height: 850 });
   const [loading, setLoading] = useState(true);
-  const [liveSelectionBoxes, setLiveSelectionBoxes] = useState<VisualBox[]>([]);
+  const selectionTimerRef = useRef<number | null>(null);
   const cropStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [cropBox, setCropBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const selectionEnabled = TEXT_SELECTION_TOOLS.includes(tool);
-
-  const clearSelectionVisual = useCallback(() => {
-    if (selectionFrameRef.current !== null) cancelAnimationFrame(selectionFrameRef.current);
-    selectionFrameRef.current = null;
-    selectionStartRef.current = null;
-    selectionPointerRef.current = null;
-    selectionPointRef.current = null;
-    selectionMovedRef.current = false;
-    setLiveSelectionBoxes([]);
-    window.getSelection()?.removeAllRanges();
-  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -487,7 +334,6 @@ export function PdfPageView({
     let renderTask: PDFRenderTask | null = null;
     let textLayer: { cancel: () => void } | null = null;
     setLoading(true);
-    clearSelectionVisual();
     void document.getPage(page).then(async (pdfPage) => {
       if (disposed) return;
       const base = pdfPage.getViewport({ scale: 1, rotation });
@@ -512,9 +358,6 @@ export function PdfPageView({
 
       textContainer.replaceChildren();
       textContainer.style.setProperty("--scale-factor", `${nextViewport.scale}`);
-      textContainer.style.setProperty("--total-scale-factor", `${nextViewport.scale}`);
-      textContainer.style.setProperty("--scale-round-x", "1px");
-      textContainer.style.setProperty("--scale-round-y", "1px");
       const [{ TextLayer }, textContent] = await Promise.all([
         import("pdfjs-dist"),
         pdfPage.getTextContent(),
@@ -524,10 +367,6 @@ export function PdfPageView({
       textLayer = layer;
       await layer.render();
       if (disposed) return;
-      textContainer.querySelectorAll<HTMLElement>("span.markedContent").forEach((element) => {
-        element.style.top = "0";
-        element.style.height = "0";
-      });
       const query = searchQuery.trim().toLocaleLowerCase();
       if (query) {
         layer.textDivs.forEach((element, index) => {
@@ -544,160 +383,74 @@ export function PdfPageView({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [clearSelectionVisual, continuous, document, fitMode, hostSize.height, hostSize.width, page, rotation, searchQuery, zoom]);
-
-  useEffect(() => {
-    if (!selectionEnabled) clearSelectionVisual();
-  }, [clearSelectionVisual, selectionEnabled]);
-
-  useEffect(() => {
-    const onDocumentPointerDown = (event: PointerEvent) => {
-      const surface = surfaceRef.current;
-      if (surface && !surface.contains(event.target as Node)) setLiveSelectionBoxes([]);
-    };
-    window.document.addEventListener("pointerdown", onDocumentPointerDown);
-    return () => window.document.removeEventListener("pointerdown", onDocumentPointerDown);
-  }, []);
+  }, [continuous, document, fitMode, hostSize.height, hostSize.width, page, rotation, searchQuery, zoom]);
 
   const pageAnnotations = useMemo(() => annotations.filter((annotation) => annotation.page === page), [annotations, page]);
   const inkAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfInkAnnotation => annotation.kind === "ink"), [pageAnnotations]);
   const markupAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfMarkupAnnotation => annotation.kind !== "ink"), [pageAnnotations]);
 
-  const publishSelection = useCallback((start: TextPosition, end: TextPosition, pointerX: number, pointerY: number, commit: boolean) => {
-    const textLayer = textLayerRef.current;
-    if (!viewport || !textLayer) return false;
-    const range = orderedRange(start, end);
-    const text = range.toString().replace(/\s+/g, " ").trim();
-    const boxes = mergeSelectionBoxes(range);
-    if (!text || !boxes.length) {
-      setLiveSelectionBoxes([]);
-      return false;
-    }
+  const captureSelection = useCallback((delay = 18) => {
+    if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout"].includes(tool)) return;
+    if (selectionTimerRef.current) window.clearTimeout(selectionTimerRef.current);
+    selectionTimerRef.current = window.setTimeout(() => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      const layer = textLayerRef.current;
+      if (!layer || !selection.anchorNode || !selection.focusNode || !layer.contains(selection.anchorNode) || !layer.contains(selection.focusNode)) return;
+      const text = selection.toString()
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n[ \t]+/g, "\n")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+      if (!text) return;
+      const surface = surfaceRef.current!;
+      const surfaceRect = surface.getBoundingClientRect();
+      const contentRect = new DOMRect(
+        surfaceRect.left + surface.clientLeft,
+        surfaceRect.top + surface.clientTop,
+        viewport.width,
+        viewport.height,
+      );
+      const clientRects = mergeSelectionClientRects(Array.from(range.getClientRects()), contentRect);
+      const rects = clientRects.map((rect) => {
+        const [x1, y1] = viewport.convertToPdfPoint(rect.left - contentRect.left, rect.top - contentRect.top);
+        const [x2, y2] = viewport.convertToPdfPoint(rect.right - contentRect.left, rect.bottom - contentRect.top);
+        return normalizeRect({ x1, y1, x2, y2 });
+      });
+      if (!rects.length) return;
+      const anchor = clientRects.at(-1)!;
+      onSelection({
+        page,
+        text,
+        rects,
+        menuX: Math.min(window.innerWidth - 14, Math.max(14, (anchor.left + anchor.right) / 2)),
+        menuY: Math.max(62, anchor.top - 10),
+      });
+    }, delay);
+  }, [onSelection, page, tool, viewport]);
 
-    const layerRect = textLayer.getBoundingClientRect();
-    setLiveSelectionBoxes(boxes.map((box) => ({
-      left: box.left - layerRect.left,
-      top: box.top - layerRect.top,
-      width: box.width,
-      height: box.height,
-    })));
-
-    if (!commit) return true;
-    const rects = boxes.map((box) => {
-      const [x1, y1] = viewport.convertToPdfPoint(box.left - layerRect.left, box.top - layerRect.top);
-      const [x2, y2] = viewport.convertToPdfPoint(box.right - layerRect.left, box.bottom - layerRect.top);
-      return normalizeRect({ x1, y1, x2, y2 });
-    });
-    const anchor = boxes.reduce((closest, box) => {
-      const centerX = box.left + box.width / 2;
-      const centerY = box.top + box.height / 2;
-      const distance = Math.hypot(pointerX - centerX, pointerY - centerY);
-      return !closest || distance < closest.distance ? { box, distance } : closest;
-    }, null as { box: ClientBox; distance: number } | null)?.box ?? boxes.at(-1)!;
-
-    onSelection({
-      page,
-      text,
-      rects,
-      menuX: Math.min(window.innerWidth - 14, Math.max(14, anchor.left + anchor.width / 2)),
-      menuY: Math.max(62, anchor.top - 9),
-    });
-    window.getSelection()?.removeAllRanges();
-    return true;
-  }, [onSelection, page, viewport]);
-
-  const updateSelectionAtPoint = useCallback((x: number, y: number, commit = false) => {
-    const textLayer = textLayerRef.current;
-    const start = selectionStartRef.current;
-    if (!textLayer || !start) return false;
-    const end = nearestTextPosition(textLayer, x, y);
-    return end ? publishSelection(start, end, x, y, commit) : false;
-  }, [publishSelection]);
-
-  const scheduleSelectionUpdate = useCallback((x: number, y: number) => {
-    selectionPointRef.current = { x, y };
-    if (selectionFrameRef.current !== null) return;
-    selectionFrameRef.current = requestAnimationFrame(() => {
-      selectionFrameRef.current = null;
-      const point = selectionPointRef.current;
-      if (point) updateSelectionAtPoint(point.x, point.y, false);
-    });
-  }, [updateSelectionAtPoint]);
-
-  const autoScrollForSelection = (clientY: number) => {
-    const stage = surfaceRef.current?.closest(".document-stage") as HTMLElement | null;
-    if (!stage) return;
-    const rect = stage.getBoundingClientRect();
-    const edge = Math.min(58, rect.height * .12);
-    let delta = 0;
-    if (clientY < rect.top + edge) delta = -Math.ceil((rect.top + edge - clientY) / 4);
-    else if (clientY > rect.bottom - edge) delta = Math.ceil((clientY - (rect.bottom - edge)) / 4);
-    if (delta) stage.scrollTop += Math.max(-22, Math.min(22, delta));
-  };
-
-  const onSelectionPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!selectionEnabled || event.button !== 0) return;
-    const textLayer = textLayerRef.current;
-    if (!textLayer) return;
-    const position = nearestTextPosition(textLayer, event.clientX, event.clientY);
-    if (!position) return;
-    event.preventDefault();
-    event.stopPropagation();
-    window.getSelection()?.removeAllRanges();
-    setLiveSelectionBoxes([]);
-    selectionStartRef.current = position;
-    selectionPointerRef.current = event.pointerId;
-    selectionPointRef.current = { x: event.clientX, y: event.clientY };
-    selectionMovedRef.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const onSelectionPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (selectionPointerRef.current !== event.pointerId || !selectionStartRef.current) return;
-    event.preventDefault();
-    const origin = selectionPointRef.current;
-    if (!origin || Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 2) selectionMovedRef.current = true;
-    autoScrollForSelection(event.clientY);
-    scheduleSelectionUpdate(event.clientX, event.clientY);
-  };
-
-  const finishTextSelection = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (selectionPointerRef.current !== event.pointerId || !selectionStartRef.current) return;
-    event.preventDefault();
-    if (selectionFrameRef.current !== null) cancelAnimationFrame(selectionFrameRef.current);
-    selectionFrameRef.current = null;
-    const committed = selectionMovedRef.current && updateSelectionAtPoint(event.clientX, event.clientY, true);
-    if (!committed) setLiveSelectionBoxes([]);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    selectionStartRef.current = null;
-    selectionPointerRef.current = null;
-    selectionPointRef.current = null;
-    selectionMovedRef.current = false;
-  };
-
-  const cancelTextSelection = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (selectionPointerRef.current !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    clearSelectionVisual();
-  };
-
-  const onSelectionDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!selectionEnabled) return;
-    const textLayer = textLayerRef.current;
-    if (!textLayer) return;
-    const position = nearestTextPosition(textLayer, event.clientX, event.clientY);
-    if (!position) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const word = expandToWord(position);
-    publishSelection(word.start, word.end, event.clientX, event.clientY, true);
-  };
+  useEffect(() => {
+    if (tool !== "select") return;
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      const layer = textLayerRef.current;
+      if (!selection || selection.isCollapsed || !layer || !selection.anchorNode || !selection.focusNode) return;
+      if (layer.contains(selection.anchorNode) && layer.contains(selection.focusNode)) captureSelection(55);
+    };
+    window.document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      window.document.removeEventListener("selectionchange", handleSelectionChange);
+      if (selectionTimerRef.current) window.clearTimeout(selectionTimerRef.current);
+    };
+  }, [captureSelection, tool]);
 
   const pointerPosition = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = surfaceRef.current!.getBoundingClientRect();
+    const surface = surfaceRef.current!;
+    const rect = surface.getBoundingClientRect();
     return {
-      x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
-      y: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+      x: Math.max(0, Math.min(viewport?.width ?? rect.width, event.clientX - rect.left - surface.clientLeft)),
+      y: Math.max(0, Math.min(viewport?.height ?? rect.height, event.clientY - rect.top - surface.clientTop)),
     };
   };
 
@@ -742,8 +495,10 @@ export function PdfPageView({
     }
     const sourceCanvas = canvasRef.current;
     if (sourceCanvas) {
-      const scaleX = sourceCanvas.width / viewport.width;
-      const scaleY = sourceCanvas.height / viewport.height;
+      const cssWidth = viewport.width;
+      const cssHeight = viewport.height;
+      const scaleX = sourceCanvas.width / cssWidth;
+      const scaleY = sourceCanvas.height / cssHeight;
       const output = window.document.createElement("canvas");
       output.width = Math.max(1, Math.floor(cropBox.width * scaleX));
       output.height = Math.max(1, Math.floor(cropBox.height * scaleY));
@@ -775,6 +530,7 @@ export function PdfPageView({
         ref={surfaceRef}
         className={`pdf-page-surface pdf-tool-${tool}`}
         style={viewport ? { width: viewport.width, height: viewport.height } : undefined}
+        onPointerUp={() => captureSelection(16)}
       >
         <canvas ref={canvasRef} className="pdf-page-canvas" />
         {viewport && (
@@ -789,35 +545,7 @@ export function PdfPageView({
             })()}
           </div>
         )}
-        {liveSelectionBoxes.length > 0 && (
-          <div aria-hidden="true" style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>
-            {liveSelectionBoxes.map((box, index) => (
-              <span
-                key={`${box.left}-${box.top}-${index}`}
-                style={{
-                  position: "absolute",
-                  left: box.left,
-                  top: box.top,
-                  width: box.width,
-                  height: box.height,
-                  borderRadius: 2,
-                  background: "rgba(37, 132, 193, .28)",
-                  boxShadow: "inset 0 0 0 .5px rgba(22, 105, 161, .2)",
-                }}
-              />
-            ))}
-          </div>
-        )}
-        <div
-          ref={textLayerRef}
-          className={`textLayer pdf-text-layer ${selectionEnabled ? "selectable" : ""}`}
-          style={selectionEnabled ? { zIndex: 3, userSelect: "none", WebkitUserSelect: "none", touchAction: "none", cursor: "text" } : undefined}
-          onPointerDown={onSelectionPointerDown}
-          onPointerMove={onSelectionPointerMove}
-          onPointerUp={finishTextSelection}
-          onPointerCancel={cancelTextSelection}
-          onDoubleClick={onSelectionDoubleClick}
-        />
+        <div ref={textLayerRef} className={`textLayer pdf-text-layer ${["select", "highlight", "underline", "strikeout"].includes(tool) ? "selectable" : ""}`} />
         {viewport && <PdfInkLayer viewport={viewport} tool={tool} color={inkColor} width={inkWidth} annotations={inkAnnotations} onCommit={(next, previous) => onInkCommit(next.map((annotation) => ({ ...annotation, page })), previous.map((annotation) => ({ ...annotation, page })))} />}
         {(tool === "crop" || tool === "pan") && (
           <div className={`pdf-interaction-layer ${tool}`} onPointerDown={onInteractionDown} onPointerMove={onInteractionMove} onPointerUp={finishInteraction} onPointerCancel={finishInteraction}>

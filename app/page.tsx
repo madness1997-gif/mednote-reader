@@ -13,9 +13,12 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Cloud,
+  CloudOff,
   Copy,
   Crop,
   Download,
+  DownloadCloud,
   Eraser,
   FileText,
   FolderOpen,
@@ -37,6 +40,7 @@ import {
   PenTool,
   Plus,
   Redo2,
+  RefreshCw,
   RotateCw,
   Rows3,
   ScanText,
@@ -50,6 +54,7 @@ import {
   Trash2,
   Underline,
   Undo2,
+  UploadCloud,
   X,
 } from "lucide-react";
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
@@ -68,6 +73,16 @@ import {
   type PdfTool,
   type PdfViewMode,
 } from "./pdf-reader";
+import {
+  downloadDriveFile,
+  getDriveUser,
+  listDriveAppFiles,
+  requestDriveToken,
+  revokeDriveToken,
+  upsertDriveFile,
+  type DriveAppFile,
+  type DriveUser,
+} from "./google-drive";
 
 type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text";
 type InkTool = "pen" | "highlight" | "shape";
@@ -150,6 +165,7 @@ type ExcerptLayout = {
   y: number;
   width: number;
   height: number;
+  contentScale: number;
 };
 
 type Notebook = {
@@ -199,6 +215,7 @@ type PersistedLibrary = {
   workspaces: WorkspaceItem[];
   activeWorkspaceId: string;
   readerShare: number;
+  savedAt?: number;
 };
 
 type LegacyNotebookState = {
@@ -214,6 +231,8 @@ const STORAGE_KEY = "mednote-library-v2";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
 const DB_NAME = "mednote-local";
 const DB_STORE = "documents";
+const DRIVE_MANIFEST_ID = "manifest:v1";
+const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "handwriting", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
@@ -365,6 +384,7 @@ function defaultExcerptLayout(index: number, kind: NoteExcerpt["kind"]): Excerpt
     y: Math.min(.69, .52 + row * .08),
     width: kind === "image" ? .4 : .38,
     height: kind === "image" ? .3 : .25,
+    contentScale: 1,
   };
 }
 
@@ -377,6 +397,7 @@ function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, inde
     y: Math.min(1 - height, Math.max(0, layout?.y ?? fallback.y)),
     width,
     height,
+    contentScale: Math.min(2.4, Math.max(.65, layout?.contentScale ?? 1)),
   };
 }
 
@@ -594,16 +615,19 @@ type DraggableExcerptProps = {
   excerpt: NoteExcerpt;
   index: number;
   movable: boolean;
+  editable: boolean;
   onMove: (excerptId: string, layout: ExcerptLayout) => void;
+  onEdit: (excerptId: string, changes: Partial<NoteExcerpt>) => void;
   onOpenSource: (excerpt: NoteExcerpt) => void;
   onDelete: (excerptId: string) => void;
 };
 
-function DraggableExcerpt({ excerpt, index, movable, onMove, onOpenSource, onDelete }: DraggableExcerptProps) {
+function DraggableExcerpt({ excerpt, index, movable, editable, onMove, onEdit, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const [layout, setLayout] = useState(savedLayout);
-  const dragRef = useRef<{
+  const interactionRef = useRef<{
+    mode: "move" | "resize";
     pointerId: number;
     startX: number;
     startY: number;
@@ -615,10 +639,10 @@ function DraggableExcerpt({ excerpt, index, movable, onMove, onOpenSource, onDel
   } | null>(null);
 
   useEffect(() => {
-    if (!dragRef.current) setLayout(savedLayout);
-  }, [savedLayout.height, savedLayout.width, savedLayout.x, savedLayout.y]);
+    if (!interactionRef.current) setLayout(savedLayout);
+  }, [savedLayout.contentScale, savedLayout.height, savedLayout.width, savedLayout.x, savedLayout.y]);
 
-  const startDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+  const startInteraction = (event: React.PointerEvent<HTMLButtonElement>, mode: "move" | "resize") => {
     if (!movable) return;
     const host = articleRef.current?.parentElement;
     if (!host) return;
@@ -626,7 +650,8 @@ function DraggableExcerpt({ excerpt, index, movable, onMove, onOpenSource, onDel
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
+    interactionRef.current = {
+      mode,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -638,48 +663,90 @@ function DraggableExcerpt({ excerpt, index, movable, onMove, onOpenSource, onDel
     };
   };
 
-  const drag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const state = dragRef.current;
+  const updateInteraction = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const state = interactionRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     const dx = (event.clientX - state.startX) / state.hostWidth;
     const dy = (event.clientY - state.startY) / state.hostHeight;
     if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-    state.current = {
-      ...state.origin,
-      x: Math.min(1 - state.origin.width, Math.max(0, state.origin.x + dx)),
-      y: Math.min(1 - state.origin.height, Math.max(0, state.origin.y + dy)),
-    };
+    state.current = state.mode === "move"
+      ? {
+          ...state.origin,
+          x: Math.min(1 - state.origin.width, Math.max(0, state.origin.x + dx)),
+          y: Math.min(1 - state.origin.height, Math.max(0, state.origin.y + dy)),
+        }
+      : {
+          ...state.origin,
+          width: Math.min(1 - state.origin.x, Math.max(.18, state.origin.width + dx)),
+          height: Math.min(1 - state.origin.y, Math.max(.14, state.origin.height + dy)),
+        };
     setLayout(state.current);
   };
 
-  const finishDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const state = dragRef.current;
+  const finishInteraction = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const state = interactionRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
-    dragRef.current = null;
+    interactionRef.current = null;
     if (state.moved) onMove(excerpt.id, state.current);
+  };
+
+  const changeContentScale = (step: number) => {
+    const next = { ...layout, contentScale: Math.min(2.4, Math.max(.65, Number((layout.contentScale + step).toFixed(2)))) };
+    setLayout(next);
+    onMove(excerpt.id, next);
   };
 
   return (
     <article
       ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${movable ? "movable" : ""}`}
+      className={`note-excerpt excerpt-${excerpt.kind} ${movable ? "movable" : ""} ${editable ? "editable" : ""}`}
       style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%` }}
     >
-      <button
-        className="excerpt-drag-handle"
-        disabled={!movable}
-        onPointerDown={startDrag}
-        onPointerMove={drag}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
-        aria-label="Kéo để di chuyển trích dẫn"
-        title={movable ? "Kéo để di chuyển" : "Chọn công cụ Chọn để di chuyển"}
-      ><Move size={13} /></button>
+      {(movable || editable) && (
+        <div className="excerpt-object-controls">
+          <button
+            className="excerpt-drag-handle"
+            disabled={!movable}
+            onPointerDown={(event) => startInteraction(event, "move")}
+            onPointerMove={updateInteraction}
+            onPointerUp={finishInteraction}
+            onPointerCancel={finishInteraction}
+            aria-label="Kéo để di chuyển khung"
+            title={movable ? "Kéo để di chuyển" : "Dùng công cụ Chọn để di chuyển"}
+          ><Move size={13} /></button>
+          <span className="excerpt-scale-controls" aria-label="Kích thước nội dung">
+            <button onClick={() => changeContentScale(-.12)} disabled={!movable || layout.contentScale <= .65} title="Thu nhỏ nội dung" aria-label="Thu nhỏ nội dung"><Minus size={12} /></button>
+            <b>{Math.round(layout.contentScale * 100)}%</b>
+            <button onClick={() => changeContentScale(.12)} disabled={!movable || layout.contentScale >= 2.4} title="Phóng to nội dung" aria-label="Phóng to nội dung"><Plus size={12} /></button>
+          </span>
+          {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : "Chữ"}</span>}
+        </div>
+      )}
       <div className="excerpt-content">
-        {excerpt.kind === "text" ? <p>“{excerpt.text}”</p> : excerpt.assetId ? <StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName}, trang ${excerpt.page}`} /> : <span>Không tìm thấy ảnh</span>}
+        {excerpt.kind === "text" ? (
+          <textarea
+            value={excerpt.text ?? ""}
+            onChange={(event) => onEdit(excerpt.id, { text: event.target.value })}
+            readOnly={!editable}
+            spellCheck={false}
+            style={{ fontSize: `${11 * layout.contentScale}px` }}
+            aria-label="Nội dung đoạn chữ đưa từ PDF"
+          />
+        ) : excerpt.assetId ? (
+          <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName}, trang ${excerpt.page}`} /></div></div>
+        ) : <span>Không tìm thấy ảnh</span>}
       </div>
       <div className="excerpt-source"><button onClick={() => onOpenSource(excerpt)} title="Quay lại đúng vị trí nguồn">{excerpt.kind === "image" ? <Image size={13} /> : <BookOpen size={13} />}<span>{excerpt.documentName} · trang {excerpt.page}</span></button><button className="delete-excerpt" onClick={() => onDelete(excerpt.id)} aria-label="Xóa trích dẫn"><X size={13} /></button></div>
+      {movable && <button
+        className="excerpt-resize-handle"
+        onPointerDown={(event) => startInteraction(event, "resize")}
+        onPointerMove={updateInteraction}
+        onPointerUp={finishInteraction}
+        onPointerCancel={finishInteraction}
+        aria-label="Kéo để đổi kích thước khung"
+        title="Kéo để đổi kích thước khung"
+      ><Maximize2 size={11} /></button>}
     </article>
   );
 }
@@ -1362,6 +1429,16 @@ export default function Home() {
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
+  const [drivePanelOpen, setDrivePanelOpen] = useState(false);
+  const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [driveUser, setDriveUser] = useState<DriveUser | null>(null);
+  const [driveStatus, setDriveStatus] = useState<"disconnected" | "connecting" | "connected" | "syncing" | "error">("disconnected");
+  const [driveReady, setDriveReady] = useState(false);
+  const [driveAutoSync, setDriveAutoSync] = useState(true);
+  const [driveLastSyncedAt, setDriveLastSyncedAt] = useState<number | null>(null);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const localSavedAtRef = useRef(Date.now());
+  const driveSyncingRef = useRef(false);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
@@ -1474,6 +1551,7 @@ export default function Home() {
             setWorkspaces(normalized);
             setActiveWorkspaceId(parsed.activeWorkspaceId || parsed.workspaces[0].id);
             setReaderShare(parsed.readerShare || 50);
+            localSavedAtRef.current = parsed.savedAt || Date.now();
             setReady(true);
             return;
           }
@@ -1541,7 +1619,9 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare } satisfies PersistedLibrary));
+      const savedAt = Date.now();
+      localSavedAtRef.current = savedAt;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, savedAt } satisfies PersistedLibrary));
     } catch { /* storage may be unavailable in private browsing */ }
   }, [workspaces, activeWorkspaceId, readerShare, ready]);
 
@@ -1816,6 +1896,10 @@ export default function Home() {
     setToast("Đã lưu vị trí trích dẫn");
   };
 
+  const editExcerpt = (excerptId: string, changes: Partial<NoteExcerpt>) => {
+    updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, ...changes } : excerpt) });
+  };
+
   const openExcerptSource = (excerpt: NoteExcerpt) => {
     if (!activeWorkspace.documents.some((document) => document.id === excerpt.documentId)) {
       setToast("Tài liệu nguồn đã bị xóa khỏi cụm");
@@ -1833,6 +1917,189 @@ export default function Home() {
     setReaderFocus(false);
     setToast(`Đã quay lại ${excerpt.documentName} · trang ${excerpt.page}`);
   };
+
+  const hasMeaningfulLocalData = () => workspaces.some((workspace) => {
+    if (workspace.kind === "document" || workspace.kind === "collection") return true;
+    if (workspace.kind === "demo") return false;
+    return workspace.notebooks.some((notebook) => notebook.pages.some((page) => page.body.trim() || page.excerpts.length || page.strokes.length));
+  });
+
+  const syncToDrive = async (token = driveToken, silent = false) => {
+    if (!token || driveSyncingRef.current) return false;
+    driveSyncingRef.current = true;
+    setDriveStatus("syncing");
+    setDriveError(null);
+    if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
+    try {
+      const remoteFiles = await listDriveAppFiles(token);
+      const remoteByMednoteId = new Map(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file] as const] : []));
+      const documents = new Map<string, LibraryDocument>();
+      workspaces.forEach((workspace) => workspace.documents.forEach((document) => documents.set(document.id, document)));
+
+      for (const document of documents.values()) {
+        const mednoteId = `pdf:${document.id}`;
+        if (remoteByMednoteId.has(mednoteId)) continue;
+        const stored = await readLocalPdf(document.id);
+        if (!stored) continue;
+        const uploaded = await upsertDriveFile(token, {
+          name: `${document.id}__${document.name}`,
+          mimeType: "application/pdf",
+          mednoteId,
+          blob: stored.blob,
+        });
+        remoteByMednoteId.set(mednoteId, uploaded);
+      }
+
+      const assetIds = new Set(workspaces.flatMap((workspace) => workspace.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : [])))));
+      for (const assetId of assetIds) {
+        const mednoteId = `asset:${assetId}`;
+        if (remoteByMednoteId.has(mednoteId)) continue;
+        const blob = await readLocalAsset(assetId);
+        if (!blob) continue;
+        const uploaded = await upsertDriveFile(token, {
+          name: `${assetId}.png`,
+          mimeType: blob.type || "image/png",
+          mednoteId,
+          blob,
+        });
+        remoteByMednoteId.set(mednoteId, uploaded);
+      }
+
+      const savedAt = localSavedAtRef.current || Date.now();
+      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, savedAt };
+      const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
+      await upsertDriveFile(token, {
+        name: "MedNote Workspace.json",
+        mimeType: "application/json",
+        mednoteId: DRIVE_MANIFEST_ID,
+        blob: new Blob([JSON.stringify(snapshot)], { type: "application/json" }),
+        existingId: existingManifest?.id,
+      });
+      setDriveReady(true);
+      setDriveLastSyncedAt(savedAt);
+      setDriveStatus("connected");
+      if (!silent) setToast("Đã đồng bộ đầy đủ lên Google Drive");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể đồng bộ Google Drive";
+      setDriveError(message);
+      setDriveStatus("error");
+      setToast(`Lỗi Drive: ${message}`);
+      return false;
+    } finally {
+      driveSyncingRef.current = false;
+    }
+  };
+
+  const restoreFromDrive = async (token = driveToken, askBeforeReplace = true) => {
+    if (!token || driveSyncingRef.current) return false;
+    if (askBeforeReplace && hasMeaningfulLocalData() && !window.confirm("Tải dữ liệu từ Google Drive sẽ thay thế workspace đang có trên thiết bị này. Tiếp tục?")) return false;
+    driveSyncingRef.current = true;
+    setDriveStatus("syncing");
+    setDriveError(null);
+    setToast("Đang tải dữ liệu từ Google Drive…");
+    try {
+      const remoteFiles = await listDriveAppFiles(token);
+      const remoteByMednoteId = new Map<string, DriveAppFile>(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file]] : []));
+      const manifestFile = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
+      if (!manifestFile) throw new Error("Google Drive chưa có bản lưu MedNote");
+      const manifestBlob = await downloadDriveFile(token, manifestFile.id);
+      const parsed = JSON.parse(await manifestBlob.text()) as PersistedLibrary;
+      if (!Array.isArray(parsed.workspaces) || !parsed.workspaces.length) throw new Error("Bản lưu Drive không hợp lệ");
+      const normalized = parsed.workspaces.map(normalizeWorkspace);
+      let missingFiles = 0;
+
+      for (const workspace of normalized) {
+        for (const document of workspace.documents) {
+          const remote = remoteByMednoteId.get(`pdf:${document.id}`);
+          if (!remote) {
+            missingFiles += 1;
+            continue;
+          }
+          await saveLocalPdf(await downloadDriveFile(token, remote.id), document);
+        }
+      }
+
+      const assetIds = new Set(normalized.flatMap((workspace) => workspace.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : [])))));
+      for (const assetId of assetIds) {
+        const remote = remoteByMednoteId.get(`asset:${assetId}`);
+        if (!remote) {
+          missingFiles += 1;
+          continue;
+        }
+        await saveLocalAsset(assetId, await downloadDriveFile(token, remote.id));
+      }
+
+      const savedAt = parsed.savedAt || (manifestFile.modifiedTime ? Date.parse(manifestFile.modifiedTime) : Date.now());
+      localSavedAtRef.current = savedAt;
+      setWorkspaces(normalized);
+      setActiveWorkspaceId(normalized.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : normalized[0].id);
+      setReaderShare(parsed.readerShare || 50);
+      setDriveReady(true);
+      setDriveLastSyncedAt(savedAt);
+      setDriveStatus("connected");
+      setToast(missingFiles ? `Đã khôi phục; thiếu ${missingFiles} tệp trên Drive` : "Đã khôi phục đầy đủ từ Google Drive");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể tải dữ liệu từ Google Drive";
+      setDriveError(message);
+      setDriveStatus("error");
+      setToast(`Lỗi Drive: ${message}`);
+      return false;
+    } finally {
+      driveSyncingRef.current = false;
+    }
+  };
+
+  const connectDrive = async () => {
+    setDrivePanelOpen(true);
+    if (!GOOGLE_CLIENT_ID) {
+      setDriveStatus("error");
+      setDriveError("Bản triển khai chưa có Google Client ID");
+      setToast("Cần cấu hình Google Client ID để bật Drive");
+      return;
+    }
+    setDriveStatus("connecting");
+    setDriveError(null);
+    try {
+      const token = await requestDriveToken(GOOGLE_CLIENT_ID);
+      const [user, files] = await Promise.all([getDriveUser(token), listDriveAppFiles(token)]);
+      setDriveToken(token);
+      setDriveUser(user);
+      setDriveStatus("connected");
+      const remoteExists = files.some((file) => file.appProperties?.mednoteId === DRIVE_MANIFEST_ID);
+      if (remoteExists && !hasMeaningfulLocalData()) {
+        await restoreFromDrive(token, false);
+      } else if (!remoteExists) {
+        await syncToDrive(token);
+      } else {
+        setDriveReady(false);
+        setToast("Drive đã có dữ liệu — chọn tải lên hoặc khôi phục");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể kết nối Google Drive";
+      setDriveError(message);
+      setDriveStatus("error");
+      setToast(`Không thể kết nối Drive: ${message}`);
+    }
+  };
+
+  const disconnectDrive = () => {
+    if (driveToken) revokeDriveToken(driveToken);
+    setDriveToken(null);
+    setDriveUser(null);
+    setDriveReady(false);
+    setDriveStatus("disconnected");
+    setDriveError(null);
+    setDrivePanelOpen(false);
+    setToast("Đã ngắt Google Drive; dữ liệu cục bộ vẫn được giữ");
+  };
+
+  useEffect(() => {
+    if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
+    const timer = window.setTimeout(() => { void syncToDrive(driveToken, true); }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, readerShare, ready, workspaces]);
 
   const performSearch = async () => {
     const query = searchQuery.trim();
@@ -2264,9 +2531,53 @@ export default function Home() {
         </div>
         <div className="top-actions">
           <span className="autosave-status"><i />{toast}</span>
+          <button
+            className={`drive-button ${driveToken ? "connected" : ""} ${driveStatus === "syncing" || driveStatus === "connecting" ? "busy" : ""}`}
+            onClick={() => driveToken ? setDrivePanelOpen((open) => !open) : void connectDrive()}
+            aria-label={driveToken ? "Mở đồng bộ Google Drive" : "Kết nối Google Drive"}
+            title="Lưu và đồng bộ bằng Google Drive"
+          >
+            {driveStatus === "syncing" || driveStatus === "connecting" ? <RefreshCw size={16} /> : driveToken ? <Cloud size={16} /> : <CloudOff size={16} />}
+            <span>{driveStatus === "syncing" ? "Đang đồng bộ" : driveToken ? "Drive" : "Kết nối Drive"}</span>
+          </button>
           <button className="primary-button" onClick={() => fileInputRef.current?.click()}><FolderOpen size={16} /> Thêm tài liệu</button>
         </div>
       </header>
+
+      {drivePanelOpen && (
+        <aside className="drive-panel" aria-label="Google Drive">
+          <div className="drive-panel-header">
+            <div><strong>Google Drive</strong><span>JSON, PDF gốc và hình cắt</span></div>
+            <button className="icon-button compact" onClick={() => setDrivePanelOpen(false)} aria-label="Đóng"><X size={17} /></button>
+          </div>
+          {driveUser ? (
+            <>
+              <div className="drive-account">
+                {driveUser.photoLink ? <img src={driveUser.photoLink} alt="" /> : <span>{driveUser.displayName.slice(0, 1).toUpperCase()}</span>}
+                <div><strong>{driveUser.displayName}</strong><small>{driveUser.emailAddress}</small></div>
+                <i className={driveStatus === "error" ? "error" : ""} />
+              </div>
+              {!driveReady && <div className="drive-conflict"><strong>Chọn bản dữ liệu muốn dùng</strong><span>Drive và thiết bị này đều đang có workspace. MedNote sẽ không tự ghi đè khi chưa chọn.</span></div>}
+              <div className="drive-actions">
+                <button onClick={() => { void syncToDrive(); }} disabled={driveStatus === "syncing"}><UploadCloud size={17} /><span><strong>Lưu bản này lên Drive</strong><small>Cập nhật Drive từ thiết bị hiện tại</small></span></button>
+                <button onClick={() => { void restoreFromDrive(); }} disabled={driveStatus === "syncing"}><DownloadCloud size={17} /><span><strong>Tải bản từ Drive</strong><small>Khôi phục workspace và các tệp</small></span></button>
+              </div>
+              <label className="drive-auto-sync"><input type="checkbox" checked={driveAutoSync} disabled={!driveReady} onChange={(event) => setDriveAutoSync(event.target.checked)} /><span><strong>Tự động đồng bộ</strong><small>Vẫn luôn lưu một bản cục bộ trên thiết bị</small></span></label>
+              <div className="drive-panel-footer">
+                <span>{driveError || (driveLastSyncedAt ? `Lần cuối: ${new Date(driveLastSyncedAt).toLocaleString("vi-VN")}` : "Đã kết nối, chưa đồng bộ")}</span>
+                <div>{driveStatus === "error" && <button onClick={() => { void connectDrive(); }}>Kết nối lại</button>}<button onClick={disconnectDrive}>Ngắt kết nối</button></div>
+              </div>
+            </>
+          ) : (
+            <div className={`drive-empty ${driveError ? "error" : ""}`}>
+              {driveStatus === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
+              <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
+              <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
+              {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Thử kết nối lại</button>}
+            </div>
+          )}
+        </aside>
+      )}
 
       {libraryOpen && (
         <div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
@@ -2513,23 +2824,23 @@ export default function Home() {
           )}
 
           <div className="note-stage workspace-frame">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle}>
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
                 <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
                 <textarea className="note-editor" value={activeNote.body} onChange={(event) => updateActiveNote({ body: event.target.value })} readOnly={activeTool !== "text"} placeholder="Bắt đầu nhập nội dung tại đây…" spellCheck={false} aria-label="Nội dung ghi chú" />
                 {activeNote.excerpts.length > 0 && (
                   <div className="note-excerpts" aria-label="Trích dẫn từ PDF">
-                    {activeNote.excerpts.map((excerpt, index) => <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} movable={activeTool === "pointer"} onMove={moveExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />)}
+                    {activeNote.excerpts.map((excerpt, index) => <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} movable={activeTool === "pointer"} editable={activeTool === "text"} onMove={moveExcerpt} onEdit={editExcerpt} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />)}
                   </div>
                 )}
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
               <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
-              {activeTool === "text" && <div className="mode-hint">Chế độ nhập chữ</div>}
-              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo chữ hoặc hình để sắp xếp</div>}
+              {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
+              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo để di chuyển · kéo góc để đổi khung</div>}
             </article>
-            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Kéo thả các đoạn chữ và hình cắt từ PDF" : activeTool === "text" ? "Chạm vào trang để nhập chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Kéo khung để di chuyển, kéo góc dưới phải để đổi kích thước" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
 
