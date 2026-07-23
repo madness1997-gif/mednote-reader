@@ -26,7 +26,8 @@ import {
   FolderOpen,
   Hand,
   Highlighter,
-  Image,
+  IndentDecrease,
+  IndentIncrease,
   Italic,
   Lasso,
   Layers2,
@@ -132,6 +133,7 @@ type TextFont =
 type TextAlign = "left" | "center" | "right" | "justify";
 type TextLineHeight = "1" | "1.15" | "1.5" | "1.8" | "2";
 type BulletStyle = "disc" | "circle" | "square" | "dash";
+type NumberingStyle = "decimal" | "decimal-leading-zero" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman";
 type TableBorderStyle = "solid" | "dashed" | "dotted" | "double";
 type TextSettings = {
   font: TextFont;
@@ -149,8 +151,10 @@ type TextToolbarState = TextSettings & {
   backgroundColor: string;
   lineHeight: TextLineHeight;
   bulletStyle: BulletStyle;
+  numberingStyle: NumberingStyle;
 };
 type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
+type ExcerptAppearance = { borderStyle: TableBorderStyle; borderWidth: number; borderColor: string; backgroundColor: string };
 type TextInsertPopover = "symbols" | "equation" | "table" | null;
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
@@ -193,6 +197,7 @@ type NoteExcerpt = {
   rect?: PdfRect;
   createdAt: number;
   layout?: ExcerptLayout;
+  appearance?: Partial<ExcerptAppearance>;
 };
 
 type ExcerptLayout = {
@@ -279,6 +284,7 @@ const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDe
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
+const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
 const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
@@ -336,6 +342,13 @@ const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
 
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
 const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ccebf3", "#d8f1dc", "#f7d5dd"];
+const BORDER_COLORS = ["transparent", "#60737d", "#111111", "#2465a8", "#c94b50", "#16836f"];
+const TABLE_BORDER_STYLES: { id: TableBorderStyle; label: string }[] = [
+  { id: "solid", label: "Nét liền" },
+  { id: "dashed", label: "Nét gạch" },
+  { id: "dotted", label: "Nét chấm" },
+  { id: "double", label: "Nét đôi" },
+];
 const SYMBOL_GROUPS = [
   { label: "Toán", symbols: ["±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "√", "∑", "∫", "∆"] },
   { label: "Hy Lạp", symbols: ["α", "β", "γ", "δ", "θ", "λ", "μ", "π", "σ", "φ", "Ω"] },
@@ -377,6 +390,11 @@ function normalizedBulletStyle(value: string): BulletStyle {
   return "disc";
 }
 
+function normalizedNumberingStyle(value: string): NumberingStyle {
+  if (value === "decimal-leading-zero" || value === "lower-alpha" || value === "upper-alpha" || value === "lower-roman" || value === "upper-roman") return value;
+  return "decimal";
+}
+
 function textFontFromFamily(family: string): TextFont {
   const normalized = family.toLocaleLowerCase().replace(/["']/g, "");
   return TEXT_FONTS.find((font) => normalized.includes(font.family.split(",")[0].replace(/["']/g, "").toLocaleLowerCase()))?.id ?? "times";
@@ -389,6 +407,7 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
   const weight = Number(style.fontWeight);
   const align: TextAlign = style.textAlign === "center" ? "center" : style.textAlign === "right" ? "right" : style.textAlign === "justify" ? "justify" : "left";
   const list = closestWithin<HTMLUListElement>(anchor, "ul", editor);
+  const orderedList = closestWithin<HTMLOListElement>(anchor, "ol", editor);
   return {
     font: textFontFromFamily(style.fontFamily),
     size: Math.max(8, Math.min(96, Math.round(Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size))),
@@ -403,6 +422,7 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
     backgroundColor: cssBackgroundColor(style.backgroundColor),
     lineHeight: normalizedLineHeight(style),
     bulletStyle: normalizedBulletStyle(list ? window.getComputedStyle(list).listStyleType : "disc"),
+    numberingStyle: normalizedNumberingStyle(orderedList ? window.getComputedStyle(orderedList).listStyleType : "decimal"),
   };
 }
 
@@ -514,6 +534,33 @@ function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, inde
   };
 }
 
+function normalizeExcerptAppearance(appearance?: Partial<ExcerptAppearance>): ExcerptAppearance {
+  const borderStyle = TABLE_BORDER_STYLES.some((option) => option.id === appearance?.borderStyle)
+    ? appearance!.borderStyle!
+    : DEFAULT_TEXT_BOX_APPEARANCE.borderStyle;
+  return {
+    borderStyle,
+    borderWidth: Math.min(8, Math.max(0, Number(appearance?.borderWidth ?? DEFAULT_TEXT_BOX_APPEARANCE.borderWidth))),
+    borderColor: appearance?.borderColor || DEFAULT_TEXT_BOX_APPEARANCE.borderColor,
+    backgroundColor: appearance?.backgroundColor || DEFAULT_TEXT_BOX_APPEARANCE.backgroundColor,
+  };
+}
+
+function boundingPdfRect(rects: PdfRect[]): PdfRect | undefined {
+  if (!rects.length) return undefined;
+  return rects.reduce<PdfRect>((bounds, rect) => ({
+    x1: Math.min(bounds.x1, rect.x1, rect.x2),
+    y1: Math.min(bounds.y1, rect.y1, rect.y2),
+    x2: Math.max(bounds.x2, rect.x1, rect.x2),
+    y2: Math.max(bounds.y2, rect.y1, rect.y2),
+  }), {
+    x1: Math.min(rects[0].x1, rects[0].x2),
+    y1: Math.min(rects[0].y1, rects[0].y2),
+    x2: Math.max(rects[0].x1, rects[0].x2),
+    y2: Math.max(rects[0].y1, rects[0].y2),
+  });
+}
+
 function normalizePage(page: NotePage): NotePage {
   const normalizedText = normalizeText(page.text);
   return {
@@ -529,6 +576,7 @@ function normalizePage(page: NotePage): NotePage {
           sourceKind: excerpt.sourceKind ?? "pdf",
           richText: excerpt.kind === "text" ? sanitizeRichTextHtml(excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")) : undefined,
           layout: normalizeExcerptLayout(excerpt.layout, index, excerpt.kind),
+          appearance: excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance) : undefined,
         }))
       : [],
   };
@@ -881,6 +929,7 @@ type DraggableExcerptProps = {
 function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
+  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance) : null;
   const [layout, setLayout] = useState(savedLayout);
   const interactionRef = useRef<{
     mode: "move" | "resize";
@@ -956,13 +1005,31 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
   return (
     <article
       ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
-      style={{ left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, width: `${layout.width * 100}%`, height: `${layout.height * 100}%`, zIndex: index + 1, "--excerpt-content-scale": layout.contentScale } as React.CSSProperties}
+      className={`note-excerpt excerpt-${excerpt.kind} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${excerpt.kind === "image" ? "excerpt-frameless" : ""} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
+      style={{
+        left: `${layout.x * 100}%`,
+        top: `${layout.y * 100}%`,
+        width: `${layout.width * 100}%`,
+        height: `${layout.height * 100}%`,
+        zIndex: index + 1,
+        "--excerpt-content-scale": layout.contentScale,
+        "--excerpt-border-style": appearance?.borderStyle,
+        "--excerpt-border-width": appearance ? `${appearance.borderWidth}px` : undefined,
+        "--excerpt-border-color": appearance?.borderColor,
+        "--excerpt-background": appearance?.backgroundColor,
+      } as React.CSSProperties}
       onPointerDown={(event) => {
         if (!selectable) return;
         event.stopPropagation();
         onSelect(excerpt.id);
       }}
+      onDoubleClick={(event) => {
+        if (excerpt.sourceKind === "manual" || !excerpt.documentId || !excerpt.page) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenSource(excerpt);
+      }}
+      title={excerpt.sourceKind !== "manual" && excerpt.documentId && excerpt.page ? "Nhấp đúp để quay lại đúng vị trí trong PDF" : undefined}
       aria-selected={selected}
     >
       {selected && (movable || editable) && (
@@ -1004,7 +1071,6 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
           <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
         ) : <span>Không tìm thấy ảnh</span>}
       </div>
-      {excerpt.sourceKind !== "manual" && excerpt.documentId && excerpt.page && <div className="excerpt-source"><button onClick={() => onOpenSource(excerpt)} title="Quay lại đúng vị trí nguồn">{excerpt.kind === "image" ? <Image size={13} /> : <BookOpen size={13} />}<span>{excerpt.documentName} · trang {excerpt.page}</span></button></div>}
       {selected && movable && <button
         className="excerpt-resize-handle"
         onPointerDown={(event) => startInteraction(event, "resize")}
@@ -1699,7 +1765,7 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
-  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc" });
+  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
   const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
   const [equationDraft, setEquationDraft] = useState("y = ax² + b");
   const [tableRows, setTableRows] = useState(3);
@@ -1872,6 +1938,48 @@ export default function Home() {
     }
     lists.forEach((list) => { list.style.listStyleType = bulletStyle === "dash" ? '"–  "' : bulletStyle; });
     finishTextCommand(target, "Đã đổi kiểu dấu đầu dòng");
+  }, [finishTextCommand, restoreTextSelection]);
+
+  const applyNumberingStyle = useCallback((numberingStyle: NumberingStyle) => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào đoạn văn trước khi tạo danh sách");
+      return;
+    }
+    let selection = window.getSelection();
+    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    let lists = range ? [closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor)].filter(Boolean) as HTMLOListElement[] : [];
+    if (!lists.length) {
+      document.execCommand("insertOrderedList", false);
+      selection = window.getSelection();
+      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const list = range ? closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor) : null;
+      if (list) lists = [list];
+    }
+    if (range) {
+      target.editor.querySelectorAll<HTMLOListElement>("ol").forEach((list) => {
+        try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* ignore detached nodes */ }
+      });
+    }
+    lists.forEach((list) => { list.style.listStyleType = numberingStyle; });
+    finishTextCommand(target, "Đã đổi kiểu đánh số");
+  }, [finishTextCommand, restoreTextSelection]);
+
+  const changeListLevel = useCallback((direction: "increase" | "decrease") => {
+    const target = restoreTextSelection();
+    if (!target) {
+      setToast("Bấm vào một mục trong danh sách trước");
+      return;
+    }
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const listItem = range ? closestWithin<HTMLLIElement>(range.startContainer, "li", target.editor) : null;
+    if (!listItem) {
+      setToast("Nút này chỉ dùng cho bullet hoặc numbering");
+      return;
+    }
+    document.execCommand(direction === "increase" ? "indent" : "outdent", false);
+    finishTextCommand(target, direction === "increase" ? "Đã tăng một cấp danh sách" : "Đã giảm một cấp danh sách");
   }, [finishTextCommand, restoreTextSelection]);
 
   const insertTextAtSelection = useCallback((text: string, message = "Đã chèn ký hiệu") => {
@@ -2245,7 +2353,7 @@ export default function Home() {
     setSelectedExcerptId(null);
     activeTextEditorRef.current = null;
     savedTextRangeRef.current = null;
-    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc" });
+    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
     setTextInsertPopover(null);
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
@@ -2436,9 +2544,10 @@ export default function Home() {
       documentId: activeDocument.id,
       documentName: activeDocument.name,
       page: selection.page,
-      rect: selection.rects[0],
+      rect: boundingPdfRect(selection.rects),
       createdAt: Date.now(),
       layout: defaultExcerptLayout(activeNote.excerpts.length, "text"),
+      appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
     };
     updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: selection.page });
     setSelectedExcerptId(excerpt.id);
@@ -2514,6 +2623,7 @@ export default function Home() {
       richText: "",
       createdAt: Date.now(),
       layout: { x, y, width, height, contentScale: 1 },
+      appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
     };
     updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
     setSelectedExcerptId(excerpt.id);
@@ -3464,17 +3574,21 @@ export default function Home() {
               <div className="toolbar-row text-command-row text-paragraph-row" aria-label="Định dạng đoạn, ký hiệu và bảng">
                 <div className="text-style-buttons compact-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={16} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={16} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={16} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={16} /></button></div>
                 <label className="word-select-with-icon" title="Khoảng cách dòng"><Rows3 size={15} /><select value={textToolbar.lineHeight} onChange={(event) => applyTextLineHeight(event.target.value as TextLineHeight)} aria-label="Khoảng cách dòng"><option value="1">1,0</option><option value="1.15">1,15</option><option value="1.5">1,5</option><option value="1.8">1,8</option><option value="2">2,0</option></select></label>
-                <label className="word-select-with-icon bullet-style-select" title="Kiểu dấu đầu dòng"><List size={15} /><select value={textToolbar.bulletStyle} onChange={(event) => applyBulletStyle(event.target.value as BulletStyle)} aria-label="Kiểu dấu đầu dòng"><option value="disc">• Tròn đặc</option><option value="circle">○ Tròn rỗng</option><option value="square">▪ Hình vuông</option><option value="dash">– Gạch ngang</option></select></label>
-                <button className={`word-command-button ${textToolbar.ordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Danh sách đánh số"><ListOrdered size={16} /></button>
+                <button className={`word-command-button ${textToolbar.unordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bullets")} title="Bật/tắt bullet"><List size={16} /></button>
+                <label className="word-select-with-icon bullet-style-select" title="Kiểu dấu đầu dòng"><select value={textToolbar.bulletStyle} onChange={(event) => applyBulletStyle(event.target.value as BulletStyle)} aria-label="Kiểu dấu đầu dòng"><option value="disc">• Tròn đặc</option><option value="circle">○ Tròn rỗng</option><option value="square">▪ Hình vuông</option><option value="dash">– Gạch ngang</option></select></label>
+                <button className={`word-command-button ${textToolbar.ordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Bật/tắt numbering"><ListOrdered size={16} /></button>
+                <label className="word-select-with-icon numbering-style-select" title="Kiểu đánh số"><select value={textToolbar.numberingStyle} onChange={(event) => applyNumberingStyle(event.target.value as NumberingStyle)} aria-label="Kiểu đánh số"><option value="decimal">1. 2. 3.</option><option value="decimal-leading-zero">01. 02. 03.</option><option value="lower-alpha">a. b. c.</option><option value="upper-alpha">A. B. C.</option><option value="lower-roman">i. ii. iii.</option><option value="upper-roman">I. II. III.</option></select></label>
+                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("decrease")} title="Giảm một cấp danh sách" aria-label="Giảm một cấp danh sách"><IndentDecrease size={16} /></button>
+                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("increase")} title="Tăng một cấp danh sách" aria-label="Tăng một cấp danh sách"><IndentIncrease size={16} /></button>
                 <span className="toolbar-mini-divider" />
                 <button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "symbols" ? null : "symbols")} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>
                 <button className={`word-command-button labeled ${textInsertPopover === "equation" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "equation" ? null : "equation")} title="Chèn công thức"><Sigma size={16} /><span>Công thức</span></button>
                 <button className={`word-command-button labeled ${textInsertPopover === "table" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "table" ? null : "table")} title="Chèn bảng"><Table2 size={16} /><span>Bảng</span></button>
                 <span className="toolbar-mini-divider" />
                 <span className="table-border-label">Đường kẻ</span>
-                <select className="border-style-select" value={tableBorder.style} onChange={(event) => updateTableBorder({ style: event.target.value as TableBorderStyle })} aria-label="Loại đường kẻ bảng"><option value="solid">Liền</option><option value="dashed">Gạch</option><option value="dotted">Chấm</option><option value="double">Đôi</option></select>
+                <div className="border-style-options" aria-label="Loại đường kẻ bảng">{TABLE_BORDER_STYLES.map((option) => <button key={option.id} className={tableBorder.style === option.id ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => updateTableBorder({ style: option.id })} title={option.label} aria-label={option.label}><i style={{ borderTopStyle: option.id, borderTopWidth: option.id === "double" ? 3 : 2 }} /></button>)}</div>
                 <select className="border-width-select" value={tableBorder.width} onChange={(event) => updateTableBorder({ width: Number(event.target.value) })} aria-label="Độ dày đường kẻ bảng">{[1, 2, 3, 4, 6].map((width) => <option key={width} value={width}>{width}px</option>)}</select>
-                <label className="table-border-color" title="Màu đường kẻ bảng"><span style={{ background: tableBorder.color }} /><input type="color" value={tableBorder.color} onChange={(event) => updateTableBorder({ color: event.target.value })} /></label>
+                <div className="border-color-options inline-swatch-group" aria-label="Màu đường kẻ bảng">{BORDER_COLORS.map((color) => <button key={color} className={`inline-color-swatch ${tableBorder.color === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateTableBorder({ color })} title={color === "transparent" ? "Trong suốt / không đường kẻ" : `Màu ${color}`} aria-label={color === "transparent" ? "Trong suốt" : `Màu ${color}`} />)}<label className="inline-custom-color" title="Màu đường kẻ tùy chỉnh"><input type="color" value={tableBorder.color === "transparent" ? "#60737d" : tableBorder.color} onChange={(event) => updateTableBorder({ color: event.target.value })} /><span>+</span></label></div>
                 <span className="selection-format-hint">Bôi chọn chữ để định dạng cục bộ</span>
               </div>
             </>}
