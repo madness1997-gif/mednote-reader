@@ -501,13 +501,13 @@ body {
 .rich-text-editor th, .rich-text-editor td { min-width: 44px; min-height: 1.5em; padding: 6px; vertical-align: top; }
 .rich-text-editor td:empty::after, .rich-text-editor th:empty::after { content: "\00a0"; }
 .note-excerpts { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
-.note-excerpt { position: absolute; min-width: 118px; min-height: 96px; display: flex; flex-direction: column; overflow: visible; border-color: var(--excerpt-border-color, #60737d); border-style: var(--excerpt-border-style, solid); border-width: var(--excerpt-border-width, 1px); border-radius: 0; background: var(--excerpt-background, transparent); box-shadow: none; pointer-events: none; }
+.note-excerpt { position: absolute; min-width: 118px; min-height: 96px; display: flex; flex-direction: column; overflow: visible; border-color: var(--excerpt-border-color, #60737d); border-style: var(--excerpt-border-style, solid); border-width: var(--excerpt-border-width, 1px); border-radius: 0; background: var(--excerpt-background, transparent); box-shadow: none; transform-origin: center; pointer-events: none; }
 .note-paper.object-mode .note-excerpt { pointer-events: auto; }
 .note-paper:has(.ink-surface.tool-textbox) { cursor: text; }
-.note-excerpt.movable { outline: 1px dashed color-mix(in srgb, var(--paper-accent) 74%, transparent); outline-offset: 2px; }
+.note-excerpt.selected.movable { outline: 1px dashed color-mix(in srgb, var(--paper-accent) 74%, transparent); outline-offset: 2px; }
 .note-excerpt.selected { outline: 2px solid var(--paper-accent); outline-offset: 2px; box-shadow: 0 5px 15px rgba(24,50,74,.16); }
 .note-excerpt.editable { outline-style: solid; }
-.note-excerpt.excerpt-frameless { min-width: 40px; min-height: 40px; border: 0; background: transparent; box-shadow: none; }
+.note-excerpt.excerpt-frameless { min-width: 28px; min-height: 28px; border: 0; background: transparent; box-shadow: none; }
 .excerpt-object-controls { position: absolute; top: -31px; left: -1px; z-index: 5; height: 29px; display: flex; align-items: center; gap: 3px; padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--paper-accent) 32%, var(--paper-line)); border-radius: 7px; background: color-mix(in srgb, var(--paper-bg) 95%, white); box-shadow: 0 3px 10px rgba(24,50,74,.14); white-space: nowrap; pointer-events: auto; }
 .excerpt-drag-handle { width: 24px; height: 23px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--paper-accent); opacity: .58; pointer-events: auto; touch-action: none; cursor: default; }
 .excerpt-drag-handle:disabled { opacity: .25; }
@@ -518,6 +518,11 @@ body {
 .excerpt-scale-controls button:hover { background: color-mix(in srgb, var(--paper-accent) 11%, transparent); }
 .excerpt-scale-controls button:disabled { color: #aeb9bd; cursor: default; }
 .excerpt-scale-controls b { min-width: 34px; color: var(--muted); font-size: 8px; text-align: center; }
+.excerpt-opacity-controls, .excerpt-rotation-controls { height: 23px; display: inline-flex; align-items: center; gap: 3px; padding: 0 3px; border-right: 1px solid var(--paper-line); color: var(--paper-accent); }
+.excerpt-opacity-controls input { width: 66px; accent-color: var(--paper-accent); cursor: pointer; }
+.excerpt-opacity-controls b, .excerpt-rotation-controls b { min-width: 27px; color: var(--muted); font-size: 8px; text-align: center; }
+.excerpt-rotation-controls button { width: 21px; height: 21px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--paper-accent); cursor: pointer; }
+.excerpt-rotation-controls button:hover { background: color-mix(in srgb, var(--paper-accent) 11%, transparent); }
 .excerpt-edit-indicator { display: inline-flex; align-items: center; gap: 3px; padding: 0 3px; color: var(--paper-accent); font-size: 8px; font-weight: 700; }
 .excerpt-delete-control { width: 22px; height: 21px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #aa555b; cursor: pointer; }
 .excerpt-delete-control:hover { background: #fff0f0; }
@@ -527,11 +532,14 @@ body {
 .excerpt-rich-editor[contenteditable="false"] { cursor: default; }
 .excerpt-rich-editor[contenteditable="true"] { border-radius: 5px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper-accent) 28%, transparent); padding: 5px; cursor: text; }
 .excerpt-image-viewport, .excerpt-image-viewport > div { width: 100%; height: 100%; }
-.excerpt-image-viewport { overflow: hidden; }
+.excerpt-image-viewport { overflow: hidden; background: transparent; transition: opacity .12s ease; }
 .excerpt-image-viewport > div { transform-origin: center; transition: transform .12s ease; }
-.excerpt-content img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.excerpt-content img { width: 100%; height: 100%; display: block; object-fit: contain; user-select: none; -webkit-user-drag: none; }
 .excerpt-image-loading { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: 9px; }
 .excerpt-resize-handle { position: absolute; right: -8px; bottom: -8px; z-index: 6; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--paper-accent); color: white; box-shadow: 0 2px 7px rgba(24,50,74,.25); cursor: nwse-resize; touch-action: none; }
+.excerpt-rotate-handle { position: absolute; top: 50%; right: -47px; z-index: 6; width: 25px; height: 25px; display: grid; place-items: center; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--paper-accent); color: white; box-shadow: 0 2px 7px rgba(24,50,74,.25); cursor: grab; touch-action: none; transform: translateY(-50%); }
+.excerpt-rotate-handle::after { content: ""; position: absolute; top: 50%; right: 23px; width: 24px; height: 1px; background: var(--paper-accent); transform: translateY(-50%); pointer-events: none; }
+.excerpt-rotate-handle:active { cursor: grabbing; }
 .ink-surface { position: absolute; inset: 0; z-index: 2; touch-action: none; }
 .ink-surface.tool-text, .ink-surface.tool-textbox, .ink-surface.tool-pointer { pointer-events: none; }
 .ink-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }

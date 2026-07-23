@@ -5,10 +5,12 @@ import {
   AlignJustify,
   AlignLeft,
   AlignRight,
+  Blend,
   BookOpen,
   Bold,
   Bookmark,
   BookmarkCheck,
+  BringToFront,
   Brush,
   Check,
   ChevronDown,
@@ -51,10 +53,12 @@ import {
   Redo2,
   RemoveFormatting,
   RefreshCw,
+  RotateCcw,
   RotateCw,
   Rows3,
   ScanText,
   Search,
+  SendToBack,
   Settings2,
   Shapes,
   Sigma,
@@ -206,6 +210,9 @@ type ExcerptLayout = {
   width: number;
   height: number;
   contentScale: number;
+  rotation: number;
+  opacity: number;
+  aspectRatio?: number;
 };
 
 type Notebook = {
@@ -518,19 +525,28 @@ function defaultExcerptLayout(index: number, kind: NoteExcerpt["kind"]): Excerpt
     width: kind === "image" ? .4 : .38,
     height: kind === "image" ? .3 : .25,
     contentScale: 1,
+    rotation: 0,
+    opacity: 1,
   };
 }
 
 function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, index: number, kind: NoteExcerpt["kind"]): ExcerptLayout {
   const fallback = defaultExcerptLayout(index, kind);
-  const width = Math.min(.72, Math.max(.2, layout?.width ?? fallback.width));
-  const height = Math.min(.62, Math.max(.16, layout?.height ?? fallback.height));
+  const width = Math.min(.9, Math.max(kind === "image" ? .06 : .2, layout?.width ?? fallback.width));
+  const height = Math.min(.82, Math.max(kind === "image" ? .04 : .16, layout?.height ?? fallback.height));
+  const rawRotation = Number(layout?.rotation ?? 0);
+  const rotation = Number.isFinite(rawRotation) ? ((rawRotation + 180) % 360 + 360) % 360 - 180 : 0;
+  const rawAspectRatio = Number(layout?.aspectRatio);
+  const rawOpacity = Number(layout?.opacity ?? 1);
   return {
     x: Math.min(1 - width, Math.max(0, layout?.x ?? fallback.x)),
     y: Math.min(1 - height, Math.max(0, layout?.y ?? fallback.y)),
     width,
     height,
     contentScale: Math.min(2.4, Math.max(.65, layout?.contentScale ?? 1)),
+    rotation,
+    opacity: Number.isFinite(rawOpacity) ? Math.min(1, Math.max(.1, rawOpacity)) : 1,
+    aspectRatio: Number.isFinite(rawAspectRatio) && rawAspectRatio > 0 ? rawAspectRatio : undefined,
   };
 }
 
@@ -907,7 +923,7 @@ function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [assetId]);
-  return source ? <img src={source} alt={alt} /> : <span className="excerpt-image-loading">Đang mở ảnh…</span>;
+  return source ? <img src={source} alt={alt} draggable={false} /> : <span className="excerpt-image-loading">Đang mở ảnh…</span>;
 }
 
 type DraggableExcerptProps = {
@@ -932,10 +948,13 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
   const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance) : null;
   const [layout, setLayout] = useState(savedLayout);
   const interactionRef = useRef<{
-    mode: "move" | "resize";
+    mode: "move" | "resize" | "rotate";
     pointerId: number;
     startX: number;
     startY: number;
+    centerX: number;
+    centerY: number;
+    startAngle: number;
     origin: ExcerptLayout;
     hostWidth: number;
     hostHeight: number;
@@ -945,13 +964,17 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
 
   useEffect(() => {
     if (!interactionRef.current) setLayout(savedLayout);
-  }, [savedLayout.contentScale, savedLayout.height, savedLayout.width, savedLayout.x, savedLayout.y]);
+  }, [savedLayout.aspectRatio, savedLayout.contentScale, savedLayout.height, savedLayout.opacity, savedLayout.rotation, savedLayout.width, savedLayout.x, savedLayout.y]);
 
-  const startInteraction = (event: React.PointerEvent<HTMLButtonElement>, mode: "move" | "resize") => {
+  const startInteraction = (event: React.PointerEvent<HTMLElement>, mode: "move" | "resize" | "rotate") => {
     if (!movable) return;
     const host = articleRef.current?.parentElement;
-    if (!host) return;
+    const article = articleRef.current;
+    if (!host || !article) return;
     const rect = host.getBoundingClientRect();
+    const articleRect = article.getBoundingClientRect();
+    const centerX = articleRect.left + articleRect.width / 2;
+    const centerY = articleRect.top + articleRect.height / 2;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -960,6 +983,9 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      centerX,
+      centerY,
+      startAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI,
       origin: layout,
       hostWidth: Math.max(1, rect.width),
       hostHeight: Math.max(1, rect.height),
@@ -968,28 +994,48 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     };
   };
 
-  const updateInteraction = (event: React.PointerEvent<HTMLButtonElement>) => {
+  const updateInteraction = (event: React.PointerEvent<HTMLElement>) => {
     const state = interactionRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     const dx = (event.clientX - state.startX) / state.hostWidth;
     const dy = (event.clientY - state.startY) / state.hostHeight;
-    if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-    state.current = state.mode === "move"
-      ? {
+    if (state.mode === "rotate") {
+      const angle = Math.atan2(event.clientY - state.centerY, event.clientX - state.centerX) * 180 / Math.PI;
+      const delta = angle - state.startAngle;
+      if (Math.abs(delta) > .5) state.moved = true;
+      state.current = {
+        ...state.origin,
+        rotation: Math.round((((state.origin.rotation + delta + 180) % 360) + 360) % 360 - 180),
+      };
+    } else if (state.mode === "move") {
+      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
+      state.current = {
           ...state.origin,
           x: Math.min(1 - state.origin.width, Math.max(0, state.origin.x + dx)),
           y: Math.min(1 - state.origin.height, Math.max(0, state.origin.y + dy)),
-        }
-      : {
+      };
+    } else if (state.origin.aspectRatio) {
+      const widthFromX = state.origin.width + dx;
+      const widthFromY = state.origin.width + dy * state.hostHeight * state.origin.aspectRatio / state.hostWidth;
+      const requestedWidth = Math.abs(widthFromX - state.origin.width) >= Math.abs(widthFromY - state.origin.width) ? widthFromX : widthFromY;
+      const maxWidthForHeight = (1 - state.origin.y) * state.origin.aspectRatio * state.hostHeight / state.hostWidth;
+      const width = Math.min(1 - state.origin.x, maxWidthForHeight, Math.max(.06, requestedWidth));
+      const height = width * state.hostWidth / (state.origin.aspectRatio * state.hostHeight);
+      if (Math.abs(width - state.origin.width) > .002) state.moved = true;
+      state.current = { ...state.origin, width, height };
+    } else {
+      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
+      state.current = {
           ...state.origin,
           width: Math.min(1 - state.origin.x, Math.max(.18, state.origin.width + dx)),
           height: Math.min(1 - state.origin.y, Math.max(.14, state.origin.height + dy)),
-        };
+      };
+    }
     setLayout(state.current);
   };
 
-  const finishInteraction = (event: React.PointerEvent<HTMLButtonElement>) => {
+  const finishInteraction = (event: React.PointerEvent<HTMLElement>) => {
     const state = interactionRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     interactionRef.current = null;
@@ -998,6 +1044,19 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
 
   const changeContentScale = (step: number) => {
     const next = { ...layout, contentScale: Math.min(2.4, Math.max(.65, Number((layout.contentScale + step).toFixed(2)))) };
+    setLayout(next);
+    onMove(excerpt.id, next);
+  };
+
+  const changeOpacity = (opacity: number) => {
+    const next = { ...layout, opacity: Math.min(1, Math.max(.1, opacity)) };
+    setLayout(next);
+    onMove(excerpt.id, next);
+  };
+
+  const rotateBy = (degrees: number) => {
+    const rotation = (((layout.rotation + degrees + 180) % 360) + 360) % 360 - 180;
+    const next = { ...layout, rotation };
     setLayout(next);
     onMove(excerpt.id, next);
   };
@@ -1012,6 +1071,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
         width: `${layout.width * 100}%`,
         height: `${layout.height * 100}%`,
         zIndex: index + 1,
+        transform: `rotate(${layout.rotation}deg)`,
         "--excerpt-content-scale": layout.contentScale,
         "--excerpt-border-style": appearance?.borderStyle,
         "--excerpt-border-width": appearance ? `${appearance.borderWidth}px` : undefined,
@@ -1022,7 +1082,11 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
         if (!selectable) return;
         event.stopPropagation();
         onSelect(excerpt.id);
+        if (excerpt.kind === "image" && movable && !(event.target as HTMLElement).closest("button,input")) startInteraction(event, "move");
       }}
+      onPointerMove={updateInteraction}
+      onPointerUp={finishInteraction}
+      onPointerCancel={finishInteraction}
       onDoubleClick={(event) => {
         if (excerpt.sourceKind === "manual" || !excerpt.documentId || !excerpt.page) return;
         event.preventDefault();
@@ -1044,11 +1108,21 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             aria-label="Kéo để di chuyển khung"
             title={movable ? "Kéo để di chuyển" : "Dùng công cụ Chọn để di chuyển"}
           ><Move size={13} /></button>
-          <span className="excerpt-scale-controls" aria-label="Kích thước nội dung">
+          {excerpt.kind === "text" && <span className="excerpt-scale-controls" aria-label="Kích thước nội dung">
             <button onClick={() => changeContentScale(-.12)} disabled={!movable || layout.contentScale <= .65} title="Thu nhỏ nội dung" aria-label="Thu nhỏ nội dung"><Minus size={12} /></button>
             <b>{Math.round(layout.contentScale * 100)}%</b>
             <button onClick={() => changeContentScale(.12)} disabled={!movable || layout.contentScale >= 2.4} title="Phóng to nội dung" aria-label="Phóng to nội dung"><Plus size={12} /></button>
-          </span>
+          </span>}
+          {excerpt.kind === "image" && <span className="excerpt-opacity-controls" aria-label="Độ trong suốt của ảnh">
+            <Blend size={12} />
+            <input type="range" min=".1" max="1" step=".05" value={layout.opacity} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => changeOpacity(Number(event.target.value))} aria-label="Độ trong suốt của ảnh" />
+            <b>{Math.round(layout.opacity * 100)}%</b>
+          </span>}
+          {excerpt.kind === "image" && <span className="excerpt-rotation-controls" aria-label="Xoay ảnh">
+            <button onClick={() => rotateBy(-15)} title="Xoay trái 15°" aria-label="Xoay trái 15 độ"><RotateCcw size={12} /></button>
+            <b>{Math.round(layout.rotation)}°</b>
+            <button onClick={() => rotateBy(15)} title="Xoay phải 15°" aria-label="Xoay phải 15 độ"><RotateCw size={12} /></button>
+          </span>}
           {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : "Chữ"}</span>}
           <button className="excerpt-delete-control" onClick={() => onDelete(excerpt.id)} aria-label="Xóa khung" title="Xóa khung"><Trash2 size={12} /></button>
         </div>
@@ -1068,9 +1142,18 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             onNormalizeInput={onNormalizeTextInput}
           />
         ) : excerpt.assetId ? (
-          <div className="excerpt-image-viewport"><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
+          <div className="excerpt-image-viewport" style={{ opacity: layout.opacity }}><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
         ) : <span>Không tìm thấy ảnh</span>}
       </div>
+      {selected && movable && excerpt.kind === "image" && <button
+        className="excerpt-rotate-handle"
+        onPointerDown={(event) => startInteraction(event, "rotate")}
+        onPointerMove={updateInteraction}
+        onPointerUp={finishInteraction}
+        onPointerCancel={finishInteraction}
+        aria-label="Kéo để xoay ảnh"
+        title="Kéo để xoay ảnh"
+      ><RotateCw size={13} /></button>}
       {selected && movable && <button
         className="excerpt-resize-handle"
         onPointerDown={(event) => startInteraction(event, "resize")}
@@ -2569,6 +2652,20 @@ export default function Home() {
     const assetId = uid("crop");
     try {
       await saveLocalAsset(assetId, result.blob);
+      const fallbackWidth = Math.max(1, Math.abs(result.rect.x2 - result.rect.x1));
+      const fallbackHeight = Math.max(1, Math.abs(result.rect.y2 - result.rect.y1));
+      let aspectRatio = fallbackWidth / fallbackHeight;
+      try {
+        const bitmap = await createImageBitmap(result.blob);
+        aspectRatio = bitmap.width / Math.max(1, bitmap.height);
+        bitmap.close();
+      } catch { /* kích thước vùng PDF vẫn là dự phòng chính xác */ }
+      const paper = PAPER_SIZES[activeNote.paper.size];
+      const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
+      const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
+      const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
+      layout.aspectRatio = aspectRatio;
+      layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / aspectRatio));
       const excerpt: NoteExcerpt = {
         id: uid("excerpt"),
         kind: "image",
@@ -2579,7 +2676,7 @@ export default function Home() {
         page: result.page,
         rect: result.rect,
         createdAt: Date.now(),
-        layout: defaultExcerptLayout(activeNote.excerpts.length, "image"),
+        layout,
       };
       updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: result.page });
       setSelectedExcerptId(excerpt.id);
@@ -2622,7 +2719,7 @@ export default function Home() {
       text: "",
       richText: "",
       createdAt: Date.now(),
-      layout: { x, y, width, height, contentScale: 1 },
+      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1 },
       appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
     };
     updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
@@ -2632,14 +2729,19 @@ export default function Home() {
     setToast("Đã tạo hộp chữ — nhập nội dung ngay");
   };
 
-  const shiftExcerptLayer = (direction: "forward" | "backward") => {
+  const shiftExcerptLayer = (direction: "front" | "forward" | "backward" | "back") => {
     if (!selectedExcerpt || selectedExcerptIndex < 0) return;
-    const targetIndex = selectedExcerptIndex + (direction === "forward" ? 1 : -1);
+    const targetIndex = direction === "front"
+      ? activeNote.excerpts.length - 1
+      : direction === "back"
+        ? 0
+        : selectedExcerptIndex + (direction === "forward" ? 1 : -1);
     if (targetIndex < 0 || targetIndex >= activeNote.excerpts.length) return;
     const next = [...activeNote.excerpts];
-    [next[selectedExcerptIndex], next[targetIndex]] = [next[targetIndex], next[selectedExcerptIndex]];
+    const [item] = next.splice(selectedExcerptIndex, 1);
+    next.splice(targetIndex, 0, item);
     updateActiveNote({ excerpts: next });
-    setToast(direction === "forward" ? "Đã đưa đối tượng lên một lớp" : "Đã đưa đối tượng xuống một lớp");
+    setToast(direction === "front" ? "Đã đưa đối tượng lên trên cùng" : direction === "back" ? "Đã đưa đối tượng xuống dưới cùng" : direction === "forward" ? "Đã đưa đối tượng lên một lớp" : "Đã đưa đối tượng xuống một lớp");
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
@@ -3551,8 +3653,10 @@ export default function Home() {
               <span className="toolbar-spacer" />
               <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">
                 <span className="layer-control-label" title={selectedExcerpt ? "Đối tượng đang chọn" : "Chọn một khung chữ hoặc ảnh để sắp xếp lớp"}><Layers2 size={16} /><span>Lớp</span></span>
+                <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === 0} onClick={() => shiftExcerptLayer("back")} aria-label="Đưa đối tượng xuống dưới cùng" title="Xuống dưới cùng"><SendToBack size={17} /></button>
                 <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === 0} onClick={() => shiftExcerptLayer("backward")} aria-label="Đưa đối tượng xuống một lớp" title="Đưa xuống một lớp"><ChevronDown size={18} /></button>
                 <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === activeNote.excerpts.length - 1} onClick={() => shiftExcerptLayer("forward")} aria-label="Đưa đối tượng lên một lớp" title="Đưa lên một lớp"><ChevronUp size={18} /></button>
+                <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === activeNote.excerpts.length - 1} onClick={() => shiftExcerptLayer("front")} aria-label="Đưa đối tượng lên trên cùng" title="Lên trên cùng"><BringToFront size={17} /></button>
               </div>
             </div>
             {notePanel === "text" && <>
@@ -3668,7 +3772,7 @@ export default function Home() {
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" && selected} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer"} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
                   })}
                 </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
@@ -3676,9 +3780,9 @@ export default function Home() {
               <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
               {activeTool === "textbox" && <div className="mode-hint">Bấm vị trí muốn đặt hộp chữ</div>}
-              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo để di chuyển · kéo góc để đổi khung</div>}
+              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo trực tiếp ảnh để di chuyển · kéo góc để đổi cỡ · kéo nút tròn để xoay</div>}
             </article>
-            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Kéo khung để di chuyển, kéo góc dưới phải để đổi kích thước" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Ảnh: kéo trực tiếp để di chuyển, kéo góc để đổi cỡ, kéo nút tròn để xoay" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
 
