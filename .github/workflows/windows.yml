@@ -2,12 +2,9 @@ name: Build MedNote for Windows
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
@@ -25,7 +22,3 @@ jobs:
           path: release/MedNote-Reader-Setup-*.exe
           if-no-files-found: error
           retention-days: 30
-      - name: Publish Windows installer
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create v1.1.7 "release/MedNote-Reader-Setup-1.1.7.exe" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MedNote Reader 1.1.7" --notes "Windows installer with the latest Word-style Type toolbar and note image improvements."
