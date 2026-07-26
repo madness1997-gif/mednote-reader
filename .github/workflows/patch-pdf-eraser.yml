@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/patch-pdf-eraser.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
