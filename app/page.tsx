@@ -64,6 +64,8 @@ import {
   Sigma,
   Square,
   Strikethrough,
+  Subscript,
+  Superscript,
   Table2,
   TextSelect,
   TextCursorInput,
@@ -136,8 +138,8 @@ type TextFont =
   | "mono";
 type TextAlign = "left" | "center" | "right" | "justify";
 type TextLineHeight = "1" | "1.15" | "1.5" | "1.8" | "2";
-type BulletStyle = "disc" | "circle" | "square" | "dash";
-type NumberingStyle = "decimal" | "decimal-leading-zero" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman";
+type BulletStyle = "none" | "disc" | "circle" | "square" | "diamond" | "arrow" | "check" | "dash";
+type NumberingStyle = "decimal" | "decimal-leading-zero" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman" | "lower-greek" | "cjk-decimal";
 type TableBorderStyle = "solid" | "dashed" | "dotted" | "double";
 type TextSettings = {
   font: TextFont;
@@ -150,6 +152,8 @@ type TextSettings = {
 };
 type TextToolbarState = TextSettings & {
   strike: boolean;
+  subscript: boolean;
+  superscript: boolean;
   unordered: boolean;
   ordered: boolean;
   backgroundColor: string;
@@ -159,7 +163,7 @@ type TextToolbarState = TextSettings & {
 };
 type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
 type ExcerptAppearance = { borderStyle: TableBorderStyle; borderWidth: number; borderColor: string; backgroundColor: string };
-type TextInsertPopover = "symbols" | "equation" | "table" | null;
+type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | null;
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
   id: string;
@@ -348,13 +352,47 @@ const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
 ];
 
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
-const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ccebf3", "#d8f1dc", "#f7d5dd"];
+const TEXT_COLORS = ["#26343a", "#000000", "#c00000", "#ff0000", "#ed7d31", "#ffc000", "#70ad47", "#00b0f0", "#4472c4", "#7030a0", "#7f7f7f", "#ffffff"];
+const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ffe699", "#ccebf3", "#d8f1dc", "#f7d5dd", "#e4d8f3", "#d9e2f3", "#ffffff"];
+const TEXT_BOX_BACKGROUND_COLORS = ["transparent", "#ffffff", "#fff2a8", "#d8f1dc", "#ccebf3", "#f7d5dd", "#e4d8f3"];
 const BORDER_COLORS = ["transparent", "#60737d", "#111111", "#2465a8", "#c94b50", "#16836f"];
 const TABLE_BORDER_STYLES: { id: TableBorderStyle; label: string }[] = [
   { id: "solid", label: "Nét liền" },
   { id: "dashed", label: "Nét gạch" },
   { id: "dotted", label: "Nét chấm" },
   { id: "double", label: "Nét đôi" },
+];
+const BULLET_STYLES: { id: BulletStyle; glyph: string; label: string }[] = [
+  { id: "none", glyph: "∅", label: "Không dùng dấu đầu dòng" },
+  { id: "disc", glyph: "●", label: "Chấm tròn đặc" },
+  { id: "circle", glyph: "○", label: "Chấm tròn rỗng" },
+  { id: "square", glyph: "▪", label: "Hình vuông" },
+  { id: "diamond", glyph: "◆", label: "Hình thoi" },
+  { id: "arrow", glyph: "➤", label: "Mũi tên" },
+  { id: "check", glyph: "✓", label: "Dấu kiểm" },
+  { id: "dash", glyph: "–", label: "Gạch ngang" },
+];
+const NUMBERING_STYLES: { id: NumberingStyle; sample: string; label: string }[] = [
+  { id: "decimal", sample: "1.  2.  3.", label: "Số thường" },
+  { id: "decimal-leading-zero", sample: "01.  02.  03.", label: "Số có số không đầu" },
+  { id: "lower-alpha", sample: "a.  b.  c.", label: "Chữ thường" },
+  { id: "upper-alpha", sample: "A.  B.  C.", label: "Chữ hoa" },
+  { id: "lower-roman", sample: "i.  ii.  iii.", label: "La Mã thường" },
+  { id: "upper-roman", sample: "I.  II.  III.", label: "La Mã hoa" },
+  { id: "lower-greek", sample: "α.  β.  γ.", label: "Chữ Hy Lạp" },
+  { id: "cjk-decimal", sample: "一.  二.  三.", label: "Số Hán" },
+];
+const LINE_PRESETS: { id: string; style: TableBorderStyle; width: number; label: string }[] = [
+  { id: "none", style: "solid", width: 0, label: "Không đường kẻ" },
+  { id: "hairline", style: "solid", width: 1, label: "Nét liền mảnh" },
+  { id: "solid-medium", style: "solid", width: 2, label: "Nét liền vừa" },
+  { id: "solid-heavy", style: "solid", width: 4, label: "Nét liền đậm" },
+  { id: "dotted", style: "dotted", width: 2, label: "Nét chấm" },
+  { id: "dotted-heavy", style: "dotted", width: 3, label: "Nét chấm đậm" },
+  { id: "dashed", style: "dashed", width: 2, label: "Nét gạch" },
+  { id: "dashed-heavy", style: "dashed", width: 3, label: "Nét gạch đậm" },
+  { id: "double", style: "double", width: 3, label: "Nét đôi" },
+  { id: "double-heavy", style: "double", width: 5, label: "Nét đôi đậm" },
 ];
 const SYMBOL_GROUPS = [
   { label: "Toán", symbols: ["±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "√", "∑", "∫", "∆"] },
@@ -392,13 +430,17 @@ function normalizedLineHeight(style: CSSStyleDeclaration): TextLineHeight {
 }
 
 function normalizedBulletStyle(value: string): BulletStyle {
+  if (value === "none") return "none";
   if (value === "circle" || value === "square") return value;
+  if (value.includes("◆")) return "diamond";
+  if (value.includes("➤")) return "arrow";
+  if (value.includes("✓")) return "check";
   if (value.includes("–") || value.includes("-") || value === "none") return "dash";
   return "disc";
 }
 
 function normalizedNumberingStyle(value: string): NumberingStyle {
-  if (value === "decimal-leading-zero" || value === "lower-alpha" || value === "upper-alpha" || value === "lower-roman" || value === "upper-roman") return value;
+  if (value === "decimal-leading-zero" || value === "lower-alpha" || value === "upper-alpha" || value === "lower-roman" || value === "upper-roman" || value === "lower-greek" || value === "cjk-decimal") return value;
   return "decimal";
 }
 
@@ -424,6 +466,8 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
     underline: document.queryCommandState("underline") || style.textDecorationLine.includes("underline"),
     align,
     strike: document.queryCommandState("strikeThrough") || style.textDecorationLine.includes("line-through"),
+    subscript: document.queryCommandState("subscript") || style.verticalAlign === "sub",
+    superscript: document.queryCommandState("superscript") || style.verticalAlign === "super",
     unordered: document.queryCommandState("insertUnorderedList"),
     ordered: document.queryCommandState("insertOrderedList"),
     backgroundColor: cssBackgroundColor(style.backgroundColor),
@@ -1848,8 +1892,9 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
-  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
+  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
   const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
+  const [textPopoverLeft, setTextPopoverLeft] = useState(12);
   const [equationDraft, setEquationDraft] = useState("y = ax² + b");
   const [tableRows, setTableRows] = useState(3);
   const [tableColumns, setTableColumns] = useState(3);
@@ -1857,6 +1902,8 @@ export default function Home() {
   const activeTextEditorRef = useRef<{ id: string; editor: HTMLElement } | null>(null);
   const savedTextRangeRef = useRef<Range | null>(null);
   const pendingFontSizeRef = useRef(new Map<string, number>());
+  const textCharacterToolbarRef = useRef<HTMLDivElement | null>(null);
+  const textParagraphToolbarRef = useRef<HTMLDivElement | null>(null);
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
   const [drivePanelOpen, setDrivePanelOpen] = useState(false);
   const [desktopGoogleClientId, setDesktopGoogleClientId] = useState(() => {
@@ -1878,12 +1925,35 @@ export default function Home() {
     if (notePanel !== "text") setTextInsertPopover(null);
   }, [notePanel]);
 
+  const openTextPopover = useCallback((popover: Exclude<TextInsertPopover, null>, button: HTMLElement) => {
+    const pane = button.closest<HTMLElement>(".notes-pane");
+    if (pane) {
+      const paneRect = pane.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      const popoverWidth = popover === "bullets" || popover === "tableLines" ? 276 : popover === "numbering" ? 322 : 360;
+      setTextPopoverLeft(Math.max(8, Math.min(buttonRect.left - paneRect.left, paneRect.width - popoverWidth - 8)));
+    }
+    setTextInsertPopover((current) => current === popover ? null : popover);
+  }, []);
+
+  const scrollTextToolbar = useCallback((toolbar: HTMLDivElement | null, direction: -1 | 1) => {
+    toolbar?.scrollBy({ left: direction * Math.max(180, toolbar.clientWidth * .72), behavior: "smooth" });
+  }, []);
+
+  const scrollTextToolbarWithWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const toolbar = event.currentTarget;
+    if (toolbar.scrollWidth <= toolbar.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    toolbar.scrollLeft += event.deltaY;
+    event.preventDefault();
+  }, []);
+
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
   const notePages = activeNotebook.pages;
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
   const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
+  const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
 
@@ -1937,7 +2007,7 @@ export default function Home() {
     setToast(message);
   }, [activateTextEditor]);
 
-  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "background" | "bold" | "italic" | "underline" | "strike" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
+  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "background" | "bold" | "italic" | "underline" | "strike" | "subscript" | "superscript" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
     const target = restoreTextSelection();
     if (!target) {
       setToast("Bấm vào nội dung hoặc bôi chọn chữ trước khi định dạng");
@@ -1962,6 +2032,8 @@ export default function Home() {
         italic: "italic",
         underline: "underline",
         strike: "strikeThrough",
+        subscript: "subscript",
+        superscript: "superscript",
         left: "justifyLeft",
         center: "justifyCenter",
         right: "justifyRight",
@@ -2007,6 +2079,16 @@ export default function Home() {
     let selection = window.getSelection();
     let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
     let lists = range ? [closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor)].filter(Boolean) as HTMLUListElement[] : [];
+    if (bulletStyle === "none" && lists.length) {
+      document.execCommand("insertUnorderedList", false);
+      finishTextCommand(target, "Đã bỏ dấu đầu dòng");
+      setTextInsertPopover(null);
+      return;
+    }
+    if (bulletStyle === "none") {
+      setTextInsertPopover(null);
+      return;
+    }
     if (!lists.length) {
       document.execCommand("insertUnorderedList", false);
       selection = window.getSelection();
@@ -2019,8 +2101,19 @@ export default function Home() {
         try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* ignore detached nodes */ }
       });
     }
-    lists.forEach((list) => { list.style.listStyleType = bulletStyle === "dash" ? '"–  "' : bulletStyle; });
+    const listStyleType = {
+      disc: "disc",
+      circle: "circle",
+      square: "square",
+      diamond: '"◆  "',
+      arrow: '"➤  "',
+      check: '"✓  "',
+      dash: '"–  "',
+      none: "none",
+    }[bulletStyle];
+    lists.forEach((list) => { list.style.listStyleType = listStyleType; });
     finishTextCommand(target, "Đã đổi kiểu dấu đầu dòng");
+    setTextInsertPopover(null);
   }, [finishTextCommand, restoreTextSelection]);
 
   const applyNumberingStyle = useCallback((numberingStyle: NumberingStyle) => {
@@ -2046,6 +2139,7 @@ export default function Home() {
     }
     lists.forEach((list) => { list.style.listStyleType = numberingStyle; });
     finishTextCommand(target, "Đã đổi kiểu đánh số");
+    setTextInsertPopover(null);
   }, [finishTextCommand, restoreTextSelection]);
 
   const changeListLevel = useCallback((direction: "increase" | "decrease") => {
@@ -2119,6 +2213,11 @@ export default function Home() {
     });
     finishTextCommand(target, "Đã cập nhật đường kẻ bảng");
   }, [finishTextCommand, restoreTextSelection, tableBorder]);
+
+  const applyTableLinePreset = useCallback((preset: (typeof LINE_PRESETS)[number]) => {
+    updateTableBorder({ style: preset.style, width: preset.width });
+    setTextInsertPopover(null);
+  }, [updateTableBorder]);
 
   const focusTypeEditor = useCallback((editorId: string) => {
     const existing = activeTextEditorRef.current;
@@ -2436,7 +2535,7 @@ export default function Home() {
     setSelectedExcerptId(null);
     activeTextEditorRef.current = null;
     savedTextRangeRef.current = null;
-    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
+    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
     setTextInsertPopover(null);
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
@@ -2702,6 +2801,17 @@ export default function Home() {
 
   const editExcerpt = (excerptId: string, changes: Partial<NoteExcerpt>) => {
     updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, ...changes } : excerpt) });
+  };
+
+  const updateSelectedTextBoxAppearance = (changes: Partial<ExcerptAppearance>, closePopover = false) => {
+    if (!selectedExcerpt || selectedExcerpt.kind !== "text") {
+      setToast("Chọn một hộp chữ trước khi chỉnh viền hoặc nền");
+      return;
+    }
+    const appearance = { ...normalizeExcerptAppearance(selectedExcerpt.appearance), ...changes };
+    editExcerpt(selectedExcerpt.id, { appearance });
+    if (closePopover) setTextInsertPopover(null);
+    setToast("Đã cập nhật hộp chữ");
   };
 
   const addTextBoxAt = (event: React.PointerEvent<HTMLElement>) => {
@@ -3660,49 +3770,114 @@ export default function Home() {
               </div>
             </div>
             {notePanel === "text" && <>
-              <div className="toolbar-row text-command-row text-character-row" aria-label="Định dạng ký tự">
-                <span className="type-row-label">Type</span>
-                <select className="word-font-select" value={textToolbar.font} style={{ fontFamily: selectedToolbarFont.family }} onChange={(event) => applyTextCommand("font", event.target.value)} aria-label="Font chữ">{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select>
-                <select className="word-size-select" value={textToolbar.size} onChange={(event) => applyTextCommand("size", Number(event.target.value))} aria-label="Cỡ chữ">{[8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 48, 60, 72].map((size) => <option key={size} value={size}>{size}</option>)}</select>
-                <div className="text-style-buttons compact-style-buttons" aria-label="Kiểu chữ"><button className={textToolbar.bold ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bold")} title="Đậm"><Bold size={16} /></button><button className={textToolbar.italic ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("italic")} title="Nghiêng"><Italic size={16} /></button><button className={textToolbar.underline ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("underline")} title="Gạch chân"><Underline size={16} /></button><button className={textToolbar.strike ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("strike")} title="Gạch ngang"><Strikethrough size={16} /></button></div>
-                <span className="toolbar-mini-divider" />
-                <button className="word-command-button auto-text-color" onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("color", activeNote.paper.color === "dark" ? "#edf3f4" : "#26343a")} title="Màu chữ tự động"><span>A</span><i /></button>
-                <label className="word-color-picker" title="Màu chữ tùy chỉnh"><span className="color-letter" style={{ borderBottomColor: textToolbar.color }}>A</span><input type="color" value={textToolbar.color === "auto" ? "#26343a" : textToolbar.color} onChange={(event) => applyTextCommand("color", event.target.value)} /></label>
-                <div className="inline-swatch-group" aria-label="Màu nền chữ">
-                  <PaintBucket size={15} />
-                  {TEXT_BACKGROUND_COLORS.map((color) => <button key={color} className={`inline-color-swatch ${textToolbar.backgroundColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("background", color)} title={color === "transparent" ? "Bỏ màu nền chữ" : `Màu nền ${color}`} />)}
-                  <label className="inline-custom-color" title="Màu nền chữ tùy chỉnh"><input type="color" value={textToolbar.backgroundColor === "transparent" ? "#fff2a8" : textToolbar.backgroundColor} onChange={(event) => applyTextCommand("background", event.target.value)} /><span>+</span></label>
+              <div className="toolbar-scroll-shell">
+                <button className="toolbar-scroll-button scroll-left" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textCharacterToolbarRef.current, -1)} aria-label="Cuộn công cụ sang trái"><ChevronLeft size={15} /></button>
+                <div ref={textCharacterToolbarRef} className="toolbar-row text-command-row text-character-row" onWheel={scrollTextToolbarWithWheel} aria-label="Định dạng ký tự">
+                  <span className="type-row-label">Type</span>
+                  <select className="word-font-select" value={textToolbar.font} style={{ fontFamily: selectedToolbarFont.family }} onChange={(event) => applyTextCommand("font", event.target.value)} aria-label="Font chữ">{TEXT_FONTS.map((font) => <option key={font.id} value={font.id} style={{ fontFamily: font.family }}>{font.label}</option>)}</select>
+                  <select className="word-size-select" value={textToolbar.size} onChange={(event) => applyTextCommand("size", Number(event.target.value))} aria-label="Cỡ chữ">{[8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 48, 60, 72].map((size) => <option key={size} value={size}>{size}</option>)}</select>
+                  <div className="text-style-buttons compact-style-buttons" aria-label="Kiểu chữ">
+                    <button className={textToolbar.bold ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bold")} title="Đậm"><Bold size={16} /></button>
+                    <button className={textToolbar.italic ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("italic")} title="Nghiêng"><Italic size={16} /></button>
+                    <button className={textToolbar.underline ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("underline")} title="Gạch chân"><Underline size={16} /></button>
+                    <button className={textToolbar.strike ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("strike")} title="Gạch ngang"><Strikethrough size={16} /></button>
+                    <button className={textToolbar.subscript ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("subscript")} title="Chỉ số dưới"><Subscript size={16} /></button>
+                    <button className={textToolbar.superscript ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("superscript")} title="Chỉ số trên"><Superscript size={16} /></button>
+                  </div>
+                  <span className="toolbar-mini-divider" />
+                  <button className={`word-command-button color-menu-trigger ${textInsertPopover === "textColor" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("textColor", event.currentTarget)} title="Màu chữ" aria-label="Mở bảng màu chữ" aria-expanded={textInsertPopover === "textColor"}><span className="color-letter" style={{ borderBottomColor: textToolbar.color === "auto" ? "#26343a" : textToolbar.color }}>A</span><ChevronDown size={10} /></button>
+                  <button className={`word-command-button color-menu-trigger ${textInsertPopover === "backgroundColor" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("backgroundColor", event.currentTarget)} title="Màu nền chữ" aria-label="Mở bảng màu nền chữ" aria-expanded={textInsertPopover === "backgroundColor"}><PaintBucket size={15} /><i className={`current-fill-sample ${textToolbar.backgroundColor === "transparent" ? "transparent" : ""}`} style={textToolbar.backgroundColor === "transparent" ? undefined : { background: textToolbar.backgroundColor }} /><ChevronDown size={10} /></button>
+                  <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("clear")} title="Xóa định dạng"><RemoveFormatting size={16} /></button>
                 </div>
-                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("clear")} title="Xóa định dạng"><RemoveFormatting size={16} /></button>
+                <button className="toolbar-scroll-button scroll-right" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textCharacterToolbarRef.current, 1)} aria-label="Cuộn công cụ sang phải"><ChevronRight size={15} /></button>
               </div>
-              <div className="toolbar-row text-command-row text-paragraph-row" aria-label="Định dạng đoạn, ký hiệu và bảng">
-                <div className="text-style-buttons compact-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={16} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={16} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={16} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={16} /></button></div>
-                <label className="word-select-with-icon" title="Khoảng cách dòng"><Rows3 size={15} /><select value={textToolbar.lineHeight} onChange={(event) => applyTextLineHeight(event.target.value as TextLineHeight)} aria-label="Khoảng cách dòng"><option value="1">1,0</option><option value="1.15">1,15</option><option value="1.5">1,5</option><option value="1.8">1,8</option><option value="2">2,0</option></select></label>
-                <button className={`word-command-button ${textToolbar.unordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("bullets")} title="Bật/tắt bullet"><List size={16} /></button>
-                <label className="word-select-with-icon bullet-style-select" title="Kiểu dấu đầu dòng"><select value={textToolbar.bulletStyle} onChange={(event) => applyBulletStyle(event.target.value as BulletStyle)} aria-label="Kiểu dấu đầu dòng"><option value="disc">• Tròn đặc</option><option value="circle">○ Tròn rỗng</option><option value="square">▪ Hình vuông</option><option value="dash">– Gạch ngang</option></select></label>
-                <button className={`word-command-button ${textToolbar.ordered ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("numbering")} title="Bật/tắt numbering"><ListOrdered size={16} /></button>
-                <label className="word-select-with-icon numbering-style-select" title="Kiểu đánh số"><select value={textToolbar.numberingStyle} onChange={(event) => applyNumberingStyle(event.target.value as NumberingStyle)} aria-label="Kiểu đánh số"><option value="decimal">1. 2. 3.</option><option value="decimal-leading-zero">01. 02. 03.</option><option value="lower-alpha">a. b. c.</option><option value="upper-alpha">A. B. C.</option><option value="lower-roman">i. ii. iii.</option><option value="upper-roman">I. II. III.</option></select></label>
-                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("decrease")} title="Giảm một cấp danh sách" aria-label="Giảm một cấp danh sách"><IndentDecrease size={16} /></button>
-                <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("increase")} title="Tăng một cấp danh sách" aria-label="Tăng một cấp danh sách"><IndentIncrease size={16} /></button>
-                <span className="toolbar-mini-divider" />
-                <button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "symbols" ? null : "symbols")} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>
-                <button className={`word-command-button labeled ${textInsertPopover === "equation" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "equation" ? null : "equation")} title="Chèn công thức"><Sigma size={16} /><span>Công thức</span></button>
-                <button className={`word-command-button labeled ${textInsertPopover === "table" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={() => setTextInsertPopover((current) => current === "table" ? null : "table")} title="Chèn bảng"><Table2 size={16} /><span>Bảng</span></button>
-                <span className="toolbar-mini-divider" />
-                <span className="table-border-label">Đường kẻ</span>
-                <div className="border-style-options" aria-label="Loại đường kẻ bảng">{TABLE_BORDER_STYLES.map((option) => <button key={option.id} className={tableBorder.style === option.id ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => updateTableBorder({ style: option.id })} title={option.label} aria-label={option.label}><i style={{ borderTopStyle: option.id, borderTopWidth: option.id === "double" ? 3 : 2 }} /></button>)}</div>
-                <select className="border-width-select" value={tableBorder.width} onChange={(event) => updateTableBorder({ width: Number(event.target.value) })} aria-label="Độ dày đường kẻ bảng">{[1, 2, 3, 4, 6].map((width) => <option key={width} value={width}>{width}px</option>)}</select>
-                <div className="border-color-options inline-swatch-group" aria-label="Màu đường kẻ bảng">{BORDER_COLORS.map((color) => <button key={color} className={`inline-color-swatch ${tableBorder.color === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateTableBorder({ color })} title={color === "transparent" ? "Trong suốt / không đường kẻ" : `Màu ${color}`} aria-label={color === "transparent" ? "Trong suốt" : `Màu ${color}`} />)}<label className="inline-custom-color" title="Màu đường kẻ tùy chỉnh"><input type="color" value={tableBorder.color === "transparent" ? "#60737d" : tableBorder.color} onChange={(event) => updateTableBorder({ color: event.target.value })} /><span>+</span></label></div>
-                <span className="selection-format-hint">Bôi chọn chữ để định dạng cục bộ</span>
+              <div className="toolbar-scroll-shell">
+                <button className="toolbar-scroll-button scroll-left" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textParagraphToolbarRef.current, -1)} aria-label="Cuộn công cụ sang trái"><ChevronLeft size={15} /></button>
+                <div ref={textParagraphToolbarRef} className="toolbar-row text-command-row text-paragraph-row" onWheel={scrollTextToolbarWithWheel} aria-label="Định dạng đoạn, ký hiệu và bảng">
+                  <div className="text-style-buttons compact-style-buttons" aria-label="Căn chữ"><button className={textToolbar.align === "left" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("left")} title="Căn trái"><AlignLeft size={16} /></button><button className={textToolbar.align === "center" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("center")} title="Căn giữa"><AlignCenter size={16} /></button><button className={textToolbar.align === "right" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("right")} title="Căn phải"><AlignRight size={16} /></button><button className={textToolbar.align === "justify" ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTextCommand("justify")} title="Căn đều hai bên"><AlignJustify size={16} /></button></div>
+                  <label className="word-select-with-icon" title="Khoảng cách dòng"><Rows3 size={15} /><select value={textToolbar.lineHeight} onChange={(event) => applyTextLineHeight(event.target.value as TextLineHeight)} aria-label="Khoảng cách dòng"><option value="1">1,0</option><option value="1.15">1,15</option><option value="1.5">1,5</option><option value="1.8">1,8</option><option value="2">2,0</option></select></label>
+                  <button className={`word-command-button list-menu-trigger ${textToolbar.unordered || textInsertPopover === "bullets" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("bullets", event.currentTarget)} title="Thư viện dấu đầu dòng" aria-label="Mở thư viện dấu đầu dòng" aria-expanded={textInsertPopover === "bullets"}><List size={16} /><ChevronDown size={10} /></button>
+                  <button className={`word-command-button list-menu-trigger ${textToolbar.ordered || textInsertPopover === "numbering" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("numbering", event.currentTarget)} title="Thư viện đánh số" aria-label="Mở thư viện đánh số" aria-expanded={textInsertPopover === "numbering"}><ListOrdered size={16} /><ChevronDown size={10} /></button>
+                  <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("decrease")} title="Giảm một cấp danh sách" aria-label="Giảm một cấp danh sách"><IndentDecrease size={16} /></button>
+                  <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("increase")} title="Tăng một cấp danh sách" aria-label="Tăng một cấp danh sách"><IndentIncrease size={16} /></button>
+                  <span className="toolbar-mini-divider" />
+                  <button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("symbols", event.currentTarget)} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>
+                  <button className={`word-command-button labeled ${textInsertPopover === "equation" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("equation", event.currentTarget)} title="Chèn công thức"><Sigma size={16} /><span>Công thức</span></button>
+                  <button className={`word-command-button labeled ${textInsertPopover === "table" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("table", event.currentTarget)} title="Chèn bảng"><Table2 size={16} /><span>Bảng</span></button>
+                  <button className={`word-command-button line-menu-trigger ${textInsertPopover === "tableLines" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("tableLines", event.currentTarget)} title="Kiểu đường kẻ bảng" aria-label="Mở thư viện đường kẻ bảng" aria-expanded={textInsertPopover === "tableLines"}><Table2 size={14} /><i style={{ borderTopStyle: tableBorder.style, borderTopWidth: `${Math.max(1, Math.min(tableBorder.width, 4))}px`, borderTopColor: tableBorder.color }} /><ChevronDown size={10} /></button>
+                  <button className={`word-command-button color-menu-trigger ${textInsertPopover === "textBoxStyle" ? "selected" : ""}`} disabled={!selectedTextBoxAppearance} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("textBoxStyle", event.currentTarget)} title={selectedTextBoxAppearance ? "Viền và nền hộp chữ" : "Chọn một hộp chữ để chỉnh viền và nền"} aria-label="Chỉnh viền và nền hộp chữ" aria-expanded={textInsertPopover === "textBoxStyle"}><ScanText size={15} /><i className={`current-fill-sample ${selectedTextBoxAppearance?.backgroundColor === "transparent" ? "transparent" : ""}`} style={!selectedTextBoxAppearance || selectedTextBoxAppearance.backgroundColor === "transparent" ? undefined : { background: selectedTextBoxAppearance.backgroundColor }} /><ChevronDown size={10} /></button>
+                  <span className="selection-format-hint">Bôi chọn chữ để định dạng cục bộ</span>
+                </div>
+                <button className="toolbar-scroll-button scroll-right" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textParagraphToolbarRef.current, 1)} aria-label="Cuộn công cụ sang phải"><ChevronRight size={15} /></button>
               </div>
             </>}
           </div>
 
-          {notePanel === "text" && textInsertPopover === "symbols" && <div className="text-insert-popover symbol-popover" role="dialog" aria-label="Chèn ký hiệu"><header><strong>Ký hiệu</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>{SYMBOL_GROUPS.map((group) => <section key={group.label}><label>{group.label}</label><div>{group.symbols.map((symbol) => <button key={symbol} onPointerDown={(event) => event.preventDefault()} onClick={() => insertTextAtSelection(symbol)}>{symbol}</button>)}</div></section>)}</div>}
+          {notePanel === "text" && textInsertPopover === "bullets" && (
+            <div className="text-insert-popover list-library-popover bullet-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện dấu đầu dòng">
+              <div className="list-library-grid">
+                {BULLET_STYLES.map((option) => <button key={option.id} className={textToolbar.bulletStyle === option.id ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyBulletStyle(option.id)} title={option.label} aria-label={option.label}><span>{option.glyph}</span></button>)}
+              </div>
+            </div>
+          )}
 
-          {notePanel === "text" && textInsertPopover === "equation" && <div className="text-insert-popover equation-popover" role="dialog" aria-label="Chèn công thức"><header><strong>Công thức</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><label className="equation-input-label">Nhập công thức bằng ký hiệu Unicode<input value={equationDraft} onChange={(event) => setEquationDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") insertEquation(); }} autoFocus /></label><div className="equation-presets">{EQUATION_PRESETS.map((equation) => <button key={equation} onClick={() => setEquationDraft(equation)}>{equation}</button>)}</div><button className="insert-confirm-button" onClick={() => insertEquation()}><Sigma size={15} /> Chèn công thức</button></div>}
+          {notePanel === "text" && textInsertPopover === "numbering" && (
+            <div className="text-insert-popover list-library-popover numbering-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện đánh số">
+              <div className="numbering-library-grid">
+                {NUMBERING_STYLES.map((option) => <button key={option.id} className={textToolbar.numberingStyle === option.id ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyNumberingStyle(option.id)} title={option.label} aria-label={option.label}><span>{option.sample}</span></button>)}
+              </div>
+            </div>
+          )}
 
-          {notePanel === "text" && textInsertPopover === "table" && <div className="text-insert-popover table-popover" role="dialog" aria-label="Chèn bảng"><header><strong>Chèn bảng</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><div className="table-size-controls"><label>Hàng<input type="number" min="1" max="12" value={tableRows} onChange={(event) => setTableRows(Math.max(1, Math.min(12, Number(event.target.value))))} /></label><span>×</span><label>Cột<input type="number" min="1" max="10" value={tableColumns} onChange={(event) => setTableColumns(Math.max(1, Math.min(10, Number(event.target.value))))} /></label></div><div className="table-preview-grid" style={{ gridTemplateColumns: `repeat(${tableColumns}, 12px)` }} aria-hidden="true">{Array.from({ length: tableRows * tableColumns }, (_, index) => <i key={index} style={{ borderStyle: tableBorder.style, borderWidth: `${Math.min(tableBorder.width, 3)}px`, borderColor: tableBorder.color }} />)}</div><button className="insert-confirm-button" onClick={insertTable}><Table2 size={15} /> Chèn bảng {tableRows} × {tableColumns}</button></div>}
+          {notePanel === "text" && textInsertPopover === "textColor" && (
+            <div className="text-insert-popover color-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Màu chữ">
+              <header><strong>Màu chữ</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>
+              <div className="popover-color-grid">
+                <button className="palette-auto-color" onPointerDown={(event) => event.preventDefault()} onClick={() => { applyTextCommand("color", activeNote.paper.color === "dark" ? "#edf3f4" : "#26343a"); setTextInsertPopover(null); }} title="Màu tự động" aria-label="Màu chữ tự động"><span>A</span></button>
+                {TEXT_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${textToolbar.color === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => { applyTextCommand("color", color); setTextInsertPopover(null); }} title={color} aria-label={`Màu chữ ${color}`} />)}
+                <label className="popover-custom-color" title="Màu chữ tùy chỉnh"><input type="color" value={textToolbar.color === "auto" ? "#26343a" : textToolbar.color} onChange={(event) => { applyTextCommand("color", event.target.value); setTextInsertPopover(null); }} /><span>+</span></label>
+              </div>
+            </div>
+          )}
+
+          {notePanel === "text" && textInsertPopover === "backgroundColor" && (
+            <div className="text-insert-popover color-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Màu nền chữ">
+              <header><strong>Màu nền chữ</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>
+              <div className="popover-color-grid">
+                {TEXT_BACKGROUND_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${textToolbar.backgroundColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => { applyTextCommand("background", color); setTextInsertPopover(null); }} title={color === "transparent" ? "Không màu" : color} aria-label={color === "transparent" ? "Nền chữ trong suốt" : `Màu nền chữ ${color}`} />)}
+                <label className="popover-custom-color" title="Màu nền chữ tùy chỉnh"><input type="color" value={textToolbar.backgroundColor === "transparent" ? "#fff2a8" : textToolbar.backgroundColor} onChange={(event) => { applyTextCommand("background", event.target.value); setTextInsertPopover(null); }} /><span>+</span></label>
+              </div>
+            </div>
+          )}
+
+          {notePanel === "text" && textInsertPopover === "tableLines" && (
+            <div className="text-insert-popover line-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện đường kẻ bảng">
+              <div className="line-library-list">
+                {LINE_PRESETS.map((preset) => <button key={preset.id} className={tableBorder.style === preset.style && tableBorder.width === preset.width ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => applyTableLinePreset(preset)} title={preset.label} aria-label={preset.label}><i className={preset.width === 0 ? "line-sample-none" : ""} style={preset.width === 0 ? undefined : { borderTopStyle: preset.style, borderTopWidth: `${preset.width}px`, borderTopColor: tableBorder.color }} /></button>)}
+              </div>
+              <div className="popover-color-strip" aria-label="Màu đường kẻ bảng">
+                {BORDER_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${tableBorder.color === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateTableBorder({ color })} title={color === "transparent" ? "Không màu" : color} aria-label={color === "transparent" ? "Đường kẻ trong suốt" : `Màu đường kẻ ${color}`} />)}
+                <label className="popover-custom-color" title="Màu đường kẻ tùy chỉnh"><input type="color" value={tableBorder.color === "transparent" ? "#60737d" : tableBorder.color} onChange={(event) => updateTableBorder({ color: event.target.value })} /><span>+</span></label>
+              </div>
+            </div>
+          )}
+
+          {notePanel === "text" && textInsertPopover === "textBoxStyle" && selectedTextBoxAppearance && (
+            <div className="text-insert-popover text-box-style-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Viền và nền hộp chữ">
+              <header><strong>Hộp chữ</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>
+              <div className="line-library-list">
+                {LINE_PRESETS.map((preset) => <button key={preset.id} className={selectedTextBoxAppearance.borderStyle === preset.style && selectedTextBoxAppearance.borderWidth === preset.width ? "selected" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => updateSelectedTextBoxAppearance({ borderStyle: preset.style, borderWidth: preset.width })} title={preset.label} aria-label={preset.label}><i className={preset.width === 0 ? "line-sample-none" : ""} style={preset.width === 0 ? undefined : { borderTopStyle: preset.style, borderTopWidth: `${preset.width}px`, borderTopColor: selectedTextBoxAppearance.borderColor }} /></button>)}
+              </div>
+              <section className="appearance-color-section"><span>Viền</span><div className="popover-color-strip">{BORDER_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${selectedTextBoxAppearance.borderColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateSelectedTextBoxAppearance({ borderColor: color })} title={color === "transparent" ? "Viền trong suốt" : color} aria-label={color === "transparent" ? "Viền trong suốt" : `Màu viền ${color}`} />)}<label className="popover-custom-color" title="Màu viền tùy chỉnh"><input type="color" value={selectedTextBoxAppearance.borderColor === "transparent" ? "#60737d" : selectedTextBoxAppearance.borderColor} onChange={(event) => updateSelectedTextBoxAppearance({ borderColor: event.target.value })} /><span>+</span></label></div></section>
+              <section className="appearance-color-section"><span>Nền</span><div className="popover-color-strip">{TEXT_BOX_BACKGROUND_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${selectedTextBoxAppearance.backgroundColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateSelectedTextBoxAppearance({ backgroundColor: color })} title={color === "transparent" ? "Nền trong suốt" : color} aria-label={color === "transparent" ? "Nền hộp chữ trong suốt" : `Màu nền hộp chữ ${color}`} />)}<label className="popover-custom-color" title="Màu nền tùy chỉnh"><input type="color" value={selectedTextBoxAppearance.backgroundColor === "transparent" ? "#ffffff" : selectedTextBoxAppearance.backgroundColor} onChange={(event) => updateSelectedTextBoxAppearance({ backgroundColor: event.target.value })} /><span>+</span></label></div></section>
+            </div>
+          )}
+
+          {notePanel === "text" && textInsertPopover === "symbols" && <div className="text-insert-popover symbol-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn ký hiệu"><header><strong>Ký hiệu</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>{SYMBOL_GROUPS.map((group) => <section key={group.label}><label>{group.label}</label><div>{group.symbols.map((symbol) => <button key={symbol} onPointerDown={(event) => event.preventDefault()} onClick={() => insertTextAtSelection(symbol)}>{symbol}</button>)}</div></section>)}</div>}
+
+          {notePanel === "text" && textInsertPopover === "equation" && <div className="text-insert-popover equation-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn công thức"><header><strong>Công thức</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><label className="equation-input-label">Nhập công thức bằng ký hiệu Unicode<input value={equationDraft} onChange={(event) => setEquationDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") insertEquation(); }} autoFocus /></label><div className="equation-presets">{EQUATION_PRESETS.map((equation) => <button key={equation} onClick={() => setEquationDraft(equation)}>{equation}</button>)}</div><button className="insert-confirm-button" onClick={() => insertEquation()}><Sigma size={15} /> Chèn công thức</button></div>}
+
+          {notePanel === "text" && textInsertPopover === "table" && <div className="text-insert-popover table-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn bảng"><header><strong>Chèn bảng</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><div className="table-size-controls"><label>Hàng<input type="number" min="1" max="12" value={tableRows} onChange={(event) => setTableRows(Math.max(1, Math.min(12, Number(event.target.value))))} /></label><span>×</span><label>Cột<input type="number" min="1" max="10" value={tableColumns} onChange={(event) => setTableColumns(Math.max(1, Math.min(10, Number(event.target.value))))} /></label></div><div className="table-preview-grid" style={{ gridTemplateColumns: `repeat(${tableColumns}, 12px)` }} aria-hidden="true">{Array.from({ length: tableRows * tableColumns }, (_, index) => <i key={index} style={{ borderStyle: tableBorder.style, borderWidth: `${Math.min(tableBorder.width, 3)}px`, borderColor: tableBorder.color }} />)}</div><button className="insert-confirm-button" onClick={insertTable}><Table2 size={15} /> Chèn bảng {tableRows} × {tableColumns}</button></div>}
 
           {notePanel === "ink" && (
             <div className="floating-tool-panel note-ink-panel" role="dialog" aria-label="Cài đặt bút">
