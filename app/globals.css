@@ -245,6 +245,7 @@ body {
 .pdf-markup-highlight { background: color-mix(in srgb, var(--markup-color) 48%, transparent); mix-blend-mode: multiply; }
 .pdf-markup-underline::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; border-radius: 2px; background: var(--markup-color); }
 .pdf-markup-strikeout::after { content: ""; position: absolute; top: 52%; right: 0; left: 0; height: 2px; border-radius: 2px; background: var(--markup-color); }
+.pdf-markup-squiggly::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 4px; background-image: linear-gradient(135deg, transparent 42%, var(--markup-color) 43%, var(--markup-color) 57%, transparent 58%), linear-gradient(45deg, transparent 42%, var(--markup-color) 43%, var(--markup-color) 57%, transparent 58%); background-position: 0 0, 3px 0; background-size: 6px 4px; }
 .pdf-source-focus { position: absolute; border: 2px solid #0e8e96; border-radius: 5px; background: rgba(14,142,150,.12); box-shadow: 0 0 0 5px rgba(14,142,150,.1); animation: source-pulse 1s ease-in-out 3; }
 @keyframes source-pulse { 50% { box-shadow: 0 0 0 11px rgba(14,142,150,.04); } }
 .textLayer { --scale-factor: 1; --total-scale-factor: var(--scale-factor); --scale-round-x: 1px; --scale-round-y: 1px; position: absolute; inset: 0; z-index: 2; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; caret-color: CanvasText; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; }
@@ -260,14 +261,26 @@ body {
 .pdf-text-layer.selectable span { cursor: text; }
 .pdf-text-layer ::selection { background: rgba(27,125,183,.3); }
 .pdf-text-layer .pdf-search-hit { border-radius: 2px; background: rgba(255,155,44,.44); }
+.pdf-object-layer { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.pdf-object { --pdf-object-color: #2465a8; --pdf-object-width: 2px; position: absolute; display: block; color: var(--pdf-object-color); }
+.pdf-object-rectangle { border: var(--pdf-object-width) solid var(--pdf-object-color); }
+.pdf-object-ellipse { border: var(--pdf-object-width) solid var(--pdf-object-color); border-radius: 50%; }
+.pdf-object-arrow { overflow: visible; fill: none; stroke: var(--pdf-object-color); stroke-linecap: round; stroke-linejoin: round; stroke-width: var(--pdf-object-width); }
+.pdf-object-note { display: grid; place-items: center; border-radius: 5px 5px 5px 1px; background: color-mix(in srgb, var(--pdf-object-color) 88%, white); box-shadow: 0 2px 5px rgba(24,50,74,.2); color: white; font-size: clamp(11px, 1.5vw, 18px); font-weight: 800; }
+.pdf-object-text { padding: 4px 5px; overflow: hidden; border: 1px dashed color-mix(in srgb, var(--pdf-object-color) 58%, transparent); background: rgba(255,255,255,.74); color: var(--pdf-object-color); font: 12px/1.3 "Segoe UI", Arial, sans-serif; white-space: pre-wrap; }
+.pdf-object-stamp { display: grid; place-items: center; overflow: hidden; border: max(2px, var(--pdf-object-width)) solid var(--pdf-object-color); border-radius: 3px; color: var(--pdf-object-color); font: 800 13px/1 "Segoe UI", Arial, sans-serif; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
+.pdf-object-signature { display: flex; align-items: center; padding: 2px 5px; overflow: hidden; border-bottom: var(--pdf-object-width) solid color-mix(in srgb, var(--pdf-object-color) 48%, transparent); color: var(--pdf-object-color); font: italic 20px/1.1 "Segoe Print", "Bradley Hand", cursive; white-space: nowrap; }
 .pdf-ink-layer { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
 .pdf-ink-layer.active { pointer-events: auto; cursor: crosshair; }
 .pdf-ink-layer.tool-eraser { cursor: cell; }
 .pdf-interaction-layer { position: absolute; inset: 0; z-index: 4; touch-action: none; }
 .pdf-interaction-layer.pan { cursor: grab; }
 .pdf-interaction-layer.pan:active { cursor: grabbing; }
-.pdf-interaction-layer.crop { cursor: crosshair; }
+.pdf-interaction-layer.crop, .pdf-interaction-layer.rectangle, .pdf-interaction-layer.ellipse, .pdf-interaction-layer.arrow { cursor: crosshair; }
+.pdf-interaction-layer.note, .pdf-interaction-layer.text, .pdf-interaction-layer.stamp, .pdf-interaction-layer.signature { cursor: copy; }
 .pdf-crop-box { position: absolute; border: 1.5px solid white; outline: 1.5px solid var(--teal); background: rgba(14,107,112,.1); box-shadow: 0 0 0 9999px rgba(11,31,42,.28); }
+.pdf-object-preview { position: absolute; border: var(--pdf-object-width) dashed var(--pdf-object-color); background: color-mix(in srgb, var(--pdf-object-color) 7%, transparent); }
+.pdf-object-preview.preview-ellipse { border-radius: 50%; }
 .pdf-selection-menu { position: fixed; z-index: 60; width: min(390px, calc(100vw - 20px)); display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; border: 1px solid #c8d6da; border-radius: 12px; background: rgba(255,255,255,.99); box-shadow: 0 14px 38px rgba(24,50,74,.25); white-space: normal; }
 .pdf-selection-menu.compact { width: max-content; max-width: calc(100vw - 20px); }
 .pdf-selection-menu.placement-above { transform: translate(-50%, -100%); }
@@ -342,7 +355,7 @@ body {
 .note-ink-panel, .note-shape-panel, .text-format-panel { left: 12px; }
 .text-format-panel { width: min(520px, calc(100% - 24px)); }
 .pdf-view-panel { right: 12px; width: min(350px, calc(100% - 24px)); }
-.pdf-ink-panel { right: 12px; width: min(330px, calc(100% - 24px)); }
+.pdf-ink-panel { right: 12px; width: min(360px, calc(100% - 24px)); }
 .tool-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 10px; border-bottom: 1px solid #e3eaec; }
 .tool-panel-heading > div { display: flex; flex-direction: column; gap: 3px; }
 .tool-panel-heading strong { color: var(--navy); font-size: 15px; }
@@ -364,6 +377,13 @@ body {
 .width-options button { height: 42px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; background: #fafcfc; color: var(--muted); font-size: 9px; cursor: pointer; }
 .width-options button.selected { border-color: var(--teal); background: var(--selected); color: var(--teal); }
 .width-options i { width: 24px; min-height: 1px; border-radius: 99px; background: currentColor; }
+.pdf-annotation-input { display: flex; flex-direction: column; gap: 6px; padding-top: 13px; color: #4e626c; font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
+.pdf-annotation-input input, .pdf-annotation-input textarea { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; outline: 0; resize: vertical; background: #fff; color: var(--ink); font-size: 12px; font-weight: 500; line-height: 1.4; letter-spacing: 0; text-transform: none; }
+.pdf-annotation-input input:focus, .pdf-annotation-input textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(14,107,112,.1); }
+.stamp-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.stamp-presets button { height: 38px; border: 2px solid #c94b50; border-radius: 5px; background: #fffafa; color: #b53f45; font-size: 10px; font-weight: 800; letter-spacing: .05em; cursor: pointer; }
+.stamp-presets button.selected { background: #c94b50; color: white; }
+.pdf-placement-help { margin: 13px 0 0; padding: 9px 10px; border-radius: 8px; background: #eef6f6; color: #5b7079; font-size: 10px; line-height: 1.45; }
 .shape-option-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding-top: 13px; }
 .shape-option-grid button { min-width: 0; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: #fafcfc; color: #52646e; font-size: 9px; cursor: pointer; }
 .shape-option-grid button.selected { border-color: var(--teal); background: var(--selected); color: var(--teal); }
@@ -512,6 +532,8 @@ body {
 .template-preview.template-grid { background-image: linear-gradient(#d9e7eb 1px, transparent 1px), linear-gradient(90deg, #d9e7eb 1px, transparent 1px); background-size: 8px 8px; }
 .template-preview.template-dotted { background-image: radial-gradient(#aabdc3 1px, transparent 1.2px); background-size: 8px 8px; }
 .template-preview.template-cornell { background-image: linear-gradient(90deg, transparent 29%, #e6b5b5 29%, #e6b5b5 31%, transparent 31%), linear-gradient(transparent 22%, #e6b5b5 22%, #e6b5b5 24%, transparent 24%), repeating-linear-gradient(to bottom, transparent 0, transparent 8px, #d9e7eb 9px); }
+.template-preview.template-first-aid { background-image: linear-gradient(90deg, #14798a 0 20%, #8b2c58 20% 100%), repeating-linear-gradient(to bottom, transparent 0, transparent 10px, #aeb8bc 11px); background-position: top, 7px 16px; background-repeat: no-repeat, repeat-y; background-size: 100% 11px, calc(100% - 14px) 11px; }
+.paper-template-help { margin: 8px 2px 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .paper-color-row { display: flex; gap: 9px; flex-wrap: wrap; }
 .paper-color-row button { position: relative; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 1px solid #cad5d8; border-radius: 50%; background: white; cursor: pointer; }
 .paper-color-row button > span { width: 28px; height: 28px; border: 1px solid rgba(24,50,74,.12); border-radius: 50%; }
@@ -530,11 +552,20 @@ body {
 .note-paper.template-dotted .paper-background { background-image: radial-gradient(var(--paper-dot) 1.25px, transparent 1.5px); background-size: var(--paper-cell-x) var(--paper-cell-y); background-position: calc(var(--paper-cell-x) / 2) calc(var(--paper-cell-y) / 2); }
 .note-paper.template-cornell .paper-background { background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--paper-line-step) - 1px), var(--paper-line) var(--paper-line-step)); }
 .note-paper.template-cornell .paper-background::before { content: ""; position: absolute; inset: 0; border-top: 2px solid color-mix(in srgb, var(--paper-accent) 32%, transparent); border-left: 2px solid color-mix(in srgb, var(--paper-accent) 32%, transparent); margin: var(--cornell-header) 0 0 31%; }
+.note-paper.template-first-aid { --paper-accent: #1b7184; }
+.note-paper.template-first-aid .paper-background { background-image: linear-gradient(90deg, #16758a 0 18%, #8b2c58 18% 78%, #16758a 78% 100%); background-position: top; background-repeat: no-repeat; background-size: 100% 30px; }
 .typed-layer { position: absolute; inset: 0; z-index: 1; padding: 42px 42px 48px; pointer-events: none; }
 .note-paper.typing .typed-layer { pointer-events: auto; }
 .note-title-input { display: block; width: 100%; padding: 0 4px 11px; border: 0; border-bottom: 2px solid var(--paper-accent); outline: 0; background: transparent; color: var(--paper-accent); font-weight: 750; font-size: clamp(17px, 1.55vw, 22px); text-align: center; letter-spacing: .025em; }
 .note-title-input:read-only { cursor: default; }
 .note-editor { display: block; width: 100%; height: calc(100% - 58px); margin-top: 15px; padding: 0 6px; border: 0; outline: 0; overflow: hidden; background: transparent; color: var(--text-color, var(--paper-ink)); font-family: var(--text-font, "Times New Roman", Times, serif); font-size: var(--text-size, 15px); font-weight: var(--text-weight, 400); font-style: var(--text-style, normal); line-height: 1.8; text-align: var(--text-align, left); text-decoration: var(--text-decoration, none); white-space: pre-wrap; }
+.note-paper.template-first-aid .typed-layer { padding: 8px 28px 28px; }
+.note-paper.template-first-aid .note-title-input { height: 22px; padding: 0 2px; border: 0; color: white; font-family: "Segoe UI", Arial, sans-serif; font-size: clamp(9px, .9vw, 12px); font-weight: 800; text-align: right; letter-spacing: .035em; }
+.note-paper.template-first-aid .note-editor { height: calc(100% - 30px); margin-top: 15px; padding: 0 2px; font-family: "Times New Roman", Times, serif; font-size: var(--text-size, 12px); line-height: 1.35; }
+.note-paper.template-first-aid .note-editor table { margin: 0; border-top: 1px solid #86979d; table-layout: fixed; }
+.note-paper.template-first-aid .note-editor th { color: #1b7184 !important; font-family: "Segoe UI", Arial, sans-serif; font-size: .74em; font-weight: 800; letter-spacing: .015em; }
+.note-paper.template-first-aid .note-editor td { font-size: .86em; }
+.note-paper.template-first-aid .note-editor th, .note-paper.template-first-aid .note-editor td { padding: 5px 6px !important; line-height: 1.28; }
 .note-editor[contenteditable="false"] { cursor: default; }
 .rich-text-editor:empty::before { content: attr(data-placeholder); color: #96a3aa; pointer-events: none; }
 .rich-text-editor ul, .rich-text-editor ol { margin: .25em 0; padding-left: 1.65em; }
@@ -623,6 +654,7 @@ body {
 .note-thumb-delete { position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #e3c9ca; border-radius: 7px; background: rgba(255,250,250,.96); color: #b8575c; cursor: pointer; box-shadow: 0 2px 7px rgba(71,35,38,.12); }
 .note-thumb-delete:hover { background: #ffe9e9; }
 .mini-note { gap: 7px; }
+.mini-note.template-first-aid { border-top: 5px solid #8b2c58; box-shadow: inset 13px 0 0 rgba(22,117,138,.1); }
 .mini-note strong { overflow: hidden; color: var(--teal); font-size: 6px; line-height: 1.2; text-align: left; white-space: nowrap; }
 .mini-note i:nth-child(3) { width: 92%; background: #7ea8aa; }
 .note-thumb b { display: block; margin-top: 5px; font-size: 12px; }

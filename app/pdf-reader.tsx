@@ -4,7 +4,23 @@ import type { PDFDocumentProxy, PDFPageProxy, RenderTask as PDFRenderTask } from
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFiumDocument } from "./pdfium-renderer";
 
-export type PdfTool = "pan" | "select" | "highlight" | "underline" | "strikeout" | "pen" | "eraser" | "crop";
+export type PdfTool =
+  | "pan"
+  | "select"
+  | "highlight"
+  | "underline"
+  | "strikeout"
+  | "squiggly"
+  | "pen"
+  | "eraser"
+  | "crop"
+  | "note"
+  | "text"
+  | "rectangle"
+  | "ellipse"
+  | "arrow"
+  | "stamp"
+  | "signature";
 export type PdfFitMode = "width" | "page";
 export type PdfViewMode = "single" | "continuous";
 
@@ -13,7 +29,7 @@ export type PdfRect = { x1: number; y1: number; x2: number; y2: number };
 
 export type PdfMarkupAnnotation = {
   id: string;
-  kind: "highlight" | "underline" | "strikeout";
+  kind: "highlight" | "underline" | "strikeout" | "squiggly";
   page: number;
   color: string;
   rects: PdfRect[];
@@ -31,7 +47,18 @@ export type PdfInkAnnotation = {
   createdAt: number;
 };
 
-export type PdfAnnotation = PdfMarkupAnnotation | PdfInkAnnotation;
+export type PdfObjectAnnotation = {
+  id: string;
+  kind: "note" | "text" | "rectangle" | "ellipse" | "arrow" | "stamp" | "signature";
+  page: number;
+  color: string;
+  width: number;
+  rect: PdfRect;
+  text: string;
+  createdAt: number;
+};
+
+export type PdfAnnotation = PdfMarkupAnnotation | PdfInkAnnotation | PdfObjectAnnotation;
 
 export type PdfSelection = {
   page: number;
@@ -95,6 +122,10 @@ function viewportRect(viewport: PageViewport, rect: PdfRect) {
   };
 }
 
+function annotationRects(annotation: Exclude<PdfAnnotation, PdfInkAnnotation>) {
+  return "rects" in annotation ? annotation.rects : [annotation.rect];
+}
+
 function drawInkStroke(context: CanvasRenderingContext2D, viewport: PageViewport, stroke: PdfInkAnnotation) {
   if (!stroke.points.length) return;
   const points = stroke.points.map((point) => {
@@ -142,15 +173,17 @@ type PdfInkLayerProps = {
   color: string;
   width: number;
   annotations: PdfInkAnnotation[];
-  onCommit: (next: PdfInkAnnotation[], previous: PdfInkAnnotation[]) => void;
+  allAnnotations: PdfAnnotation[];
+  onCommit: (next: PdfAnnotation[], previous: PdfAnnotation[]) => void;
 };
 
-function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: PdfInkLayerProps) {
+function PdfInkLayer({ viewport, tool, color, width, annotations, allAnnotations, onCommit }: PdfInkLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const beforeRef = useRef<PdfInkAnnotation[]>(annotations);
   const workingRef = useRef<PdfInkAnnotation[]>(annotations);
   const currentRef = useRef<PdfInkAnnotation | null>(null);
   const modeRef = useRef<"idle" | "pen" | "eraser">("idle");
+  const erasedAnnotationIdsRef = useRef<Set<string>>(new Set());
 
   const render = useCallback((items = workingRef.current) => {
     const canvas = canvasRef.current;
@@ -184,10 +217,22 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
     const rect = event.currentTarget.getBoundingClientRect();
     const px = event.clientX - rect.left;
     const py = event.clientY - rect.top;
+    const eraserRadius = 14;
     workingRef.current = workingRef.current.filter((stroke) => {
       const points = stroke.points.map((point) => viewport.convertToViewportPoint(point.x, point.y));
-      if (points.length === 1) return Math.hypot(px - points[0][0], py - points[0][1]) > 14;
-      return !points.slice(1).some((point, index) => pointSegmentDistance(px, py, points[index][0], points[index][1], point[0], point[1]) <= 14 + stroke.width * viewport.scale / 2);
+      if (points.length === 1) return Math.hypot(px - points[0][0], py - points[0][1]) > eraserRadius;
+      return !points.slice(1).some((point, index) => pointSegmentDistance(px, py, points[index][0], points[index][1], point[0], point[1]) <= eraserRadius + stroke.width * viewport.scale / 2);
+    });
+    allAnnotations.forEach((annotation) => {
+      if (annotation.kind === "ink" || erasedAnnotationIdsRef.current.has(annotation.id)) return;
+      const hit = annotationRects(annotation).some((annotationRect) => {
+        const box = viewportRect(viewport, annotationRect);
+        return px >= box.left - eraserRadius
+          && px <= box.left + box.width + eraserRadius
+          && py >= box.top - eraserRadius
+          && py <= box.top + box.height + eraserRadius;
+      });
+      if (hit) erasedAnnotationIdsRef.current.add(annotation.id);
     });
     render();
   };
@@ -198,6 +243,7 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
     event.currentTarget.setPointerCapture(event.pointerId);
     beforeRef.current = annotations;
     workingRef.current = annotations;
+    erasedAnnotationIdsRef.current.clear();
     if (tool === "eraser") {
       modeRef.current = "eraser";
       eraseAt(event);
@@ -237,14 +283,27 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
     const mode = modeRef.current;
     modeRef.current = "idle";
     if (mode === "pen" && currentRef.current) {
-      const next = [...beforeRef.current, currentRef.current];
-      workingRef.current = next;
-      onCommit(next, beforeRef.current);
+      const nextInk = [...beforeRef.current, currentRef.current];
+      workingRef.current = nextInk;
+      onCommit(
+        [...allAnnotations.filter((annotation) => annotation.kind !== "ink"), ...nextInk],
+        allAnnotations,
+      );
     } else if (mode === "eraser") {
-      const next = workingRef.current;
-      if (next.length !== beforeRef.current.length) onCommit(next, beforeRef.current);
+      const nextInk = workingRef.current;
+      const erasedIds = erasedAnnotationIdsRef.current;
+      if (nextInk.length !== beforeRef.current.length || erasedIds.size) {
+        onCommit(
+          [
+            ...allAnnotations.filter((annotation) => annotation.kind !== "ink" && !erasedIds.has(annotation.id)),
+            ...nextInk,
+          ],
+          allAnnotations,
+        );
+      }
     }
     currentRef.current = null;
+    erasedAnnotationIdsRef.current.clear();
     render();
   };
 
@@ -256,8 +315,44 @@ function PdfInkLayer({ viewport, tool, color, width, annotations, onCommit }: Pd
       onPointerMove={onPointerMove}
       onPointerUp={finish}
       onPointerCancel={finish}
-      aria-label="Lớp viết tay trên PDF"
+      aria-label="Lớp viết và tẩy chú thích trên PDF"
     />
+  );
+}
+
+function PdfObjectLayer({ viewport, annotations }: { viewport: PageViewport; annotations: PdfObjectAnnotation[] }) {
+  return (
+    <div className="pdf-object-layer" aria-hidden="true">
+      {annotations.map((annotation) => {
+        const box = viewportRect(viewport, annotation.rect);
+        const style = {
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          height: box.height,
+          "--pdf-object-color": annotation.color,
+          "--pdf-object-width": `${Math.max(1, annotation.width * viewport.scale)}px`,
+        } as React.CSSProperties;
+        if (annotation.kind === "arrow") {
+          return (
+            <svg key={annotation.id} className="pdf-object pdf-object-arrow" style={style} viewBox="0 0 100 100" preserveAspectRatio="none">
+              <line x1="3" y1="4" x2="91" y2="91" vectorEffect="non-scaling-stroke" />
+              <polyline points="72,91 91,91 91,72" vectorEffect="non-scaling-stroke" />
+            </svg>
+          );
+        }
+        return (
+          <span
+            key={annotation.id}
+            className={`pdf-object pdf-object-${annotation.kind}`}
+            style={style}
+            title={annotation.text}
+          >
+            {annotation.kind === "note" ? "✎" : annotation.text}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -272,11 +367,12 @@ type PdfPageViewProps = {
   tool: PdfTool;
   inkColor: string;
   inkWidth: number;
+  annotationText: string;
   annotations: PdfAnnotation[];
   searchQuery?: string;
   sourceFocus?: PdfRect | null;
   onSelection: (selection: PdfSelection) => void;
-  onInkCommit: (next: PdfInkAnnotation[], previous: PdfInkAnnotation[]) => void;
+  onAnnotationCommit: (next: PdfAnnotation[], previous: PdfAnnotation[]) => void;
   onCrop: (result: PdfCropResult) => void | Promise<void>;
 };
 
@@ -291,11 +387,12 @@ export function PdfPageView({
   tool,
   inkColor,
   inkWidth,
+  annotationText,
   annotations,
   searchQuery = "",
   sourceFocus,
   onSelection,
-  onInkCommit,
+  onAnnotationCommit,
   onCrop,
 }: PdfPageViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -307,8 +404,10 @@ export function PdfPageView({
   const [loading, setLoading] = useState(true);
   const selectionTimerRef = useRef<number | null>(null);
   const cropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const objectStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [cropBox, setCropBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [objectBox, setObjectBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -439,10 +538,11 @@ export function PdfPageView({
 
   const pageAnnotations = useMemo(() => annotations.filter((annotation) => annotation.page === page), [annotations, page]);
   const inkAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfInkAnnotation => annotation.kind === "ink"), [pageAnnotations]);
-  const markupAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfMarkupAnnotation => annotation.kind !== "ink"), [pageAnnotations]);
+  const markupAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfMarkupAnnotation => "rects" in annotation), [pageAnnotations]);
+  const objectAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfObjectAnnotation => "rect" in annotation), [pageAnnotations]);
 
   const captureSelection = useCallback((delay = 18) => {
-    if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout"].includes(tool)) return;
+    if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout", "squiggly"].includes(tool)) return;
     if (selectionTimerRef.current) window.clearTimeout(selectionTimerRef.current);
     selectionTimerRef.current = window.setTimeout(() => {
       const selection = window.getSelection();
@@ -513,13 +613,45 @@ export function PdfPageView({
   };
 
   const onInteractionDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!viewport || (tool !== "crop" && tool !== "pan")) return;
+    if (!viewport || !["crop", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     if (tool === "crop") {
       const point = pointerPosition(event);
       cropStartRef.current = point;
       setCropBox({ left: point.x, top: point.y, width: 0, height: 0 });
+      return;
+    }
+    if (["rectangle", "ellipse", "arrow"].includes(tool)) {
+      const point = pointerPosition(event);
+      objectStartRef.current = point;
+      setObjectBox({ left: point.x, top: point.y, width: 0, height: 0 });
+      return;
+    }
+    if (["note", "text", "stamp", "signature"].includes(tool)) {
+      const point = pointerPosition(event);
+      const dimensions = tool === "note"
+        ? { width: 30, height: 30 }
+        : tool === "text"
+          ? { width: 210, height: 72 }
+          : tool === "stamp"
+            ? { width: 132, height: 44 }
+            : { width: 168, height: 52 };
+      const left = Math.min(Math.max(0, point.x - dimensions.width / 2), Math.max(0, viewport.width - dimensions.width));
+      const top = Math.min(Math.max(0, point.y - dimensions.height / 2), Math.max(0, viewport.height - dimensions.height));
+      const [x1, y1] = viewport.convertToPdfPoint(left, top);
+      const [x2, y2] = viewport.convertToPdfPoint(left + dimensions.width, top + dimensions.height);
+      const annotation: PdfObjectAnnotation = {
+        id: `pdf-${tool}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        kind: tool as PdfObjectAnnotation["kind"],
+        page,
+        color: inkColor,
+        width: Math.max(1, inkWidth / viewport.scale),
+        rect: normalizeRect({ x1, y1, x2, y2 }),
+        text: annotationText.trim() || (tool === "stamp" ? "ĐÃ XEM" : tool === "signature" ? "Ký tên" : "Ghi chú"),
+        createdAt: Date.now(),
+      };
+      onAnnotationCommit([...pageAnnotations, annotation], pageAnnotations);
       return;
     }
     const stage = surfaceRef.current?.closest(".document-stage") as HTMLElement | null;
@@ -535,6 +667,13 @@ export function PdfPageView({
       setCropBox({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
       return;
     }
+    if (["rectangle", "ellipse", "arrow"].includes(tool) && objectStartRef.current) {
+      event.preventDefault();
+      const point = pointerPosition(event);
+      const start = objectStartRef.current;
+      setObjectBox({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
+      return;
+    }
     if (tool === "pan" && panStartRef.current) {
       event.preventDefault();
       const stage = surfaceRef.current?.closest(".document-stage") as HTMLElement | null;
@@ -546,6 +685,26 @@ export function PdfPageView({
 
   const finishInteraction = () => {
     panStartRef.current = null;
+    if (["rectangle", "ellipse", "arrow"].includes(tool)) {
+      const box = objectBox;
+      objectStartRef.current = null;
+      setObjectBox(null);
+      if (!box || !viewport || box.width < 5 || box.height < 5) return;
+      const [x1, y1] = viewport.convertToPdfPoint(box.left, box.top);
+      const [x2, y2] = viewport.convertToPdfPoint(box.left + box.width, box.top + box.height);
+      const annotation: PdfObjectAnnotation = {
+        id: `pdf-${tool}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        kind: tool as PdfObjectAnnotation["kind"],
+        page,
+        color: inkColor,
+        width: Math.max(1, inkWidth / viewport.scale),
+        rect: normalizeRect({ x1, y1, x2, y2 }),
+        text: "",
+        createdAt: Date.now(),
+      };
+      onAnnotationCommit([...pageAnnotations, annotation], pageAnnotations);
+      return;
+    }
     if (tool !== "crop" || !cropStartRef.current || !cropBox || !viewport || cropBox.width < 10 || cropBox.height < 10) {
       cropStartRef.current = null;
       if (tool === "crop") setCropBox(null);
@@ -603,11 +762,13 @@ export function PdfPageView({
             })()}
           </div>
         )}
-        <div ref={textLayerRef} className={`textLayer pdf-text-layer ${["select", "highlight", "underline", "strikeout"].includes(tool) ? "selectable" : ""}`} />
-        {viewport && <PdfInkLayer viewport={viewport} tool={tool} color={inkColor} width={inkWidth} annotations={inkAnnotations} onCommit={(next, previous) => onInkCommit(next.map((annotation) => ({ ...annotation, page })), previous.map((annotation) => ({ ...annotation, page })))} />}
-        {(tool === "crop" || tool === "pan") && (
+        <div ref={textLayerRef} className={`textLayer pdf-text-layer ${["select", "highlight", "underline", "strikeout", "squiggly"].includes(tool) ? "selectable" : ""}`} />
+        {viewport && <PdfObjectLayer viewport={viewport} annotations={objectAnnotations} />}
+        {viewport && <PdfInkLayer viewport={viewport} tool={tool} color={inkColor} width={inkWidth} annotations={inkAnnotations} allAnnotations={pageAnnotations} onCommit={onAnnotationCommit} />}
+        {["crop", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool) && (
           <div className={`pdf-interaction-layer ${tool}`} onPointerDown={onInteractionDown} onPointerMove={onInteractionMove} onPointerUp={finishInteraction} onPointerCancel={finishInteraction}>
             {cropBox && <span className="pdf-crop-box" style={{ left: cropBox.left, top: cropBox.top, width: cropBox.width, height: cropBox.height }} />}
+            {objectBox && <span className={`pdf-object-preview preview-${tool}`} style={{ left: objectBox.left, top: objectBox.top, width: objectBox.width, height: objectBox.height, "--pdf-object-color": inkColor, "--pdf-object-width": `${inkWidth}px` } as React.CSSProperties} />}
           </div>
         )}
       </div>

@@ -39,6 +39,7 @@ import {
   ListTree,
   Maximize2,
   Menu,
+  MessageSquareText,
   Minus,
   MousePointer2,
   Move,
@@ -50,6 +51,7 @@ import {
   PenLine,
   PenTool,
   Plus,
+  Printer,
   Redo2,
   RemoveFormatting,
   RefreshCw,
@@ -58,17 +60,20 @@ import {
   Rows3,
   ScanText,
   Search,
+  Signature,
   SendToBack,
   Settings2,
   Shapes,
   Sigma,
   Square,
+  Stamp,
   Strikethrough,
   Subscript,
   Superscript,
   Table2,
   TextSelect,
   TextCursorInput,
+  Type,
   Trash2,
   Underline,
   Undo2,
@@ -85,7 +90,6 @@ import {
   type PdfAnnotation,
   type PdfCropResult,
   type PdfFitMode,
-  type PdfInkAnnotation,
   type PdfMarkupAnnotation,
   type PdfRect,
   type PdfSelection,
@@ -116,7 +120,7 @@ type PenStyle = "ballpoint" | "fountain" | "pencil" | "brush";
 type ShapeKind = "line" | "arrow" | "rectangle" | "ellipse" | "circle";
 type PaperSize = "a4" | "a5" | "b5" | "letter" | "square";
 type PaperOrientation = "portrait" | "landscape";
-type PaperTemplate = "blank" | "ruled" | "ruled-dense" | "grid" | "dotted" | "cornell";
+type PaperTemplate = "blank" | "ruled" | "ruled-dense" | "grid" | "dotted" | "cornell" | "first-aid";
 type PaperColor = "white" | "ivory" | "yellow" | "mint" | "blue" | "dark";
 type TextFont =
   | "handwriting"
@@ -313,7 +317,22 @@ const PAPER_TEMPLATES: { id: PaperTemplate; label: string }[] = [
   { id: "grid", label: "Ô vuông" },
   { id: "dotted", label: "Chấm" },
   { id: "cornell", label: "Cornell" },
+  { id: "first-aid", label: "First Aid" },
 ];
+
+const FIRST_AID_TEMPLATE_HTML = [
+  '<table style="width:100%;border-collapse:collapse">',
+  '<tbody>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #9eabb0;text-align:left">TỔNG QUAN</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #9eabb0">Viết định nghĩa hoặc thông điệp cốt lõi tại đây.</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #c7d0d3;text-align:left">YẾU TỐ NGUY CƠ</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #c7d0d3">• Yếu tố có thể thay đổi<br>• Yếu tố không thể thay đổi</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #c7d0d3;text-align:left">CƠ CHẾ</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #c7d0d3">Nguyên nhân → cơ chế trung gian → biểu hiện.</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #c7d0d3;text-align:left">LÂM SÀNG</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #c7d0d3">Triệu chứng, dấu hiệu và hình ảnh then chốt.</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #c7d0d3;text-align:left">CHẨN ĐOÁN</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #c7d0d3">Xét nghiệm đầu tay → xác nhận → phân tầng.</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;border-bottom:1px solid #c7d0d3;text-align:left">ĐIỀU TRỊ</th><td style="padding:6px;vertical-align:top;border-bottom:1px solid #c7d0d3">Điều trị nền tảng, thuốc chính và theo dõi.</td></tr>',
+  '<tr><th style="width:24%;padding:6px;vertical-align:top;color:#1b7184;text-align:left">PEARL</th><td style="padding:6px;vertical-align:top;background-color:#fff5b8"><b>Điểm dễ nhầm hoặc mẹo nhớ.</b></td></tr>',
+  '</tbody>',
+  '</table>',
+].join("");
 
 const PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[] = [
   { id: "white", label: "Trắng", swatch: "#ffffff" },
@@ -401,11 +420,54 @@ const SYMBOL_GROUPS = [
 ];
 const EQUATION_PRESETS = ["x² + y² = z²", "x₁ + x₂", "a⁄b", "√x", "∑ᵢ₌₁ⁿ xᵢ", "∫ₐᵇ f(x)dx", "Δx⁄Δt", "μ ± σ"];
 
+function pdfAnnotationLabel(annotation: PdfAnnotation) {
+  const labels: Record<PdfAnnotation["kind"], string> = {
+    highlight: "Tô sáng",
+    underline: "Gạch chân",
+    strikeout: "Gạch ngang",
+    squiggly: "Lượn sóng",
+    ink: "Nét bút",
+    note: "Ghi chú",
+    text: "Chữ",
+    rectangle: "Chữ nhật",
+    ellipse: "Elip",
+    arrow: "Mũi tên",
+    stamp: "Con dấu",
+    signature: "Chữ ký",
+  };
+  return labels[annotation.kind];
+}
+
+function pdfAnnotationSummary(annotation: PdfAnnotation) {
+  if (annotation.kind === "ink") return `${annotation.points.length} điểm bút`;
+  if ("text" in annotation && annotation.text) return annotation.text;
+  return pdfAnnotationLabel(annotation);
+}
+
 function cssColorToHex(color: string) {
   if (color.startsWith("#")) return color;
   const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
   if (!channels || channels.length < 3) return "#111111";
   return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexToRgb01(color: string) {
+  const hex = cssColorToHex(color).replace("#", "");
+  const normalized = hex.length === 3 ? hex.split("").map((character) => character + character).join("") : hex.padEnd(6, "0").slice(0, 6);
+  return {
+    red: Number.parseInt(normalized.slice(0, 2), 16) / 255,
+    green: Number.parseInt(normalized.slice(2, 4), 16) / 255,
+    blue: Number.parseInt(normalized.slice(4, 6), 16) / 255,
+  };
+}
+
+function standardPdfText(value: string) {
+  return value
+    .replace(/Đ/g, "D")
+    .replace(/đ/g, "d")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "?");
 }
 
 function cssBackgroundColor(color: string) {
@@ -494,9 +556,17 @@ const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof 
   { id: "highlight", label: "Tô sáng chữ", shortLabel: "Tô sáng", icon: Highlighter },
   { id: "underline", label: "Gạch chân chữ", shortLabel: "Gạch chân", icon: Underline },
   { id: "strikeout", label: "Gạch ngang chữ", shortLabel: "Gạch ngang", icon: Strikethrough },
+  { id: "squiggly", label: "Gạch lượn sóng dưới chữ", shortLabel: "Lượn sóng", icon: Blend },
   { id: "pen", label: "Viết trên PDF", shortLabel: "Bút", icon: PenTool },
-  { id: "eraser", label: "Tẩy nét bút trên PDF", shortLabel: "Tẩy", icon: Eraser },
+  { id: "eraser", label: "Tẩy mọi chú thích đã tạo trên PDF", shortLabel: "Tẩy", icon: Eraser },
   { id: "crop", label: "Cắt hình hoặc bảng sang note", shortLabel: "Cắt", icon: Crop },
+  { id: "note", label: "Đặt ghi chú dán", shortLabel: "Ghi chú", icon: MessageSquareText },
+  { id: "text", label: "Chèn chữ trực tiếp lên PDF", shortLabel: "Chữ", icon: Type },
+  { id: "rectangle", label: "Vẽ hình chữ nhật", shortLabel: "Chữ nhật", icon: Square },
+  { id: "ellipse", label: "Vẽ hình elip", shortLabel: "Elip", icon: Shapes },
+  { id: "arrow", label: "Vẽ mũi tên", shortLabel: "Mũi tên", icon: Move },
+  { id: "stamp", label: "Đóng dấu lên PDF", shortLabel: "Đóng dấu", icon: Stamp },
+  { id: "signature", label: "Đặt chữ ký lên PDF", shortLabel: "Chữ ký", icon: Signature },
 ];
 
 const starterStrokes: Stroke[] = [
@@ -1865,6 +1935,9 @@ export default function Home() {
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
   const [pdfTool, setPdfTool] = useState<PdfTool>("pan");
+  const [pdfTextDraft, setPdfTextDraft] = useState("Ghi chú");
+  const [pdfStampDraft, setPdfStampDraft] = useState("ĐÃ XEM");
+  const [pdfSignatureDraft, setPdfSignatureDraft] = useState("Ký tên");
   const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
   const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
@@ -2245,6 +2318,7 @@ export default function Home() {
   const viewMode = activeReader.viewMode;
   const bookmarks = activeReader.bookmarks;
   const pdfAnnotations = activeReader.annotations;
+  const pdfAnnotationText = pdfTool === "stamp" ? pdfStampDraft : pdfTool === "signature" ? pdfSignatureDraft : pdfTextDraft;
   const documentName = activeWorkspace.name;
   const totalPages = currentPdfDocument?.numPages ?? (activeDocument ? 1 : 482);
 
@@ -2566,7 +2640,7 @@ export default function Home() {
 
   const choosePdfTool = (tool: PdfTool) => {
     setPdfTool(tool);
-    if (["pen", "highlight", "underline", "strikeout"].includes(tool)) {
+    if (["pen", "highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
       setPdfPanel((panel) => panel === "ink" && pdfTool === tool ? null : "ink");
     } else {
       setPdfPanel(null);
@@ -2587,7 +2661,7 @@ export default function Home() {
 
   const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
     if (!selection || !activeDocument) return;
-    const color = kind === "highlight" ? "#f6d96b" : kind === "underline" ? inkColor : "#c94b50";
+    const color = kind === "highlight" ? "#f6d96b" : kind === "underline" || kind === "squiggly" ? inkColor : "#c94b50";
     const annotation: PdfMarkupAnnotation = {
       id: uid(`pdf-${kind}`),
       kind,
@@ -2600,7 +2674,7 @@ export default function Home() {
     commitPdfAnnotations([...pdfAnnotations, annotation]);
     window.getSelection()?.removeAllRanges();
     setPdfSelection(null);
-    setToast(kind === "highlight" ? "Đã tô sáng" : kind === "underline" ? "Đã gạch chân" : "Đã gạch ngang");
+    setToast(kind === "highlight" ? "Đã tô sáng" : kind === "underline" ? "Đã gạch chân" : kind === "squiggly" ? "Đã gạch lượn sóng" : "Đã gạch ngang");
   };
 
   const copyPdfSelection = async () => {
@@ -2614,7 +2688,7 @@ export default function Home() {
   };
 
   const handlePdfSelection = (selection: PdfSelection) => {
-    if (pdfTool === "highlight" || pdfTool === "underline" || pdfTool === "strikeout") {
+    if (pdfTool === "highlight" || pdfTool === "underline" || pdfTool === "strikeout" || pdfTool === "squiggly") {
       addPdfMarkup(pdfTool, selection);
       return;
     }
@@ -2670,8 +2744,8 @@ export default function Home() {
     window.open(oxfordLookupUrl(pdfSelection.text), "_blank", "noopener,noreferrer");
   };
 
-  const commitPdfInk = (page: number, nextPage: PdfInkAnnotation[], previousPage: PdfInkAnnotation[]) => {
-    const other = pdfAnnotations.filter((annotation) => annotation.kind !== "ink" || annotation.page !== page);
+  const commitPdfPageAnnotations = (page: number, nextPage: PdfAnnotation[], previousPage: PdfAnnotation[]) => {
+    const other = pdfAnnotations.filter((annotation) => annotation.page !== page);
     const previous = [...other, ...previousPage];
     const next = [...other, ...nextPage.map((annotation) => ({ ...annotation, page }))];
     commitPdfAnnotations(next, previous);
@@ -3133,6 +3207,154 @@ export default function Home() {
     setPdfRailTab("search");
   };
 
+  const exportAnnotatedPdf = async (mode: "download" | "print") => {
+    if (!activeDocument) {
+      setToast("Chưa có PDF để xuất");
+      return;
+    }
+    setToast(mode === "print" ? "Đang chuẩn bị bản in…" : "Đang tạo PDF có chú thích…");
+    try {
+      const stored = await readLocalPdf(activeDocument.id);
+      if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");
+      const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+      const output = await PDFDocument.load(await stored.blob.arrayBuffer(), { ignoreEncryption: true });
+      const pages = output.getPages();
+      const regularFont = await output.embedFont(StandardFonts.Helvetica);
+      const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
+      const signatureFont = await output.embedFont(StandardFonts.HelveticaOblique);
+      const colorOf = (value: string) => {
+        const color = hexToRgb01(value);
+        return rgb(color.red, color.green, color.blue);
+      };
+      const drawText = (page: (typeof pages)[number], value: string, options: Parameters<(typeof page)["drawText"]>[1]) => {
+        try {
+          page.drawText(value, options);
+        } catch {
+          page.drawText(standardPdfText(value), options);
+        }
+      };
+
+      pdfAnnotations.forEach((annotation) => {
+        const target = pages[annotation.page - 1];
+        if (!target) return;
+        const color = colorOf(annotation.color);
+        if (annotation.kind === "ink") {
+          annotation.points.slice(1).forEach((point, index) => {
+            const previous = annotation.points[index];
+            target.drawLine({
+              start: { x: previous.x, y: previous.y },
+              end: { x: point.x, y: point.y },
+              color,
+              thickness: Math.max(.7, annotation.width),
+              opacity: .96,
+            });
+          });
+          return;
+        }
+        if ("rects" in annotation) {
+          annotation.rects.forEach((rect) => {
+            const x = Math.min(rect.x1, rect.x2);
+            const y = Math.min(rect.y1, rect.y2);
+            const width = Math.abs(rect.x2 - rect.x1);
+            const height = Math.abs(rect.y2 - rect.y1);
+            if (annotation.kind === "highlight") {
+              target.drawRectangle({ x, y, width, height, color, opacity: .34 });
+            } else if (annotation.kind === "underline") {
+              target.drawLine({ start: { x, y: y + .6 }, end: { x: x + width, y: y + .6 }, color, thickness: 1.2 });
+            } else if (annotation.kind === "strikeout") {
+              target.drawLine({ start: { x, y: y + height * .52 }, end: { x: x + width, y: y + height * .52 }, color, thickness: 1.2 });
+            } else {
+              const step = Math.max(2.4, Math.min(4, height * .24));
+              for (let cursor = x; cursor < x + width; cursor += step) {
+                target.drawLine({
+                  start: { x: cursor, y: y + 1.2 },
+                  end: { x: Math.min(x + width, cursor + step / 2), y: y + 2.8 },
+                  color,
+                  thickness: 1,
+                });
+                target.drawLine({
+                  start: { x: Math.min(x + width, cursor + step / 2), y: y + 2.8 },
+                  end: { x: Math.min(x + width, cursor + step), y: y + 1.2 },
+                  color,
+                  thickness: 1,
+                });
+              }
+            }
+          });
+          return;
+        }
+
+        const rect = annotation.rect;
+        const x = Math.min(rect.x1, rect.x2);
+        const y = Math.min(rect.y1, rect.y2);
+        const width = Math.abs(rect.x2 - rect.x1);
+        const height = Math.abs(rect.y2 - rect.y1);
+        const thickness = Math.max(.8, annotation.width);
+        if (annotation.kind === "rectangle") {
+          target.drawRectangle({ x, y, width, height, borderColor: color, borderWidth: thickness });
+        } else if (annotation.kind === "ellipse") {
+          target.drawEllipse({ x: x + width / 2, y: y + height / 2, xScale: width / 2, yScale: height / 2, borderColor: color, borderWidth: thickness });
+        } else if (annotation.kind === "arrow") {
+          target.drawLine({ start: { x, y: y + height }, end: { x: x + width, y }, color, thickness });
+          const angle = Math.atan2(-height, width);
+          const head = Math.min(16, Math.max(7, Math.min(width, height) * .28));
+          [angle + Math.PI * .78, angle - Math.PI * .78].forEach((branch) => {
+            target.drawLine({
+              start: { x: x + width, y },
+              end: { x: x + width + Math.cos(branch) * head, y: y + Math.sin(branch) * head },
+              color,
+              thickness,
+            });
+          });
+        } else if (annotation.kind === "note") {
+          target.drawRectangle({ x, y, width, height, color, opacity: .84, borderColor: color, borderWidth: .8 });
+          drawText(target, "!", { x: x + width * .38, y: y + height * .24, size: Math.max(8, height * .48), font: boldFont, color: rgb(1, 1, 1) });
+        } else if (annotation.kind === "stamp") {
+          target.drawRectangle({ x, y, width, height, borderColor: color, borderWidth: Math.max(1.4, thickness) });
+          const value = annotation.text || "DA XEM";
+          drawText(target, value, { x: x + 6, y: y + Math.max(4, height * .32), size: Math.max(8, Math.min(18, height * .38)), font: boldFont, color });
+        } else {
+          const font = annotation.kind === "signature" ? signatureFont : regularFont;
+          const size = annotation.kind === "signature" ? Math.max(10, Math.min(24, height * .45)) : Math.max(8, Math.min(16, height * .28));
+          drawText(target, annotation.text || (annotation.kind === "signature" ? "Ky ten" : "Ghi chu"), { x: x + 3, y: y + Math.max(3, height - size - 4), size, font, color, maxWidth: Math.max(20, width - 6), lineHeight: size * 1.2 });
+        }
+      });
+
+      const bytes = await output.save();
+      const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      if (mode === "download") {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${activeDocument.name.replace(/\.pdf$/i, "")}-annotated.pdf`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1200);
+        setToast("Đã xuất PDF có chú thích");
+        return;
+      }
+      const frame = document.createElement("iframe");
+      frame.style.position = "fixed";
+      frame.style.right = "0";
+      frame.style.bottom = "0";
+      frame.style.width = "1px";
+      frame.style.height = "1px";
+      frame.style.opacity = "0";
+      frame.src = url;
+      frame.onload = () => window.setTimeout(() => {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      }, 500);
+      document.body.appendChild(frame);
+      window.setTimeout(() => {
+        frame.remove();
+        URL.revokeObjectURL(url);
+      }, 60_000);
+      setToast("Đã mở hộp thoại in");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể xuất PDF");
+    }
+  };
+
   const exportNotebook = async () => {
     setToast("Đang tạo tệp note…");
     const pagesHtml: string[] = [];
@@ -3202,6 +3424,16 @@ export default function Home() {
         setShowPdfRail(true);
         setPdfRailTab("search");
         window.setTimeout(() => document.getElementById("pdf-search-input")?.focus(), 0);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "p" && activeDocument) {
+        event.preventDefault();
+        void exportAnnotatedPdf("print");
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLocaleLowerCase() === "s" && activeDocument) {
+        event.preventDefault();
+        void exportAnnotatedPdf("download");
         return;
       }
       if ((event.ctrlKey || event.metaKey) && (event.key === "+" || event.key === "=")) {
@@ -3433,6 +3665,25 @@ export default function Home() {
     setToast("Đã lưu mẫu giấy cho trang này");
   };
 
+  const updatePaperTemplate = (template: PaperTemplate) => {
+    if (template !== "first-aid") {
+      updatePaper({ template });
+      return;
+    }
+    const shouldSeed = !activeNote.body.trim() && !activeNote.excerpts.length;
+    updateActiveNote({
+      paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
+      text: { ...activeNote.text, font: "times", size: 12, align: "left" },
+      ...(shouldSeed ? {
+        title: /^GHI CHÚ(?:\s+\d+)?$/i.test(activeNote.title.trim()) ? "TÊN CHỦ ĐỀ" : activeNote.title,
+        bodyHtml: FIRST_AID_TEMPLATE_HTML,
+        body: "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL",
+      } : {}),
+    });
+    setActiveTool("text");
+    setToast(shouldSeed ? "Đã tạo khung note First Aid để điền nội dung" : "Đã áp dụng bố cục First Aid");
+  };
+
   const updateText = (changes: Partial<TextSettings>) => {
     updateActiveNote({ text: { ...activeNote.text, ...changes } });
     setToast("Đã lưu định dạng chữ cho trang này");
@@ -3578,6 +3829,7 @@ export default function Home() {
             <button onClick={() => addPdfMarkup("highlight")} aria-label="Tô sáng" title="Tô sáng"><Highlighter size={14} /> Tô</button>
             <button onClick={() => addPdfMarkup("underline")} aria-label="Gạch chân" title="Gạch chân"><Underline size={14} /> Chân</button>
             <button onClick={() => addPdfMarkup("strikeout")} aria-label="Gạch ngang" title="Gạch ngang"><Strikethrough size={14} /> Ngang</button>
+            <button onClick={() => addPdfMarkup("squiggly")} aria-label="Gạch lượn sóng" title="Gạch lượn sóng"><Blend size={14} /> Lượn</button>
             <button className="send-note" onClick={() => addTextExcerpt()} aria-label="Đưa sang note" title="Đưa sang note"><NotebookTabs size={14} /> Note</button>
             <button onClick={openOxfordLookup} aria-label="Tra Oxford" title="Tra Oxford"><BookOpen size={14} /> Oxford</button>
             <button className="close-selection" onClick={() => { setPdfSelection(null); window.getSelection()?.removeAllRanges(); }} aria-label="Đóng"><X size={14} /></button>
@@ -3667,7 +3919,7 @@ export default function Home() {
               <h3>Đánh dấu trang</h3>
               {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPage(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => updateReader((reader) => ({ ...reader, bookmarks: reader.bookmarks.filter((item) => item !== page) }))}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
               <h3>Chú thích</h3>
-              {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPage(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{annotation.kind === "highlight" ? "Tô" : annotation.kind === "underline" ? "Gạch chân" : annotation.kind === "strikeout" ? "Gạch ngang" : "Nét bút"}</span><b>Trang {annotation.page}</b><p>{annotation.kind === "ink" ? `${annotation.points.length} điểm bút` : annotation.text}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight và nét bút sẽ xuất hiện tại đây.</span></div>}
+              {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPage(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{pdfAnnotationLabel(annotation)}</span><b>Trang {annotation.page}</b><p>{pdfAnnotationSummary(annotation)}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight, hình vẽ, ghi chú và nét bút sẽ xuất hiện tại đây.</span></div>}
             </div>
           )}
         </aside>
@@ -3682,6 +3934,8 @@ export default function Home() {
                 </select>
               ) : <span className="current-document-label">{activeDocument?.name ?? "Tài liệu mẫu"}</span>}
               {activeDocument && <button className="pdf-toolbar-button danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void deleteActiveDocument(); }}><Trash2 size={17} /></button>}
+              <button className="pdf-toolbar-button" disabled={!activeDocument} onClick={() => { void exportAnnotatedPdf("download"); }} title="Xuất PDF có chú thích" aria-label="Xuất PDF có chú thích"><Download size={17} /><span>Xuất PDF</span></button>
+              <button className="pdf-toolbar-button" disabled={!activeDocument} onClick={() => { void exportAnnotatedPdf("print"); }} title="In PDF có chú thích" aria-label="In PDF có chú thích"><Printer size={17} /></button>
               <span className="toolbar-divider" />
               {activeWorkspace.kind !== "empty" && <div className="page-control"><button aria-label="Trang trước" disabled={sourcePage <= 1} onClick={() => goToPage(sourcePage - 1)}><ChevronLeft size={14} /></button><label><input key={`${activeDocument?.id}-${sourcePage}`} defaultValue={sourcePage} inputMode="numeric" aria-label="Số trang" onKeyDown={(event) => { if (event.key === "Enter") goToPage(Number(event.currentTarget.value)); }} onBlur={(event) => goToPage(Number(event.currentTarget.value))} /><span>/ {totalPages}</span></label><button aria-label="Trang sau" disabled={sourcePage >= totalPages} onClick={() => goToPage(sourcePage + 1)}><ChevronRight size={14} /></button></div>}
               <div className="zoom-control"><button aria-label="Thu nhỏ" disabled={!currentPdfDocument} onClick={() => setSourceZoom((zoom) => zoom - .1)}><Minus size={15} /></button><span>{Math.round(sourceZoom * 100)}%</span><button aria-label="Phóng to" disabled={!currentPdfDocument} onClick={() => setSourceZoom((zoom) => zoom + .1)}><Plus size={15} /></button></div>
@@ -3691,7 +3945,7 @@ export default function Home() {
             </div>
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster" aria-label="Công cụ thao tác PDF">
-                {PDF_TOOLS.map(({ id, label, shortLabel, icon: Icon }) => <button key={id} className={`pdf-toolbar-button pdf-mode-button ${pdfTool === id ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => choosePdfTool(id)} title={label} aria-label={label}><Icon size={18} />{pdfTool === id && <span>{shortLabel}</span>}{["pen", "highlight", "underline", "strikeout"].includes(id) && <ChevronDown className="tool-chevron" size={11} />}</button>)}
+                {PDF_TOOLS.map(({ id, label, shortLabel, icon: Icon }) => <button key={id} className={`pdf-toolbar-button pdf-mode-button ${pdfTool === id ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => choosePdfTool(id)} title={label} aria-label={label}><Icon size={18} />{pdfTool === id && <span>{shortLabel}</span>}{["pen", "highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(id) && <ChevronDown className="tool-chevron" size={11} />}</button>)}
               </div>
               <span className="toolbar-spacer" />
               <button className="pdf-toolbar-button" disabled={!(pdfHistory[pdfHistoryKey]?.undo.length)} onClick={undoPdf} title="Hoàn tác chú thích"><Undo2 size={17} /></button>
@@ -3714,16 +3968,23 @@ export default function Home() {
 
           {pdfPanel === "ink" && (
             <div className="floating-tool-panel pdf-ink-panel" role="dialog" aria-label="Cài đặt công cụ PDF">
-              <div className="tool-panel-heading"><div><strong>{pdfTool === "pen" ? "Bút viết PDF" : "Màu chú thích"}</strong><span>Chọn màu không làm đổi công cụ</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
+              <div className="tool-panel-heading"><div><strong>{pdfTool === "pen" ? "Bút viết PDF" : pdfTool === "note" ? "Ghi chú dán" : pdfTool === "text" ? "Chèn chữ" : pdfTool === "stamp" ? "Đóng dấu" : pdfTool === "signature" ? "Chữ ký" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Hình vẽ" : "Đánh dấu văn bản"}</strong><span>{["note", "text", "stamp", "signature"].includes(pdfTool) ? "Nhập nội dung rồi bấm vị trí muốn đặt" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Kéo trực tiếp trên trang để vẽ" : "Chọn màu không làm đổi công cụ"}</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
+              {(pdfTool === "note" || pdfTool === "text") && <label className="pdf-annotation-input"><span>Nội dung</span><textarea value={pdfTextDraft} onChange={(event) => setPdfTextDraft(event.target.value)} rows={3} placeholder="Nhập ghi chú…" /></label>}
+              {pdfTool === "stamp" && <>
+                <div className="panel-setting"><label>Mẫu dấu</label><div className="stamp-presets">{["ĐÃ XEM", "ĐÃ DUYỆT", "BẢN NHÁP", "QUAN TRỌNG"].map((stamp) => <button key={stamp} className={pdfStampDraft === stamp ? "selected" : ""} onClick={() => setPdfStampDraft(stamp)}>{stamp}</button>)}</div></div>
+                <label className="pdf-annotation-input"><span>Tùy chỉnh</span><input value={pdfStampDraft} onChange={(event) => setPdfStampDraft(event.target.value)} /></label>
+              </>}
+              {pdfTool === "signature" && <label className="pdf-annotation-input"><span>Chữ ký dạng chữ</span><input value={pdfSignatureDraft} onChange={(event) => setPdfSignatureDraft(event.target.value)} placeholder="Nhập tên ký…" /></label>}
               <div className="panel-setting"><label>Màu</label><div className="color-options">{INK_COLORS.map((color) => <button key={color} className={`color-swatch ${inkColor === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onClick={() => setInkColor(color)} aria-label={`Chọn màu ${color}`} />)}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={inkColor} onChange={(event) => setInkColor(event.target.value)} /><span>+</span></label></div></div>
-              {pdfTool === "pen" && <div className="panel-setting"><label>Độ dày</label><div className="width-options">{[1, 2, 3, 5].map((width) => <button key={width} className={inkWidth === width ? "selected" : ""} onClick={() => setInkWidth(width)}><i style={{ height: width }} />{width}</button>)}</div></div>}
+              {(pdfTool === "pen" || ["rectangle", "ellipse", "arrow"].includes(pdfTool)) && <div className="panel-setting"><label>Độ dày</label><div className="width-options">{[1, 2, 3, 5].map((width) => <button key={width} className={inkWidth === width ? "selected" : ""} onClick={() => setInkWidth(width)}><i style={{ height: width }} />{width}</button>)}</div></div>}
+              {["note", "text", "stamp", "signature"].includes(pdfTool) && <p className="pdf-placement-help">Bấm nhiều vị trí để đặt lại cùng nội dung. Dùng công cụ Tẩy hoặc danh sách Chú thích để xóa.</p>}
             </div>
           )}
 
           <div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
-            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
               <div className="continuous-pages">
-                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onInkCommit={(next, previous) => commitPdfInk(page, next, previous)} onCrop={addImageExcerpt} />)}
+                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
               </div>
             ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
@@ -3916,10 +4177,11 @@ export default function Home() {
                 <div className="segmented-control"><button className={activeNote.paper.orientation === "portrait" ? "selected" : ""} onClick={() => updatePaper({ orientation: "portrait" })}>Dọc</button><button className={activeNote.paper.orientation === "landscape" ? "selected" : ""} onClick={() => updatePaper({ orientation: "landscape" })}>Ngang</button></div>
               </section>
               <section>
-                <label>Dòng kẻ</label>
+                <label>Dòng kẻ & bố cục</label>
                 <div className="template-grid">
-                  {PAPER_TEMPLATES.map((template) => <button key={template.id} className={activeNote.paper.template === template.id ? "selected" : ""} onClick={() => updatePaper({ template: template.id })}><span className={`template-preview template-${template.id}`} /><b>{template.label}</b></button>)}
+                  {PAPER_TEMPLATES.map((template) => <button key={template.id} className={activeNote.paper.template === template.id ? "selected" : ""} onClick={() => updatePaperTemplate(template.id)}><span className={`template-preview template-${template.id}`} /><b>{template.label}</b></button>)}
                 </div>
+                <p className="paper-template-help">Mẫu First Aid dùng đầu mục xanh, đường phân cách mảnh và dải tiêu đề tím–xanh; trang trống sẽ được tạo sẵn khung nội dung để điền.</p>
               </section>
               <section>
                 <label>Màu giấy</label>
