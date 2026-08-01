@@ -21,8 +21,16 @@
   transition: box-shadow .15s ease, outline-color .15s ease;
 }
 
+.fa-block-wrap {
+  position: relative;
+  z-index: 1;
+}
+
+.fa-block-wrap.has-selected-block { z-index: 20; }
+
 .fa-block.selected {
-  z-index: 3;
+  z-index: 20;
+  padding-top: 32px;
   outline: 2px solid #13808b;
   outline-offset: 1px;
   box-shadow: 0 7px 18px rgba(26,74,82,.13);
@@ -59,13 +67,15 @@
 
 .fa-block-toolbar {
   position: absolute;
-  top: -30px;
-  right: 0;
-  z-index: 8;
+  top: 2px;
+  right: 2px;
+  z-index: 30;
   display: none;
   align-items: center;
   gap: 2px;
   min-height: 28px;
+  max-width: calc(100% - 4px);
+  overflow-x: auto;
   padding: 2px 4px;
   border: 1px solid #c5d3d6;
   border-radius: 8px 8px 2px 2px;
@@ -101,13 +111,17 @@
 
 .fa-insert-slot {
   position: relative;
-  z-index: 4;
+  z-index: 2;
   min-height: 11px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 5px;
+  pointer-events: none;
 }
+
+.fa-insert-button,
+.fa-block-menu { pointer-events: auto; }
 
 .fa-insert-slot.first { grid-template-columns: 1fr; justify-items: center; }
 .fa-insert-slot > span { height: 1px; background: transparent; }

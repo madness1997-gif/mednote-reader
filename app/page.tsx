@@ -188,6 +188,7 @@ type PaperSettings = {
 type NotePage = {
   id: string;
   title: string;
+  titleHtml?: string;
   body: string;
   bodyHtml?: string;
   citationPage: number | null;
@@ -965,12 +966,13 @@ type RichTextEditorProps = {
   placeholder?: string;
   ariaLabel: string;
   autoFocus?: boolean;
+  singleLine?: boolean;
   onChange: (html: string, text: string) => void;
   onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
   onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
 };
 
-function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
+function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, singleLine = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1025,22 +1027,27 @@ function RichTextEditor({ editorId, className, html, editable, placeholder, aria
       contentEditable={editable}
       suppressContentEditableWarning
       role="textbox"
-      aria-multiline="true"
+      aria-multiline={!singleLine}
       aria-label={ariaLabel}
       spellCheck={false}
       onFocus={captureSelection}
       onMouseUp={captureSelection}
       onKeyUp={captureSelection}
+      onKeyDown={(event) => {
+        if (singleLine && event.key === "Enter") event.preventDefault();
+      }}
       onInput={emitChange}
       onPaste={(event) => {
         if (!editable) return;
         event.preventDefault();
-        document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+        const text = event.clipboardData.getData("text/plain");
+        document.execCommand("insertText", false, singleLine ? text.replace(/\s*\r?\n\s*/g, " ") : text);
       }}
       onDrop={(event) => {
         if (!editable) return;
         event.preventDefault();
-        document.execCommand("insertText", false, event.dataTransfer.getData("text/plain"));
+        const text = event.dataTransfer.getData("text/plain");
+        document.execCommand("insertText", false, singleLine ? text.replace(/\s*\r?\n\s*/g, " ") : text);
       }}
     />
   );
@@ -3483,7 +3490,7 @@ export default function Home() {
           : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
         excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
-      pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
+      pagesHtml.push(`<section><h2>${index + 1}. ${page.titleHtml ? sanitizeRichTextHtml(page.titleHtml) : escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
     }
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(activeNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(activeNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
@@ -3823,11 +3830,13 @@ export default function Home() {
       return;
     }
     const shouldSeed = !activeNote.body.trim() && !activeNote.excerpts.length;
+    const replaceDefaultTitle = /^GHI CHÚ(?:\s+\d+)?$/i.test(activeNote.title.trim());
     updateActiveNote({
       paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
       text: { ...activeNote.text, font: "times", size: 12, align: "left" },
       ...(shouldSeed ? {
-        title: /^GHI CHÚ(?:\s+\d+)?$/i.test(activeNote.title.trim()) ? "TÊN CHỦ ĐỀ" : activeNote.title,
+        title: replaceDefaultTitle ? "TÊN CHỦ ĐỀ" : activeNote.title,
+        titleHtml: replaceDefaultTitle ? undefined : activeNote.titleHtml,
         bodyHtml: FIRST_AID_TEMPLATE_HTML,
         body: "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL",
       } : {}),
@@ -4384,7 +4393,13 @@ export default function Home() {
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
-                <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text" && !(activeNote.paper.template === "first-aid" && activeTool === "pointer")} aria-label="Tiêu đề ghi chú" />
+                <RichTextEditor editorId={`title:${activeNote.id}`} className="note-title-input" html={activeNote.titleHtml ?? plainTextToRichHtml(activeNote.title)} editable={activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer")} singleLine placeholder="Nhập tiêu đề" ariaLabel="Tiêu đề ghi chú" onChange={(titleHtml, title) => updateActiveNote({ titleHtml, title })} onActivate={(editorId, editor, range) => {
+                  if (activeNote.paper.template === "first-aid" && activeTool === "pointer") {
+                    setActiveTool("text");
+                    setNotePanel("text");
+                  }
+                  activateTextEditor(editorId, editor, range);
+                }} onNormalizeInput={normalizeTextEditorInput} />
                 <RichTextEditor editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {

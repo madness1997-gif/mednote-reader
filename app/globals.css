@@ -571,11 +571,14 @@ body {
 .note-paper.template-first-aid .paper-background { background-image: linear-gradient(90deg, #16758a 0 18%, #8b2c58 18% 78%, #16758a 78% 100%); background-position: top; background-repeat: no-repeat; background-size: 100% 30px; }
 .typed-layer { position: absolute; inset: 0; z-index: 1; padding: 42px 42px 48px; pointer-events: none; }
 .note-paper.typing .typed-layer { pointer-events: auto; }
-.note-title-input { display: block; width: 100%; padding: 0 4px 11px; border: 0; border-bottom: 2px solid var(--paper-accent); outline: 0; background: transparent; color: var(--paper-accent); font-weight: 750; font-size: clamp(17px, 1.55vw, 22px); text-align: center; letter-spacing: .025em; }
-.note-title-input:read-only { cursor: default; }
+.note-title-input { width: 100%; min-height: 32px; display: block; padding: 0 4px 11px; overflow-x: auto; overflow-y: hidden; border: 0; border-bottom: 2px solid var(--paper-accent); outline: 0; background: transparent; color: var(--paper-accent); font-weight: 750; font-size: clamp(17px, 1.55vw, 22px); line-height: 1.25; text-align: center; letter-spacing: .025em; white-space: nowrap; scrollbar-width: none; }
+.note-title-input::-webkit-scrollbar { display: none; }
+.note-title-input[contenteditable="false"] { cursor: default; }
+.note-title-input[contenteditable="true"] { cursor: text; }
+.note-title-input:empty::before { content: attr(data-placeholder); color: currentColor; opacity: .62; pointer-events: none; }
 .note-editor { display: block; width: 100%; height: calc(100% - 58px); margin-top: 15px; padding: 0 6px; border: 0; outline: 0; overflow: hidden; background: transparent; color: var(--text-color, var(--paper-ink)); font-family: var(--text-font, "Times New Roman", Times, serif); font-size: var(--text-size, 15px); font-weight: var(--text-weight, 400); font-style: var(--text-style, normal); line-height: 1.8; text-align: var(--text-align, left); text-decoration: var(--text-decoration, none); white-space: pre-wrap; }
 .note-paper.template-first-aid .typed-layer { padding: 8px 28px 28px; }
-.note-paper.template-first-aid .note-title-input { height: 22px; padding: 0 2px; border: 0; color: white; font-family: "Segoe UI", Arial, sans-serif; font-size: clamp(9px, .9vw, 12px); font-weight: 800; text-align: right; letter-spacing: .035em; }
+.note-paper.template-first-aid .note-title-input { min-height: 22px; height: 22px; padding: 0 2px; border: 0; color: white; font-family: "Segoe UI", Arial, sans-serif; font-size: clamp(9px, .9vw, 12px); font-weight: 800; line-height: 22px; text-align: right; letter-spacing: .035em; }
 .note-paper.template-first-aid .note-editor { height: calc(100% - 30px); margin-top: 15px; padding: 0 2px; font-family: "Times New Roman", Times, serif; font-size: var(--text-size, 12px); line-height: 1.35; }
 .note-paper.template-first-aid .note-editor table { margin: 0; border-top: 1px solid #86979d; table-layout: fixed; }
 .note-paper.template-first-aid .note-editor th { color: #1b7184 !important; font-family: "Segoe UI", Arial, sans-serif; font-size: .74em; font-weight: 800; letter-spacing: .015em; }

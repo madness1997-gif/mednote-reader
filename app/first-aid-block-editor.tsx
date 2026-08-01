@@ -458,7 +458,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
       {blocks.map((block, index) => {
         const selected = selectedId === block.id;
         return (
-          <div key={block.id}>
+          <div className={`fa-block-wrap ${selected ? "has-selected-block" : ""}`} key={block.id}>
             <section className={`fa-block fa-block-${block.type} ${selected ? "selected" : ""}`} onClick={(event) => { event.stopPropagation(); if (canManage) setSelectedId(block.id); }} onKeyDown={(event) => onBlockKeyDown(event, block)} onDragOver={(event) => { if (draggedId) event.preventDefault(); }} onDrop={(event: DragEvent<HTMLElement>) => { event.preventDefault(); if (draggedId) moveToIndex(draggedId, index); setDraggedId(null); }}>
               {canManage && <div className="fa-block-toolbar">
                 <button draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedId(block.id); }} onDragEnd={() => setDraggedId(null)} aria-label="Kéo để đổi thứ tự" title="Kéo để đổi thứ tự"><GripVertical size={15} /></button>
