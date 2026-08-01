@@ -306,7 +306,7 @@ const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", temp
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
-const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "#fff8cf" };
+const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "transparent" };
 const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
@@ -672,15 +672,16 @@ function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, inde
   };
 }
 
-function normalizeExcerptAppearance(appearance?: Partial<ExcerptAppearance>): ExcerptAppearance {
+function normalizeExcerptAppearance(appearance?: Partial<ExcerptAppearance>, migrateLegacyCallout = false): ExcerptAppearance {
   const borderStyle = TABLE_BORDER_STYLES.some((option) => option.id === appearance?.borderStyle)
     ? appearance!.borderStyle!
     : DEFAULT_TEXT_BOX_APPEARANCE.borderStyle;
+  const savedBackground = appearance?.backgroundColor || DEFAULT_TEXT_BOX_APPEARANCE.backgroundColor;
   return {
     borderStyle,
     borderWidth: Math.min(8, Math.max(0, Number(appearance?.borderWidth ?? DEFAULT_TEXT_BOX_APPEARANCE.borderWidth))),
     borderColor: appearance?.borderColor || DEFAULT_TEXT_BOX_APPEARANCE.borderColor,
-    backgroundColor: appearance?.backgroundColor || DEFAULT_TEXT_BOX_APPEARANCE.backgroundColor,
+    backgroundColor: migrateLegacyCallout && savedBackground.toLowerCase() === "#fff8cf" ? "transparent" : savedBackground,
   };
 }
 
@@ -728,7 +729,7 @@ function normalizePage(page: NotePage): NotePage {
             richText: excerpt.kind === "text" ? sanitizeRichTextHtml(excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")) : undefined,
             layout,
             appearance: excerpt.kind === "text"
-              ? normalizeExcerptAppearance(excerpt.appearance ?? (excerpt.annotationKind === "callout" ? DEFAULT_CALLOUT_APPEARANCE : undefined))
+              ? normalizeExcerptAppearance(excerpt.appearance ?? (excerpt.annotationKind === "callout" ? DEFAULT_CALLOUT_APPEARANCE : undefined), excerpt.annotationKind === "callout")
               : undefined,
             callout: excerpt.annotationKind === "callout" ? normalizeCalloutSettings(excerpt.callout, layout) : undefined,
           };
@@ -1091,7 +1092,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const isCallout = excerpt.annotationKind === "callout";
-  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance ?? (isCallout ? DEFAULT_CALLOUT_APPEARANCE : undefined)) : null;
+  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance ?? (isCallout ? DEFAULT_CALLOUT_APPEARANCE : undefined), isCallout) : null;
   const savedCallout = isCallout ? normalizeCalloutSettings(excerpt.callout, savedLayout) : null;
   const [layout, setLayout] = useState(savedLayout);
   const [calloutAnchor, setCalloutAnchor] = useState(savedCallout);
@@ -2944,6 +2945,39 @@ export default function Home() {
     }
   };
 
+  const addFirstAidImage = async ({ blob, name, aspectRatio, y }: { blob: Blob; name: string; aspectRatio: number; y: number }) => {
+    const assetId = uid("note-image");
+    try {
+      await saveLocalAsset(assetId, blob);
+      const paper = PAPER_SIZES[activeNote.paper.size];
+      const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
+      const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
+      const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
+      layout.x = .3;
+      layout.aspectRatio = Math.max(.01, aspectRatio);
+      layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / layout.aspectRatio));
+      layout.y = Math.min(1 - layout.height, Math.max(.065, y));
+      const excerpt: NoteExcerpt = {
+        id: uid("excerpt"),
+        kind: "image",
+        sourceKind: "manual",
+        assetId,
+        documentName: name,
+        createdAt: Date.now(),
+        layout,
+      };
+      updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
+      setSelectedExcerptId(excerpt.id);
+      setActiveTool("pointer");
+      setNotePanel(null);
+      setToast("Đã đưa ảnh lên trang — có thể kéo, đổi cỡ, xoay, chỉnh độ trong suốt và xếp lớp");
+      return true;
+    } catch {
+      setToast("Không thể lưu ảnh trên thiết bị này");
+      return false;
+    }
+  };
+
   const deleteExcerpt = (excerptId: string) => {
     updateActiveNote({ excerpts: activeNote.excerpts.filter((excerpt) => excerpt.id !== excerptId) });
     if (selectedExcerptId === excerptId) setSelectedExcerptId(null);
@@ -4404,7 +4438,8 @@ export default function Home() {
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer"} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                    const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
                   })}
                 </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}

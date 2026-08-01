@@ -598,7 +598,7 @@ body {
 .rich-text-editor table { width: 100%; margin: .45em 0; border-collapse: collapse; table-layout: fixed; }
 .rich-text-editor th, .rich-text-editor td { min-width: 44px; min-height: 1.5em; padding: 6px; vertical-align: top; }
 .rich-text-editor td:empty::after, .rich-text-editor th:empty::after { content: "\00a0"; }
-.note-excerpts { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.note-excerpts { position: absolute; inset: 0; z-index: 50; overflow: hidden; pointer-events: none; }
 .note-excerpt { position: absolute; min-width: 118px; min-height: 96px; display: flex; flex-direction: column; overflow: visible; border-color: var(--excerpt-border-color, #60737d); border-style: var(--excerpt-border-style, solid); border-width: var(--excerpt-border-width, 1px); border-radius: 0; background: var(--excerpt-background, transparent); box-shadow: none; transform-origin: center; pointer-events: none; }
 .note-paper.object-mode .note-excerpt { pointer-events: auto; }
 .note-paper:has(.ink-surface.tool-textbox) { cursor: text; }

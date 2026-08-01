@@ -44,6 +44,12 @@ type FirstAidBlockEditorProps = {
   plainText: string;
   mode: EditorMode;
   onChange: (html: string, plainText: string) => void;
+  onInsertImage: (image: {
+    blob: Blob;
+    name: string;
+    aspectRatio: number;
+    y: number;
+  }) => Promise<boolean>;
 };
 
 type BlockOption = {
@@ -53,7 +59,7 @@ type BlockOption = {
   icon: LucideIcon;
 };
 
-const SERIALIZATION_VERSION = 1;
+const SERIALIZATION_VERSION = 2;
 const ASSET_DB = "mednote-first-aid-assets";
 const ASSET_STORE = "assets";
 
@@ -87,7 +93,7 @@ function createBlock(type: BlockType): FirstAidBlock {
     case "table":
       return { id: uid(), type, rows: [["Tiêu đề 1", "Tiêu đề 2"], ["Nội dung", "Nội dung"]] };
     case "flow":
-      return { id: uid(), type, steps: ["Bước 1", "Bước 2", "Bước 3"] };
+      return { id: uid(), type, label: "CƠ CHẾ", steps: ["Bước 1", "Bước 2", "Bước 3"] };
     case "pearl":
       return { id: uid(), type, label: "HIGH-YIELD", text: "Điểm dễ nhầm hoặc mẹo nhớ." };
   }
@@ -130,7 +136,7 @@ function blockPlainText(block: FirstAidBlock) {
     case "figure": return block.caption ?? "";
     case "figure-text": return `${block.text ?? ""}\n${block.caption ?? ""}`.trim();
     case "table": return (block.rows ?? []).map((row) => row.join(" | ")).join("\n");
-    case "flow": return (block.steps ?? []).join(" → ");
+    case "flow": return `${block.label ?? "CƠ CHẾ"}\n${(block.steps ?? []).join(" → ")}`.trim();
     case "pearl": return `${block.label ?? "HIGH-YIELD"}: ${block.text ?? ""}`;
   }
 }
@@ -161,7 +167,8 @@ function blockStaticHtml(block: FirstAidBlock) {
     return `<div style="padding:6px;${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell) => `<${rowIndex === 0 ? "th" : "td"} style="padding:5px 6px;border:1px solid #b9c4c8;${rowIndex === 0 ? "color:#1b7184;font:800 9px/1.2 'Segoe UI',Arial,sans-serif;text-align:left;background:#f2f6f7" : ""}">${escapeHtml(cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
   }
   if (block.type === "flow") {
-    return `<div style="display:flex;align-items:stretch;gap:5px;padding:7px 6px;${border}${content}">${(block.steps ?? []).map((step, index, all) => `<div style="flex:1;padding:6px;border:1px solid #b7c4c8;border-radius:4px;text-align:center;background:#fff">${escapeHtml(step)}</div>${index < all.length - 1 ? '<div style="display:grid;place-items:center;color:#8b2c58;font-weight:800">→</div>' : ""}`).join("")}</div>`;
+    const flow = `<div style="display:flex;align-items:stretch;gap:5px;padding:7px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="flex:1;padding:6px;border:1px solid #b7c4c8;border-radius:4px;text-align:center;background:#fff">${escapeHtml(step)}</div>${index < all.length - 1 ? '<div style="display:grid;place-items:center;color:#8b2c58;font-weight:800">→</div>' : ""}`).join("")}</div>`;
+    return `<div style="display:grid;grid-template-columns:22% 1fr;${border}"><div style="padding:7px;color:#1b7184;background:#eff7f8;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${escapeHtml(block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;
   }
   return `<div style="display:grid;grid-template-columns:22% 1fr;margin:4px 0;border:1px solid #e0c96e;background:#fff7c7"><div style="padding:6px;color:#8b2c58;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${escapeHtml(block.label)}</div><div style="padding:6px;white-space:pre-wrap;${content}"><b>${escapeHtml(block.text)}</b></div></div>`;
 }
@@ -169,15 +176,60 @@ function blockStaticHtml(block: FirstAidBlock) {
 function serializeBlocks(blocks: FirstAidBlock[]) {
   const payload = encodePayload({ version: SERIALIZATION_VERSION, blocks });
   const visible = blocks.map(blockStaticHtml).join("");
-  return `<div data-mednote-first-aid-rendered="1" style="width:100%">${visible}</div><template data-mednote-first-aid="${payload}"></template>`;
+  // Keep the structured payload in a comment. Rich-text sanitizing intentionally
+  // preserves comments, while unknown elements/attributes may be removed when a
+  // notebook is loaded. The visible HTML remains useful for export and fallback.
+  return `<div data-mednote-first-aid-rendered="1" style="width:100%">${visible}</div><!--mednote-first-aid:${payload}-->`;
+}
+
+const LEGACY_SECTION_LABELS = [
+  "TỔNG QUAN",
+  "YẾU TỐ NGUY CƠ",
+  "CƠ CHẾ",
+  "LÂM SÀNG",
+  "CHẨN ĐOÁN",
+  "ĐIỀU TRỊ",
+  "PEARL",
+  "CLINICAL PEARL",
+  "HIGH-YIELD",
+  "ĐIỂM CẦN NHỚ",
+] as const;
+
+function splitLegacySection(value = "") {
+  const trimmed = value.trim();
+  const firstLineEnd = trimmed.indexOf("\n");
+  const firstLine = (firstLineEnd >= 0 ? trimmed.slice(0, firstLineEnd) : trimmed).trim();
+  const normalizedFirstLine = firstLine.toLocaleUpperCase("vi-VN").replace(/\s+/g, " ");
+  const label = LEGACY_SECTION_LABELS.find((candidate) => normalizedFirstLine === candidate || normalizedFirstLine.startsWith(`${candidate}:`));
+  if (!label) return null;
+  const inlineText = normalizedFirstLine.startsWith(`${label}:`) ? firstLine.slice(firstLine.indexOf(":") + 1).trim() : "";
+  const remainingText = firstLineEnd >= 0 ? trimmed.slice(firstLineEnd + 1).trim() : "";
+  return { label, text: [inlineText, remainingText].filter(Boolean).join("\n") };
+}
+
+function recoverLegacySections(blocks: FirstAidBlock[]) {
+  const sections = blocks.map((block) => block.type === "text" ? splitLegacySection(block.text) : null);
+  const recognized = sections.filter(Boolean).length;
+  // A single paragraph may legitimately start with words such as "CƠ CHẾ".
+  // Only migrate when the page clearly resembles the former First Aid template.
+  if (recognized < 3 || recognized < Math.ceil(blocks.length / 2)) return blocks;
+  return blocks.map((block, index) => {
+    const section = sections[index];
+    if (!section) return block;
+    if (["PEARL", "CLINICAL PEARL", "HIGH-YIELD", "ĐIỂM CẦN NHỚ"].includes(section.label)) {
+      return { ...createBlock("pearl"), id: block.id, label: section.label === "PEARL" ? "ĐIỂM CẦN NHỚ" : section.label, text: section.text || "Điểm dễ nhầm hoặc mẹo nhớ." };
+    }
+    return { ...createBlock("label"), id: block.id, label: section.label, text: section.text };
+  });
 }
 
 function parseBlocks(html: string, plainText: string): FirstAidBlock[] {
-  const payload = html.match(/<template[^>]*data-mednote-first-aid="([^"]+)"[^>]*>/i)?.[1];
+  const payload = html.match(/<!--\s*mednote-first-aid:([A-Za-z0-9+/=]+)\s*-->/i)?.[1]
+    ?? html.match(/<template[^>]*data-mednote-first-aid="([^"]+)"[^>]*>/i)?.[1];
   if (payload) {
     try {
       const parsed = decodePayload<{ version: number; blocks: FirstAidBlock[] }>(payload);
-      if (Array.isArray(parsed.blocks) && parsed.blocks.length) return parsed.blocks;
+      if (Array.isArray(parsed.blocks) && parsed.blocks.length) return recoverLegacySections(parsed.blocks);
     } catch {
       // Fall through to legacy conversion.
     }
@@ -196,7 +248,7 @@ function parseBlocks(html: string, plainText: string): FirstAidBlock[] {
     }
   }
   const paragraphs = plainText.split(/\n{2,}/).map((text) => text.trim()).filter(Boolean);
-  if (paragraphs.length) return paragraphs.map((text) => ({ ...createBlock("text"), text, textStyle: "paragraph" }));
+  if (paragraphs.length) return recoverLegacySections(paragraphs.map((text) => ({ ...createBlock("text"), text, textStyle: "paragraph" })));
   return [createBlock("heading"), createBlock("label"), createBlock("label"), createBlock("pearl")];
 }
 
@@ -209,17 +261,6 @@ function openAssetDb() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-}
-
-async function saveAsset(id: string, blob: Blob) {
-  const database = await openAssetDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(ASSET_STORE, "readwrite");
-    transaction.objectStore(ASSET_STORE).put(blob, id);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  database.close();
 }
 
 async function readAsset(id: string) {
@@ -246,7 +287,8 @@ async function compressImage(file: File) {
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
     canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob ?? file), "image/webp", 0.84));
+    const blob = await new Promise<Blob>((resolve) => canvas.toBlob((result) => resolve(result ?? file), "image/webp", 0.84));
+    return { blob, aspectRatio: canvas.width / Math.max(1, canvas.height) };
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -282,7 +324,7 @@ function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void
   );
 }
 
-export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAidBlockEditorProps) {
+export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage }: FirstAidBlockEditorProps) {
   const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => parseBlocks(html, plainText));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -290,7 +332,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const assetUrlsRef = useRef<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingImageBlockRef = useRef<string | null>(null);
+  const pendingImageBlockRef = useRef<{ blockId: string; y: number } | null>(null);
   const canManage = mode !== "view";
   const canEdit = mode === "edit";
   const assetIds = useMemo(() => Array.from(new Set(blocks.map((block) => block.imageAssetId).filter((value): value is string => Boolean(value)))).sort(), [blocks]);
@@ -310,6 +352,15 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
 
   useEffect(() => () => {
     Object.values(assetUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  useEffect(() => {
+    const normalizedHtml = serializeBlocks(blocks);
+    if (html === normalizedHtml) return;
+    onChange(normalizedHtml, blocks.map(blockPlainText).filter(Boolean).join("\n\n"));
+    // Normalize legacy/sanitized First Aid pages once when this note is opened.
+    // The editor is keyed by page id, so later edits continue through commit().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const commit = (next: FirstAidBlock[]) => {
@@ -384,29 +435,48 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
     }
   };
 
-  const requestImage = (blockId: string) => {
+  const blockPlacementY = (element: HTMLElement) => {
+    const block = element.closest<HTMLElement>(".fa-block");
+    const page = element.closest<HTMLElement>(".typed-layer");
+    if (!block || !page) return .28;
+    const blockRect = block.getBoundingClientRect();
+    const pageRect = page.getBoundingClientRect();
+    return Math.min(.88, Math.max(.08, (blockRect.top - pageRect.top) / Math.max(1, pageRect.height)));
+  };
+
+  const requestImage = (blockId: string, element: HTMLElement) => {
     if (!canEdit) return;
-    pendingImageBlockRef.current = blockId;
+    pendingImageBlockRef.current = { blockId, y: blockPlacementY(element) };
     fileInputRef.current?.click();
   };
 
-  const applyImageFile = async (blockId: string, file: File) => {
+  const replaceImageBlockAfterInsert = (blockId: string) => {
+    const current = blocks.find((block) => block.id === blockId);
+    if (!current) return;
+    const figureText = current.text === "Nhập nội dung liên quan đến hình…" ? "" : current.text;
+    const preservedText = current.type === "figure-text"
+      ? [figureText, current.caption && current.caption !== "Chú thích" ? current.caption : ""].filter(Boolean).join("\n")
+      : current.caption && current.caption !== "Nhập chú thích hình…" ? current.caption : "";
+    const next = preservedText
+      ? blocks.map((block) => block.id === blockId ? { ...createBlock("text"), id: blockId, text: preservedText, textStyle: "paragraph" as TextStyle } : block)
+      : blocks.filter((block) => block.id !== blockId);
+    commit(next.length ? next : [createBlock("label")]);
+    setSelectedId(null);
+  };
+
+  const applyImageFile = async (blockId: string, file: File, y: number) => {
     if (!file.type.startsWith("image/")) return;
-    const blob = await compressImage(file);
-    const assetId = uid("fa-image");
-    await saveAsset(assetId, blob);
-    const url = URL.createObjectURL(blob);
-    assetUrlsRef.current[assetId] = url;
-    setAssetUrls((current) => ({ ...current, [assetId]: url }));
-    updateBlock(blockId, { imageAssetId: assetId, imageName: file.name });
+    const { blob, aspectRatio } = await compressImage(file);
+    const inserted = await onInsertImage({ blob, name: file.name, aspectRatio, y });
+    if (inserted) replaceImageBlockAfterInsert(blockId);
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    const blockId = pendingImageBlockRef.current;
+    const pending = pendingImageBlockRef.current;
     event.target.value = "";
     pendingImageBlockRef.current = null;
-    if (file && blockId) void applyImageFile(blockId, file);
+    if (file && pending) void applyImageFile(pending.blockId, file, pending.y);
   };
 
   const updateTableCell = (block: FirstAidBlock, rowIndex: number, columnIndex: number, value: string) => {
@@ -418,12 +488,12 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
   const renderImageZone = (block: FirstAidBlock) => {
     const url = block.imageAssetId ? assetUrls[block.imageAssetId] : undefined;
     return (
-      <div className={`fa-image-zone ${url ? "has-image" : ""}`} onClick={() => requestImage(block.id)} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
+      <div className={`fa-image-zone ${url ? "has-image" : ""}`} onClick={(event) => requestImage(block.id, event.currentTarget)} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
         if (!canEdit) return;
         event.preventDefault();
         event.stopPropagation();
         const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/"));
-        if (file) void applyImageFile(block.id, file);
+        if (file) void applyImageFile(block.id, file, blockPlacementY(event.currentTarget));
       }}>
         {url ? <img src={url} alt={block.imageName || "Hình trong note"} /> : <><ImageIcon size={24} /><b>Thả, dán hoặc chọn hình</b><small>Ảnh được nén và lưu cục bộ</small></>}
       </div>
@@ -443,7 +513,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
     }
     if (block.type === "flow") {
       const steps = block.steps ?? ["Bước 1"];
-      return <div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><AutoTextarea value={step} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item) })} ariaLabel={`Bước ${index + 1}`} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, `Bước ${steps.length + 1}`] })}><Plus size={14} /> Thêm bước</button></div>;
+      return <div className="fa-flow-layout"><AutoTextarea className="fa-flow-label" value={block.label ?? "CƠ CHẾ"} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { label: value })} ariaLabel="Nhãn diễn tiến" /><div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><AutoTextarea value={step} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item) })} ariaLabel={`Bước ${index + 1}`} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, `Bước ${steps.length + 1}`] })}><Plus size={14} /> Thêm bước</button></div></div>;
     }
     return <div className="fa-pearl-layout"><AutoTextarea className="fa-pearl-label" value={block.label ?? "HIGH-YIELD"} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { label: value })} ariaLabel="Nhãn pearl" /><AutoTextarea className="fa-pearl-text" value={block.text ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { text: value })} ariaLabel="Nội dung pearl" /></div>;
   };
@@ -460,13 +530,13 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
         return (
           <div className={`fa-block-wrap ${selected ? "has-selected-block" : ""}`} key={block.id}>
             <section className={`fa-block fa-block-${block.type} ${selected ? "selected" : ""}`} onClick={(event) => { event.stopPropagation(); if (canManage) setSelectedId(block.id); }} onKeyDown={(event) => onBlockKeyDown(event, block)} onDragOver={(event) => { if (draggedId) event.preventDefault(); }} onDrop={(event: DragEvent<HTMLElement>) => { event.preventDefault(); if (draggedId) moveToIndex(draggedId, index); setDraggedId(null); }}>
-              {canManage && <div className="fa-block-toolbar">
-                <button draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedId(block.id); }} onDragEnd={() => setDraggedId(null)} aria-label="Kéo để đổi thứ tự" title="Kéo để đổi thứ tự"><GripVertical size={15} /></button>
+              {canManage && <div className="fa-block-toolbar" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+                <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedId(block.id); }} onDragEnd={() => setDraggedId(null)} aria-label="Kéo để đổi thứ tự" title="Kéo để đổi thứ tự"><GripVertical size={15} /></button>
                 <select value={block.type} onChange={(event) => convertBlock(block.id, event.target.value as BlockType)} aria-label="Đổi loại block">{BLOCK_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}</select>
-                <button disabled={index === 0} onClick={() => moveBlock(block.id, -1)} aria-label="Đưa block lên"><ArrowUp size={14} /></button>
-                <button disabled={index === blocks.length - 1} onClick={() => moveBlock(block.id, 1)} aria-label="Đưa block xuống"><ArrowDown size={14} /></button>
-                <button onClick={() => duplicateBlock(block.id)} aria-label="Nhân bản block"><Copy size={14} /></button>
-                <button className="danger" onClick={() => removeBlock(block.id)} aria-label="Xóa block"><Trash2 size={14} /></button>
+                <button type="button" disabled={index === 0} onClick={() => moveBlock(block.id, -1)} aria-label="Đưa block lên"><ArrowUp size={14} /></button>
+                <button type="button" disabled={index === blocks.length - 1} onClick={() => moveBlock(block.id, 1)} aria-label="Đưa block xuống"><ArrowDown size={14} /></button>
+                <button type="button" onClick={() => duplicateBlock(block.id)} aria-label="Nhân bản block"><Copy size={14} /></button>
+                <button type="button" className="danger" onClick={() => removeBlock(block.id)} aria-label="Xóa block"><Trash2 size={14} /></button>
               </div>}
               {renderBlockBody(block)}
             </section>
