@@ -135,6 +135,10 @@
 }
 
 .fa-insert-button:disabled { display: none; }
+.fa-insert-slot.last { min-height: 36px; }
+.fa-insert-button.persistent { width: auto; height: 27px; display: inline-flex; align-items: center; gap: 4px; padding: 0 9px; border-color: #a9c4c8; border-radius: 7px; background: #fff; color: #147783; box-shadow: 0 2px 7px rgba(23,91,101,.1); }
+.fa-insert-button.persistent:hover { border-color: #13808b; background: #edf8f8; }
+.fa-insert-button.persistent b { font-family: "Segoe UI", Arial, sans-serif; font-size: 9px; }
 
 .fa-block-menu {
   position: absolute;

@@ -279,6 +279,7 @@ type PersistedLibrary = {
   workspaces: WorkspaceItem[];
   activeWorkspaceId: string;
   readerShare: number;
+  noteZoom?: number;
   savedAt?: number;
 };
 
@@ -302,6 +303,7 @@ const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDe
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
+const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
 const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "#fff8cf" };
 const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
@@ -1992,6 +1994,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
+  const noteStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
@@ -2027,9 +2030,12 @@ export default function Home() {
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
   const [readerShare, setReaderShare] = useState(50);
+  const [noteZoom, setNoteZoom] = useState(1);
   const [toast, setToast] = useState("Đã tự lưu");
   const [ready, setReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
+  const [renamingWorkspaceName, setRenamingWorkspaceName] = useState("");
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
   const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
@@ -2483,6 +2489,7 @@ export default function Home() {
             setWorkspaces(normalized);
             setActiveWorkspaceId(parsed.activeWorkspaceId || parsed.workspaces[0].id);
             setReaderShare(parsed.readerShare || 50);
+            setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
             localSavedAtRef.current = parsed.savedAt || Date.now();
             setReady(true);
             return;
@@ -2537,6 +2544,7 @@ export default function Home() {
         setWorkspaces([restoredWorkspace]);
         setActiveWorkspaceId(restoredWorkspace.id);
         setReaderShare(legacy?.readerShare || 50);
+        setNoteZoom(1);
         setReady(true);
       }
     };
@@ -2553,9 +2561,9 @@ export default function Home() {
     try {
       const savedAt = Date.now();
       localSavedAtRef.current = savedAt;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, savedAt } satisfies PersistedLibrary));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, noteZoom, savedAt } satisfies PersistedLibrary));
     } catch { /* storage may be unavailable in private browsing */ }
-  }, [workspaces, activeWorkspaceId, readerShare, ready]);
+  }, [workspaces, activeWorkspaceId, readerShare, noteZoom, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -3095,7 +3103,7 @@ export default function Home() {
       }
 
       const savedAt = localSavedAtRef.current || Date.now();
-      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, savedAt };
+      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, noteZoom, savedAt };
       const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
       await upsertDriveFile(token, {
         name: "MedNote Workspace.json",
@@ -3164,6 +3172,7 @@ export default function Home() {
       setWorkspaces(normalized);
       setActiveWorkspaceId(normalized.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : normalized[0].id);
       setReaderShare(parsed.readerShare || 50);
+      setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
       setDriveReady(true);
       setDriveLastSyncedAt(savedAt);
       setDriveStatus("connected");
@@ -3233,7 +3242,7 @@ export default function Home() {
     if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
     const timer = window.setTimeout(() => { void syncToDrive(driveToken, true); }, 2200);
     return () => window.clearTimeout(timer);
-  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, readerShare, ready, workspaces]);
+  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaces]);
 
   const performSearch = async () => {
     const query = searchQuery.trim();
@@ -3682,6 +3691,49 @@ export default function Home() {
     setToast(lastNotebook ? "Đã xóa sổ note và tạo sổ trống" : "Đã xóa sổ note");
   };
 
+  const beginWorkspaceRename = (workspace: WorkspaceItem) => {
+    setRenamingWorkspaceId(workspace.id);
+    setRenamingWorkspaceName(workspace.name);
+  };
+
+  const cancelWorkspaceRename = () => {
+    setRenamingWorkspaceId(null);
+    setRenamingWorkspaceName("");
+  };
+
+  const commitWorkspaceRename = (workspaceId: string) => {
+    const nextName = renamingWorkspaceName.trim().replace(/\.pdf$/i, "").trim();
+    if (!nextName) {
+      setToast("Tên tài liệu không được để trống");
+      return;
+    }
+    setWorkspaces((items) => items.map((workspace) => {
+      if (workspace.id !== workspaceId) return workspace;
+      const singleDocument = workspace.kind === "document" && workspace.documents.length === 1 ? workspace.documents[0] : null;
+      const renamedDocument = singleDocument ? { ...singleDocument, name: `${nextName}.pdf` } : null;
+      const documents = renamedDocument ? [renamedDocument] : workspace.documents;
+      const notebooks = workspace.notebooks.map((notebook) => ({
+        ...notebook,
+        title: notebook.title === `Ghi chú — ${workspace.name}` ? `Ghi chú — ${nextName}` : notebook.title,
+        pages: renamedDocument ? notebook.pages.map((page) => ({
+          ...page,
+          excerpts: page.excerpts.map((excerpt) => excerpt.documentId === renamedDocument.id
+            ? { ...excerpt, documentName: renamedDocument.name }
+            : excerpt),
+        })) : notebook.pages,
+      }));
+      return { ...workspace, name: nextName, documents, notebooks };
+    }));
+    const target = workspaces.find((workspace) => workspace.id === workspaceId);
+    const targetDocument = target?.kind === "document" && target.documents.length === 1 ? target.documents[0] : null;
+    if (targetDocument) {
+      const renamedDocument = { ...targetDocument, name: `${nextName}.pdf` };
+      void readLocalPdf(targetDocument.id).then((stored) => stored ? saveLocalPdf(stored.blob, renamedDocument) : undefined).catch(() => undefined);
+    }
+    cancelWorkspaceRename();
+    setToast("Đã đổi tên tài liệu");
+  };
+
   const deleteWorkspace = async (workspaceId: string) => {
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
     if (!target) return;
@@ -3814,12 +3866,20 @@ export default function Home() {
   const selectedPaperSize = PAPER_SIZES[activeNote.paper.size];
   const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;
   const paperHeight = activeNote.paper.orientation === "portrait" ? selectedPaperSize.height : selectedPaperSize.width;
+  const basePaperMaxWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32);
+  const noteZoomPercent = Math.round(noteZoom * 100);
+  const setNoteViewZoom = (value: number) => setNoteZoom(Math.max(.5, Math.min(2, value)));
+  const fitNoteToView = () => {
+    const available = (noteStageRef.current?.clientWidth ?? basePaperMaxWidth) - 72;
+    setNoteViewZoom(available / basePaperMaxWidth);
+  };
   const lineStep = activeNote.paper.template === "ruled-dense" ? 5 : 8;
   const defaultTextFont = TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? TEXT_FONTS[0];
   const selectedToolbarFont = TEXT_FONTS.find((font) => font.id === textToolbar.font) ?? TEXT_FONTS[0];
   const paperStyle = {
     "--paper-ratio": `${paperWidth} / ${paperHeight}`,
-    "--paper-max-width": `${activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32)}px`,
+    "--paper-max-width": `${basePaperMaxWidth}px`,
+    "--note-view-zoom": noteZoom,
     "--paper-line-step": `${(lineStep / paperHeight) * 100}%`,
     "--paper-cell-x": `${(8 / paperWidth) * 100}%`,
     "--paper-cell-y": `${(8 / paperHeight) * 100}%`,
@@ -3906,13 +3966,23 @@ export default function Home() {
             <div className="library-list">
               {workspaces.map((workspace) => {
                 const pageCount = workspace.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
+                const isRenaming = renamingWorkspaceId === workspace.id;
                 return (
-                  <div className="library-row" key={workspace.id}>
-                    <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
-                      <span className="library-icon"><FileText size={19} /></span>
-                      <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Chưa có PDF" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
-                    </button>
-                    {workspace.kind !== "empty" && <button className="library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa tài liệu và note liên quan"><Trash2 size={17} /></button>}
+                  <div className={`library-row ${workspace.kind === "empty" ? "library-row-single" : ""}`} key={workspace.id}>
+                    {isRenaming ? (
+                      <form className={`library-item library-rename-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onSubmit={(event) => { event.preventDefault(); commitWorkspaceRename(workspace.id); }}>
+                        <span className="library-icon"><FileText size={19} /></span>
+                        <span><input autoFocus value={renamingWorkspaceName} onChange={(event) => setRenamingWorkspaceName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelWorkspaceRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
+                      </form>
+                    ) : (
+                      <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
+                        <span className="library-icon"><FileText size={19} /></span>
+                        <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Chưa có PDF" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
+                      </button>
+                    )}
+                    {workspace.kind !== "empty" && (isRenaming
+                      ? <><button className="library-action library-save" onClick={() => commitWorkspaceRename(workspace.id)} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" onClick={cancelWorkspaceRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
+                      : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${workspace.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa tài liệu và note liên quan"><Trash2 size={17} /></button></>)}
                   </div>
                 );
               })}
@@ -4106,6 +4176,15 @@ export default function Home() {
                 <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
               </div>
               <span className="toolbar-spacer" />
+              <div className="note-view-control" aria-label="Tỷ lệ xem trang note">
+                <button onClick={() => setNoteViewZoom(noteZoom - .1)} disabled={noteZoom <= .5} aria-label="Thu nhỏ trang note" title="Thu nhỏ trang note"><Minus size={14} /></button>
+                <select value={noteZoomPercent} onChange={(event) => setNoteViewZoom(Number(event.target.value) / 100)} aria-label="Chọn tỷ lệ xem trang note" title="Tỷ lệ xem trang note">
+                  {!NOTE_ZOOM_PRESETS.includes(noteZoomPercent) && <option value={noteZoomPercent}>{noteZoomPercent}%</option>}
+                  {NOTE_ZOOM_PRESETS.map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
+                </select>
+                <button onClick={() => setNoteViewZoom(noteZoom + .1)} disabled={noteZoom >= 2} aria-label="Phóng to trang note" title="Phóng to trang note"><Plus size={14} /></button>
+                <button onClick={fitNoteToView} aria-label="Vừa chiều rộng khung note" title="Vừa chiều rộng khung note"><Maximize2 size={14} /></button>
+              </div>
               <div className="toolbar-cluster history-cluster">
                 <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
                 <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
@@ -4292,8 +4371,8 @@ export default function Home() {
             </div>
           )}
 
-          <div className="note-stage workspace-frame">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+          <div className="note-stage workspace-frame" ref={noteStageRef}>
+            <article className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
               if (!(event.target as HTMLElement).closest("[data-rich-editor-id]")) {
@@ -4305,7 +4384,7 @@ export default function Home() {
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
-                <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text"} aria-label="Tiêu đề ghi chú" />
+                <input className="note-title-input" value={activeNote.title} onChange={(event) => updateActiveNote({ title: event.target.value })} readOnly={activeTool !== "text" && !(activeNote.paper.template === "first-aid" && activeTool === "pointer")} aria-label="Tiêu đề ghi chú" />
                 <RichTextEditor editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {

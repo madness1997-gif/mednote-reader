@@ -470,9 +470,9 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange }: FirstAi
               </div>}
               {renderBlockBody(block)}
             </section>
-            <div className="fa-insert-slot">
+            <div className={`fa-insert-slot ${index === blocks.length - 1 ? "last" : ""}`}>
               <span />
-              <button className="fa-insert-button" disabled={!canManage} onClick={() => setInsertAt(insertAt === index + 1 ? null : index + 1)} aria-label={`Thêm block sau block ${index + 1}`}><Plus size={14} /></button>
+              <button className={`fa-insert-button ${index === blocks.length - 1 ? "persistent" : ""}`} disabled={!canManage} onClick={() => setInsertAt(insertAt === index + 1 ? null : index + 1)} aria-label={`Thêm block sau block ${index + 1}`}><Plus size={14} />{index === blocks.length - 1 && <b>Thêm block</b>}</button>
               <span />
               {insertAt === index + 1 && <InsertMenu onInsert={(type) => insertBlock(type, index + 1)} onClose={() => setInsertAt(null)} />}
             </div>
