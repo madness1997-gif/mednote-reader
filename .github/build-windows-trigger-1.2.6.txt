@@ -1,0 +1,1 @@
+Trigger tracked Windows 1.2.6 artifact build.
