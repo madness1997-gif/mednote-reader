@@ -169,6 +169,10 @@ type TableBorderSettings = { style: TableBorderStyle; width: number; color: stri
 type ExcerptAppearance = { borderStyle: TableBorderStyle; borderWidth: number; borderColor: string; backgroundColor: string };
 type CalloutSettings = { anchorX: number; anchorY: number };
 type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | null;
+type EquationTemplate = "plain" | "fraction" | "root" | "power" | "subscript" | "sum" | "integral" | "matrix";
+type FirstAidCropPlacement = { x: number; y: number; width: number };
+type FirstAidCropTarget = { noteId: string; blockId: string; placement: FirstAidCropPlacement };
+type FirstAidCropResult = { token: string; blockId: string; excerptId: string; imageName: string; aspectRatio: number };
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
   id: string;
@@ -430,7 +434,34 @@ const SYMBOL_GROUPS = [
   { label: "Hy Lạp", symbols: ["α", "β", "γ", "δ", "θ", "λ", "μ", "π", "σ", "φ", "Ω"] },
   { label: "Y học", symbols: ["°", "‰", "µ", "→", "←", "↔", "↑", "↓", "♂", "♀", "®", "©"] },
 ];
-const EQUATION_PRESETS = ["x² + y² = z²", "x₁ + x₂", "a⁄b", "√x", "∑ᵢ₌₁ⁿ xᵢ", "∫ₐᵇ f(x)dx", "Δx⁄Δt", "μ ± σ"];
+const EQUATION_PRESETS = ["x² + y² = z²", "eGFR = 142 × min(Scr/κ,1)ᵅ × max(Scr/κ,1)⁻¹·²⁰⁰ × 0.9938ᴬᵍᵉ", "BMI = kg/m²", "Δx/Δt", "μ ± σ"];
+const EQUATION_TEMPLATES: { id: EquationTemplate; label: string; sample: string; fields: string[]; defaults: string[] }[] = [
+  { id: "plain", label: "Tự nhập", sample: "x + y", fields: ["Công thức"], defaults: ["y = ax² + b"] },
+  { id: "fraction", label: "Phân số", sample: "a⁄b", fields: ["Tử số", "Mẫu số"], defaults: ["a", "b"] },
+  { id: "root", label: "Căn", sample: "ⁿ√x", fields: ["Biểu thức dưới căn", "Bậc căn (để trống = 2)"], defaults: ["x", ""] },
+  { id: "power", label: "Lũy thừa", sample: "xⁿ", fields: ["Cơ số", "Số mũ"], defaults: ["x", "n"] },
+  { id: "subscript", label: "Chỉ số dưới", sample: "xᵢ", fields: ["Ký hiệu", "Chỉ số"], defaults: ["x", "i"] },
+  { id: "sum", label: "Tổng", sample: "∑", fields: ["Biểu thức", "Cận dưới", "Cận trên"], defaults: ["xᵢ", "i = 1", "n"] },
+  { id: "integral", label: "Tích phân", sample: "∫", fields: ["Hàm số", "Cận dưới", "Cận trên", "Biến"], defaults: ["f(x)", "a", "b", "x"] },
+  { id: "matrix", label: "Ma trận 2×2", sample: "[ ]", fields: ["Hàng 1 · cột 1", "Hàng 1 · cột 2", "Hàng 2 · cột 1", "Hàng 2 · cột 2"], defaults: ["a", "b", "c", "d"] },
+];
+
+function equationTemplateById(template: EquationTemplate) {
+  return EQUATION_TEMPLATES.find((option) => option.id === template) ?? EQUATION_TEMPLATES[0];
+}
+
+function equationMarkup(template: EquationTemplate, parts: string[]) {
+  const values = parts.map((part) => escapeHtml(part.trim() || "□"));
+  const math = "font-family:Cambria Math,STIX Two Math,Times New Roman,serif;font-style:normal";
+  if (template === "plain") return `<span style="${math}">${values[0] ?? ""}</span>`;
+  if (template === "fraction") return `<span style="${math};display:inline-block;vertical-align:middle;text-align:center;line-height:1.05;white-space:nowrap"><span style="display:block;padding:0 4px;border-bottom:1px solid currentColor">${values[0]}</span><span style="display:block;padding:0 4px">${values[1]}</span></span>`;
+  if (template === "root") return `<span style="${math};white-space:nowrap">${parts[1]?.trim() ? `<sup>${values[1]}</sup>` : ""}√<span style="border-top:1px solid currentColor;padding:0 2px">${values[0]}</span></span>`;
+  if (template === "power") return `<span style="${math};white-space:nowrap">${values[0]}<sup>${values[1]}</sup></span>`;
+  if (template === "subscript") return `<span style="${math};white-space:nowrap">${values[0]}<sub>${values[1]}</sub></span>`;
+  if (template === "sum") return `<span style="${math};white-space:nowrap">∑<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]}</span>`;
+  if (template === "integral") return `<span style="${math};white-space:nowrap">∫<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]} d${values[3]}</span>`;
+  return `<span style="${math};display:inline-flex;align-items:center;vertical-align:middle;white-space:nowrap"><b>[</b><span style="display:inline-grid;grid-template-columns:auto auto;column-gap:10px;row-gap:2px;margin:0 4px;text-align:center"><span>${values[0]}</span><span>${values[1]}</span><span>${values[2]}</span><span>${values[3]}</span></span><b>]</b></span>`;
+}
 
 function pdfAnnotationLabel(annotation: PdfAnnotation) {
   const labels: Record<PdfAnnotation["kind"], string> = {
@@ -932,8 +963,8 @@ function plainTextToRichHtml(value: string) {
 function sanitizeRichTextHtml(value: string) {
   const template = document.createElement("template");
   template.innerHTML = value;
-  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD"]);
-  const allowedStyles = ["fontFamily", "fontSize", "color", "backgroundColor", "fontWeight", "fontStyle", "textDecoration", "textAlign", "lineHeight", "listStyleType", "borderCollapse", "borderColor", "borderStyle", "borderWidth", "width", "minWidth", "padding", "verticalAlign"] as const;
+  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "SUB", "SUP", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD"]);
+  const allowedStyles = ["fontFamily", "fontSize", "color", "backgroundColor", "fontWeight", "fontStyle", "textDecoration", "textAlign", "lineHeight", "listStyleType", "borderCollapse", "borderColor", "borderStyle", "borderWidth", "borderTop", "borderBottom", "width", "minWidth", "padding", "margin", "display", "alignItems", "gridTemplateColumns", "columnGap", "rowGap", "verticalAlign", "whiteSpace"] as const;
   Array.from(template.content.querySelectorAll<HTMLElement>("*")).forEach((element) => {
     if (!allowedTags.has(element.tagName)) {
       if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(element.tagName)) {
@@ -2057,6 +2088,8 @@ export default function Home() {
   const [pdfSignatureDraft, setPdfSignatureDraft] = useState("Ký tên");
   const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
   const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
+  const [firstAidCropTarget, setFirstAidCropTarget] = useState<FirstAidCropTarget | null>(null);
+  const [firstAidCropResult, setFirstAidCropResult] = useState<FirstAidCropResult | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
   const dictionaryAbortRef = useRef<AbortController | null>(null);
   const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("pages");
@@ -2089,6 +2122,8 @@ export default function Home() {
   const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
   const [textPopoverLeft, setTextPopoverLeft] = useState(12);
   const [equationDraft, setEquationDraft] = useState("y = ax² + b");
+  const [equationTemplate, setEquationTemplate] = useState<EquationTemplate>("fraction");
+  const [equationParts, setEquationParts] = useState(() => [...equationTemplateById("fraction").defaults]);
   const [tableRows, setTableRows] = useState(3);
   const [tableColumns, setTableColumns] = useState(3);
   const [tableBorder, setTableBorder] = useState<TableBorderSettings>({ style: "solid", width: 1, color: "#60737d" });
@@ -2123,7 +2158,7 @@ export default function Home() {
     if (pane) {
       const paneRect = pane.getBoundingClientRect();
       const buttonRect = button.getBoundingClientRect();
-      const popoverWidth = popover === "bullets" || popover === "tableLines" ? 276 : popover === "numbering" ? 322 : 360;
+      const popoverWidth = popover === "bullets" || popover === "tableLines" ? 276 : popover === "numbering" ? 322 : popover === "equation" ? 520 : 360;
       setTextPopoverLeft(Math.max(8, Math.min(buttonRect.left - paneRect.left, paneRect.width - popoverWidth - 8)));
     }
     setTextInsertPopover((current) => current === popover ? null : popover);
@@ -2362,17 +2397,17 @@ export default function Home() {
     finishTextCommand(target, message);
   }, [finishTextCommand, restoreTextSelection]);
 
-  const insertEquation = useCallback((equation = equationDraft) => {
+  const insertEquation = useCallback(() => {
     const target = restoreTextSelection();
-    const trimmed = equation.trim();
-    if (!target || !trimmed) {
+    const parts = equationTemplate === "plain" ? [equationDraft] : equationParts;
+    if (!target || !parts.some((part) => part.trim())) {
       setToast(target ? "Nhập công thức trước khi chèn" : "Bấm vào vị trí cần chèn công thức trước");
       return;
     }
-    document.execCommand("insertHTML", false, `<span style="font-family:Cambria Math,STIX Two Math,Times New Roman,serif;font-style:normal">${escapeHtml(trimmed)}</span>&nbsp;`);
+    document.execCommand("insertHTML", false, `${equationMarkup(equationTemplate, parts)}&nbsp;`);
     finishTextCommand(target, "Đã chèn công thức");
     setTextInsertPopover(null);
-  }, [equationDraft, finishTextCommand, restoreTextSelection]);
+  }, [equationDraft, equationParts, equationTemplate, finishTextCommand, restoreTextSelection]);
 
   const insertTable = useCallback(() => {
     const target = restoreTextSelection();
@@ -2762,6 +2797,7 @@ export default function Home() {
 
   const choosePdfTool = (tool: PdfTool) => {
     setPdfTool(tool);
+    if (tool !== "crop") setFirstAidCropTarget(null);
     if (["pen", "highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
       setPdfPanel((panel) => panel === "ink" && pdfTool === tool ? null : "ink");
     } else {
@@ -2944,7 +2980,14 @@ export default function Home() {
 
   const addImageExcerpt = async (result: PdfCropResult) => {
     if (!activeDocument) return;
+    if (firstAidCropTarget && firstAidCropTarget.noteId !== activeNote.id) {
+      setFirstAidCropTarget(null);
+      setPdfTool("pan");
+      setToast("Đã hủy Crop vì trang First Aid đích đã thay đổi");
+      return;
+    }
     const assetId = uid("crop");
+    const cropTarget = firstAidCropTarget?.noteId === activeNote.id ? firstAidCropTarget : null;
     try {
       await saveLocalAsset(assetId, result.blob);
       const fallbackWidth = Math.max(1, Math.abs(result.rect.x2 - result.rect.x1));
@@ -2960,9 +3003,15 @@ export default function Home() {
       const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
       const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
       layout.aspectRatio = aspectRatio;
+      if (cropTarget) {
+        layout.width = Math.min(.9, Math.max(.06, cropTarget.placement.width));
+        layout.x = Math.min(1 - layout.width, Math.max(0, cropTarget.placement.x));
+      }
       layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / aspectRatio));
+      if (cropTarget) layout.y = Math.min(1 - layout.height, Math.max(.04, cropTarget.placement.y));
+      const excerptId = uid("excerpt");
       const excerpt: NoteExcerpt = {
-        id: uid("excerpt"),
+        id: excerptId,
         kind: "image",
         sourceKind: "pdf",
         assetId,
@@ -2978,10 +3027,33 @@ export default function Home() {
       setActiveTool("pointer");
       setNotePanel(null);
       setPdfTool("pan");
-      setToast("Đã cắt hình và đưa sang note");
+      if (cropTarget) {
+        setFirstAidCropResult({ token: uid("crop-result"), blockId: cropTarget.blockId, excerptId, imageName: `${activeDocument.name} · trang ${result.page}`, aspectRatio });
+        setFirstAidCropTarget(null);
+        setToast("Đã crop từ PDF — ảnh đã gắn vào block và trở thành đối tượng trên trang");
+      } else {
+        setToast("Đã cắt hình và đưa sang note");
+      }
     } catch {
+      setFirstAidCropTarget(null);
       setToast("Không thể lưu hình cắt trên thiết bị này");
     }
+  };
+
+  const requestFirstAidPdfCrop = ({ blockId, placement }: { blockId: string; placement: FirstAidCropPlacement }) => {
+    if (!activeDocument) {
+      setToast("Thêm hoặc mở một PDF trước khi dùng Crop từ PDF");
+      return;
+    }
+    setFirstAidCropResult(null);
+    setFirstAidCropTarget({ noteId: activeNote.id, blockId, placement });
+    setPdfSelection(null);
+    setPdfTool("crop");
+    setToast("Kéo khoanh vùng cần cắt trên trang PDF; ảnh sẽ tự gắn vào block đang chọn");
+  };
+
+  const finishFirstAidPdfCrop = (token: string) => {
+    setFirstAidCropResult((current) => current?.token === token ? null : current);
   };
 
   const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => {
@@ -4399,7 +4471,14 @@ export default function Home() {
 
           {notePanel === "text" && textInsertPopover === "symbols" && <div className="text-insert-popover symbol-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn ký hiệu"><header><strong>Ký hiệu</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>{SYMBOL_GROUPS.map((group) => <section key={group.label}><label>{group.label}</label><div>{group.symbols.map((symbol) => <button key={symbol} onPointerDown={(event) => event.preventDefault()} onClick={() => insertTextAtSelection(symbol)}>{symbol}</button>)}</div></section>)}</div>}
 
-          {notePanel === "text" && textInsertPopover === "equation" && <div className="text-insert-popover equation-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn công thức"><header><strong>Công thức</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><label className="equation-input-label">Nhập công thức bằng ký hiệu Unicode<input value={equationDraft} onChange={(event) => setEquationDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") insertEquation(); }} autoFocus /></label><div className="equation-presets">{EQUATION_PRESETS.map((equation) => <button key={equation} onClick={() => setEquationDraft(equation)}>{equation}</button>)}</div><button className="insert-confirm-button" onClick={() => insertEquation()}><Sigma size={15} /> Chèn công thức</button></div>}
+          {notePanel === "text" && textInsertPopover === "equation" && <div className="text-insert-popover equation-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn công thức">
+            <header><strong>Công thức</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>
+            <div className="equation-template-grid">{EQUATION_TEMPLATES.map((option) => <button key={option.id} className={equationTemplate === option.id ? "selected" : ""} onClick={() => { setEquationTemplate(option.id); setEquationParts([...option.defaults]); if (option.id === "plain") setEquationDraft(option.defaults[0]); }}><b>{option.sample}</b><span>{option.label}</span></button>)}</div>
+            {equationTemplate === "plain" ? <label className="equation-input-label">Nhập công thức<input value={equationDraft} spellCheck={false} onChange={(event) => setEquationDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") insertEquation(); }} autoFocus /></label> : <div className="equation-field-grid">{equationTemplateById(equationTemplate).fields.map((label, index) => <label key={`${equationTemplate}-${label}`}>{label}<input value={equationParts[index] ?? ""} spellCheck={false} onChange={(event) => setEquationParts((current) => current.map((part, partIndex) => partIndex === index ? event.target.value : part))} /></label>)}</div>}
+            <div className="equation-preview" aria-label="Xem trước công thức" dangerouslySetInnerHTML={{ __html: equationMarkup(equationTemplate, equationTemplate === "plain" ? [equationDraft] : equationParts) }} />
+            <div className="equation-presets">{EQUATION_PRESETS.map((equation) => <button key={equation} onClick={() => { setEquationTemplate("plain"); setEquationDraft(equation); setEquationParts([equation]); }}>{equation}</button>)}</div>
+            <button className="insert-confirm-button" onClick={() => insertEquation()}><Sigma size={15} /> Chèn công thức</button>
+          </div>}
 
           {notePanel === "text" && textInsertPopover === "table" && <div className="text-insert-popover table-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Chèn bảng"><header><strong>Chèn bảng</strong><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header><div className="table-size-controls"><label>Hàng<input type="number" min="1" max="12" value={tableRows} onChange={(event) => setTableRows(Math.max(1, Math.min(12, Number(event.target.value))))} /></label><span>×</span><label>Cột<input type="number" min="1" max="10" value={tableColumns} onChange={(event) => setTableColumns(Math.max(1, Math.min(10, Number(event.target.value))))} /></label></div><div className="table-preview-grid" style={{ gridTemplateColumns: `repeat(${tableColumns}, 12px)` }} aria-hidden="true">{Array.from({ length: tableRows * tableColumns }, (_, index) => <i key={index} style={{ borderStyle: tableBorder.style, borderWidth: `${Math.min(tableBorder.width, 3)}px`, borderColor: tableBorder.color }} />)}</div><button className="insert-confirm-button" onClick={insertTable}><Table2 size={15} /> Chèn bảng {tableRows} × {tableColumns}</button></div>}
 
@@ -4480,7 +4559,7 @@ export default function Home() {
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;
                     const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && excerpt.kind === "text")} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
                   })}
                 </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}

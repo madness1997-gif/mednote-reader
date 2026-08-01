@@ -510,8 +510,19 @@ body {
 .equation-input-label { display: flex; flex-direction: column; gap: 5px; color: #61737b; font-size: 9px; font-weight: 700; }
 .equation-input-label input { height: 35px; padding: 0 9px; border: 1px solid #cfdcdf; border-radius: 7px; outline: 0; color: #263741; font: 15px "Cambria Math", "Times New Roman", serif; }
 .equation-input-label input:focus { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(14,107,112,.1); }
+.equation-popover { width: min(520px, calc(100% - 16px)); max-height: min(650px, calc(100vh - 190px)); overflow-y: auto; }
+.equation-template-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-bottom: 9px; }
+.equation-template-grid button { min-width: 0; min-height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px; border: 1px solid #dbe5e7; border-radius: 7px; background: #fafcfc; color: #425860; cursor: pointer; }
+.equation-template-grid button:hover, .equation-template-grid button.selected { border-color: #5d9fa5; background: #e9f5f5; color: var(--teal); }
+.equation-template-grid b { font: 16px/1.1 "Cambria Math", "Times New Roman", serif; }
+.equation-template-grid span { font-size: 8px; font-weight: 700; }
+.equation-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.equation-field-grid label { min-width: 0; display: flex; flex-direction: column; gap: 3px; color: #61737b; font-size: 8px; font-weight: 700; }
+.equation-field-grid input { min-width: 0; height: 32px; padding: 0 8px; border: 1px solid #cfdcdf; border-radius: 6px; outline: 0; color: #263741; font: 14px "Cambria Math", "Times New Roman", serif; }
+.equation-field-grid input:focus { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(14,107,112,.1); }
+.equation-preview { min-height: 52px; display: grid; place-items: center; margin-top: 8px; padding: 8px; overflow-x: auto; border: 1px solid #d8e2e4; border-radius: 7px; background: #fff; color: #1f3139; font-size: 19px; }
 .equation-presets { grid-template-columns: repeat(2, 1fr); margin-top: 8px; }
-.equation-presets button { height: 34px; font-size: 13px; }
+.equation-presets button { height: auto; min-height: 34px; padding: 4px 6px; overflow: hidden; font-size: 11px; line-height: 1.2; text-overflow: ellipsis; }
 .insert-confirm-button { height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--teal); color: white; font-size: 10px; font-weight: 750; cursor: pointer; }
 .table-size-controls { display: flex; align-items: flex-end; gap: 8px; }
 .table-size-controls label { display: flex; flex-direction: column; gap: 4px; color: #61737b; font-size: 9px; font-weight: 700; }

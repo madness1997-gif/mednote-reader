@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Columns2,
   Copy,
+  Crop,
   GitBranch,
   GripVertical,
   Heading2,
@@ -28,17 +29,31 @@ type FirstAidBlock = {
   id: string;
   type: BlockType;
   title?: string;
+  titleHtml?: string;
   label?: string;
+  labelHtml?: string;
   text?: string;
+  textHtml?: string;
   textStyle?: TextStyle;
   imageAssetId?: string;
   imageObjectId?: string;
   imageName?: string;
   imageAspectRatio?: number;
   caption?: string;
+  captionHtml?: string;
   imageSide?: "left" | "right";
   rows?: string[][];
+  rowsHtml?: string[][];
   steps?: string[];
+  stepsHtml?: string[];
+};
+
+type PdfCropResultLink = {
+  token: string;
+  blockId: string;
+  excerptId: string;
+  imageName: string;
+  aspectRatio: number;
 };
 
 type FirstAidBlockEditorProps = {
@@ -53,7 +68,12 @@ type FirstAidBlockEditorProps = {
     placement: { x: number; y: number; width: number };
   }) => Promise<{ excerptId: string } | null>;
   onRemoveImage: (excerptId: string) => void;
+  onRequestPdfCrop: (request: { blockId: string; placement: { x: number; y: number; width: number } }) => void;
+  pdfCropResult: PdfCropResultLink | null;
+  onPdfCropHandled: (token: string) => void;
   pageObjectIds: string[];
+  onTextActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
+  onNormalizeTextInput: (editorId: string, editor: HTMLElement) => void;
 };
 
 type BlockOption = {
@@ -63,7 +83,7 @@ type BlockOption = {
   icon: LucideIcon;
 };
 
-const SERIALIZATION_VERSION = 3;
+const SERIALIZATION_VERSION = 4;
 const ASSET_DB = "mednote-first-aid-assets";
 const ASSET_STORE = "assets";
 
@@ -116,6 +136,49 @@ function lines(value = "") {
   return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
+function plainTextToRichHtml(value = "") {
+  return escapeHtml(value).replace(/\r\n?|\n/g, "<br>");
+}
+
+function sanitizeBlockRichTextHtml(value: string) {
+  const template = document.createElement("template");
+  template.innerHTML = value;
+  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "SUB", "SUP", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD"]);
+  const allowedStyles = ["fontFamily", "fontSize", "color", "backgroundColor", "fontWeight", "fontStyle", "textDecoration", "textAlign", "lineHeight", "listStyleType", "borderCollapse", "borderColor", "borderStyle", "borderWidth", "borderTop", "borderBottom", "width", "minWidth", "padding", "margin", "display", "alignItems", "gridTemplateColumns", "columnGap", "rowGap", "verticalAlign", "whiteSpace"] as const;
+  Array.from(template.content.querySelectorAll<HTMLElement>("*")).forEach((element) => {
+    if (!allowedTags.has(element.tagName)) {
+      if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(element.tagName)) {
+        element.remove();
+        return;
+      }
+      const parent = element.parentNode;
+      while (parent && element.firstChild) parent.insertBefore(element.firstChild, element);
+      element.remove();
+      return;
+    }
+    const styles = Object.fromEntries(allowedStyles.map((property) => [property, element.style[property]]));
+    const face = element.tagName === "FONT" ? element.getAttribute("face") : null;
+    const color = element.tagName === "FONT" ? element.getAttribute("color") : null;
+    const size = element.tagName === "FONT" ? element.getAttribute("size") : null;
+    Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
+    allowedStyles.forEach((property) => {
+      const styleValue = styles[property];
+      if (styleValue) element.style[property] = styleValue;
+    });
+    if (face) element.setAttribute("face", face);
+    if (color) element.setAttribute("color", color);
+    if (size && /^[1-7]$/.test(size)) element.setAttribute("size", size);
+  });
+  return template.innerHTML;
+}
+
+function richBlockHtml(html: string | undefined, text = "", textStyle: TextStyle = "paragraph") {
+  if (html) return html;
+  if (textStyle === "paragraph") return plainTextToRichHtml(text);
+  const tag = textStyle === "numbered" ? "ol" : "ul";
+  return `<${tag}>${lines(text).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</${tag}>`;
+}
+
 function encodePayload(value: unknown) {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   let binary = "";
@@ -148,34 +211,31 @@ function blockPlainText(block: FirstAidBlock) {
 function blockStaticHtml(block: FirstAidBlock) {
   const border = "border-bottom:1px solid #b8c3c7;";
   const content = "font-family:'Times New Roman',serif;font-size:12px;line-height:1.32;color:#26343a;";
+  const rich = (html: string | undefined, text = "", textStyle: TextStyle = "paragraph") => sanitizeBlockRichTextHtml(richBlockHtml(html, text, textStyle));
   if (block.type === "heading") {
-    return `<div style="margin:0;padding:5px 8px;background:#1b7184;color:#fff;font:800 11px/1.2 'Segoe UI',Arial,sans-serif;letter-spacing:.04em;text-transform:uppercase">${escapeHtml(block.title)}</div>`;
+    return `<div style="margin:0;padding:5px 8px;background:#1b7184;color:#fff;font:800 11px/1.2 'Segoe UI',Arial,sans-serif;letter-spacing:.04em;text-transform:uppercase">${rich(block.titleHtml, block.title)}</div>`;
   }
   if (block.type === "label") {
-    return `<div style="display:grid;grid-template-columns:22% 1fr;${border}"><div style="padding:6px;color:#1b7184;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${escapeHtml(block.label)}</div><div style="padding:6px;white-space:pre-wrap;${content}">${escapeHtml(block.text)}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:22% 1fr;background:linear-gradient(90deg,#eff7f8 0 22%,transparent 22%);${border}"><div style="padding:5px 6px;color:#1b7184;border-right:1px solid #d3e1e4;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div></div>`;
   }
   if (block.type === "text") {
-    const items = lines(block.text);
-    const body = block.textStyle === "paragraph"
-      ? `<div style="white-space:pre-wrap">${escapeHtml(block.text)}</div>`
-      : `<${block.textStyle === "numbered" ? "ol" : "ul"} style="margin:0;padding-left:18px">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</${block.textStyle === "numbered" ? "ol" : "ul"}>`;
-    return `<div style="padding:6px;${border}${content}">${body}</div>`;
+    return `<div style="padding:4px 6px;${border}${content}">${rich(block.textHtml, block.text, block.textStyle)}</div>`;
   }
   if (block.type === "figure" || block.type === "figure-text") {
     const objectAttribute = block.imageObjectId ? ` data-mednote-image-object-id="${escapeHtml(block.imageObjectId)}"` : "";
-    const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;place-items:center;background:#eef3f4;color:#72828a;font:700 10px/1.3 'Segoe UI',Arial,sans-serif">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:4px 6px;background:#edf1f2;color:#43545d;font:600 9px/1.3 'Segoe UI',Arial,sans-serif">${escapeHtml(block.caption)}</div>`;
+    const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;place-items:center;background:#eef3f4;color:#72828a;font:700 10px/1.3 'Segoe UI',Arial,sans-serif">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:3px 6px;background:#edf1f2;color:#43545d;font:600 9px/1.3 'Segoe UI',Arial,sans-serif">${rich(block.captionHtml, block.caption)}</div>`;
     if (block.type === "figure") return `<div style="padding:6px;${border}">${figure}</div>`;
-    const text = `<div style="padding:6px;white-space:pre-wrap;${content}">${escapeHtml(block.text)}</div>`;
+    const text = `<div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div>`;
     return `<div style="display:grid;grid-template-columns:44% 1fr;gap:8px;padding:6px;${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
   }
   if (block.type === "table") {
-    return `<div style="padding:6px;${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell) => `<${rowIndex === 0 ? "th" : "td"} style="padding:5px 6px;border:1px solid #b9c4c8;${rowIndex === 0 ? "color:#1b7184;font:800 9px/1.2 'Segoe UI',Arial,sans-serif;text-align:left;background:#f2f6f7" : ""}">${escapeHtml(cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
+    return `<div style="padding:5px;${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell, columnIndex) => `<${rowIndex === 0 ? "th" : "td"} style="padding:4px 5px;border:1px solid #b9c4c8;${rowIndex === 0 ? "color:#1b7184;font:800 9px/1.2 'Segoe UI',Arial,sans-serif;text-align:left;background:#f2f6f7" : ""}">${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
   }
   if (block.type === "flow") {
-    const flow = `<div style="display:flex;align-items:stretch;gap:5px;padding:7px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="flex:1;padding:6px;border:1px solid #b7c4c8;border-radius:4px;text-align:center;background:#fff">${escapeHtml(step)}</div>${index < all.length - 1 ? '<div style="display:grid;place-items:center;color:#8b2c58;font-weight:800">→</div>' : ""}`).join("")}</div>`;
-    return `<div style="display:grid;grid-template-columns:22% 1fr;${border}"><div style="padding:7px;color:#1b7184;background:#eff7f8;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${escapeHtml(block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;
+    const flow = `<div style="display:flex;align-items:stretch;gap:4px;padding:5px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="flex:1;padding:5px;border:1px solid #b7c4c8;border-radius:4px;text-align:center;background:#fff">${rich(block.stepsHtml?.[index], step)}</div>${index < all.length - 1 ? '<div style="display:grid;place-items:center;color:#8b2c58;font-weight:800">→</div>' : ""}`).join("")}</div>`;
+    return `<div style="display:grid;grid-template-columns:22% 1fr;background:linear-gradient(90deg,#eff7f8 0 22%,transparent 22%);${border}"><div style="padding:5px 6px;color:#1b7184;border-right:1px solid #d3e1e4;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;
   }
-  return `<div style="display:grid;grid-template-columns:22% 1fr;margin:4px 0;border:1px solid #e0c96e;background:#fff7c7"><div style="padding:6px;color:#8b2c58;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${escapeHtml(block.label)}</div><div style="padding:6px;white-space:pre-wrap;${content}"><b>${escapeHtml(block.text)}</b></div></div>`;
+  return `<div style="display:grid;grid-template-columns:22% 1fr;margin:2px 0;border:1px solid #e0c96e;background:#fff7c7"><div style="padding:5px 6px;color:#8b2c58;border-right:1px solid #e7d98d;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;${content}"><b>${rich(block.textHtml, block.text)}</b></div></div>`;
 }
 
 function serializeBlocks(blocks: FirstAidBlock[]) {
@@ -299,23 +359,78 @@ async function compressImage(file: File) {
   }
 }
 
-function AutoTextarea({ value, onChange, readOnly, placeholder, ariaLabel, className = "", onKeyDown }: {
-  value: string;
-  onChange: (value: string) => void;
-  readOnly: boolean;
+function BlockRichEditor({ editorId, className = "", html, text, textStyle = "paragraph", editable, singleLine = false, placeholder, ariaLabel, onChange, onActivate, onNormalizeInput }: {
+  editorId: string;
+  className?: string;
+  html?: string;
+  text?: string;
+  textStyle?: TextStyle;
+  editable: boolean;
+  singleLine?: boolean;
   placeholder?: string;
   ariaLabel: string;
-  className?: string;
-  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onChange: (html: string, text: string) => void;
+  onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
+  onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const resize = () => {
-    if (!ref.current) return;
-    ref.current.style.height = "0px";
-    ref.current.style.height = `${Math.max(28, ref.current.scrollHeight)}px`;
+  const editorRef = useRef<HTMLDivElement>(null);
+  const resolvedHtml = richBlockHtml(html, text, textStyle);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || editor.innerHTML === resolvedHtml || document.activeElement === editor) return;
+    editor.innerHTML = resolvedHtml;
+  }, [resolvedHtml]);
+
+  const captureSelection = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const belongs = range && (range.commonAncestorContainer === editor || editor.contains(range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentNode));
+    onActivate(editorId, editor, belongs && range ? range.cloneRange() : null);
   };
-  useEffect(resize, [value]);
-  return <textarea ref={ref} className={className} value={value} readOnly={readOnly} placeholder={placeholder} aria-label={ariaLabel} rows={1} onChange={(event) => { onChange(event.target.value); resize(); }} onKeyDown={onKeyDown} />;
+
+  const emitChange = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    onNormalizeInput(editorId, editor);
+    onChange(sanitizeBlockRichTextHtml(editor.innerHTML), editor.innerText.replace(/\u00a0/g, " "));
+    captureSelection();
+  };
+
+  return <div
+    ref={editorRef}
+    className={`fa-rich-editor rich-text-editor ${className}`}
+    data-rich-editor-id={editorId}
+    data-placeholder={placeholder}
+    contentEditable={editable}
+    suppressContentEditableWarning
+    role="textbox"
+    aria-multiline={!singleLine}
+    aria-label={ariaLabel}
+    spellCheck={false}
+    onFocus={captureSelection}
+    onMouseUp={captureSelection}
+    onKeyUp={captureSelection}
+    onKeyDown={(event) => {
+      if (singleLine && event.key === "Enter") event.preventDefault();
+    }}
+    onInput={emitChange}
+    onPaste={(event) => {
+      if (!editable) return;
+      event.preventDefault();
+      const pasted = event.clipboardData.getData("text/plain");
+      document.execCommand("insertText", false, singleLine ? pasted.replace(/\s*\r?\n\s*/g, " ") : pasted);
+    }}
+    onDrop={(event) => {
+      if (!editable) return;
+      const dropped = event.dataTransfer.getData("text/plain");
+      if (!dropped) return;
+      event.preventDefault();
+      document.execCommand("insertText", false, singleLine ? dropped.replace(/\s*\r?\n\s*/g, " ") : dropped);
+    }}
+  />;
 }
 
 function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void; onClose: () => void }) {
@@ -329,7 +444,7 @@ function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void
   );
 }
 
-export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage, onRemoveImage, pageObjectIds }: FirstAidBlockEditorProps) {
+export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage, onRemoveImage, onRequestPdfCrop, pdfCropResult, onPdfCropHandled, pageObjectIds, onTextActivate, onNormalizeTextInput }: FirstAidBlockEditorProps) {
   const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => parseBlocks(html, plainText));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -383,6 +498,21 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     // A deleted page object turns its anchored row back into a Browse row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageObjectKey]);
+
+  useEffect(() => {
+    if (!pdfCropResult) return;
+    const exists = blocks.some((block) => block.id === pdfCropResult.blockId);
+    if (exists) {
+      const next = blocks.map((block) => block.id === pdfCropResult.blockId
+        ? { ...block, imageObjectId: pdfCropResult.excerptId, imageAssetId: undefined, imageName: pdfCropResult.imageName, imageAspectRatio: pdfCropResult.aspectRatio }
+        : block);
+      commit(next);
+    }
+    onPdfCropHandled(pdfCropResult.token);
+    // Handle each PDF crop token only once. The block list is intentionally read
+    // from the render that received the result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfCropResult?.token]);
 
   const updateBlock = (id: string, changes: Partial<FirstAidBlock>) => commit(blocks.map((block) => block.id === id ? { ...block, ...changes } : block));
 
@@ -473,6 +603,11 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     fileInputRef.current?.click();
   };
 
+  const requestPdfCrop = (blockId: string, element: HTMLElement) => {
+    if (!canEdit) return;
+    onRequestPdfCrop({ blockId, placement: blockPlacement(element) });
+  };
+
   const applyImageFile = async (blockId: string, file: File, placement: { x: number; y: number; width: number }) => {
     if (!file.type.startsWith("image/")) return;
     const { blob, aspectRatio } = await compressImage(file);
@@ -488,11 +623,30 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     if (file && pending) void applyImageFile(pending.blockId, file, pending.placement);
   };
 
-  const updateTableCell = (block: FirstAidBlock, rowIndex: number, columnIndex: number, value: string) => {
+  const updateTableCellRich = (block: FirstAidBlock, rowIndex: number, columnIndex: number, cellHtml: string, value: string) => {
     const rows = (block.rows ?? [["", ""]]).map((row) => [...row]);
+    const rowsHtml = (block.rows ?? [["", ""]]).map((row, index) => row.map((cell, cellIndex) => block.rowsHtml?.[index]?.[cellIndex] ?? plainTextToRichHtml(cell)));
     rows[rowIndex][columnIndex] = value;
-    updateBlock(block.id, { rows });
+    rowsHtml[rowIndex][columnIndex] = cellHtml;
+    updateBlock(block.id, { rows, rowsHtml });
   };
+
+  const renderRichField = (block: FirstAidBlock, field: "title" | "label" | "text" | "caption", htmlField: "titleHtml" | "labelHtml" | "textHtml" | "captionHtml", className: string, ariaLabel: string, options?: { singleLine?: boolean; placeholder?: string; textStyle?: TextStyle }) => (
+    <BlockRichEditor
+      editorId={`first-aid:${block.id}:${field}`}
+      className={className}
+      html={block[htmlField]}
+      text={block[field]}
+      textStyle={options?.textStyle}
+      editable={canEdit}
+      singleLine={options?.singleLine}
+      placeholder={options?.placeholder}
+      ariaLabel={ariaLabel}
+      onChange={(fieldHtml, fieldText) => updateBlock(block.id, { [field]: fieldText, [htmlField]: fieldHtml } as Partial<FirstAidBlock>)}
+      onActivate={onTextActivate}
+      onNormalizeInput={onNormalizeTextInput}
+    />
+  );
 
   const renderImageZone = (block: FirstAidBlock) => {
     if (block.imageObjectId) {
@@ -500,34 +654,34 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     }
     const url = block.imageAssetId ? assetUrls[block.imageAssetId] : undefined;
     return (
-      <div className={`fa-image-zone ${url ? "has-image" : ""}`} onClick={(event) => requestImage(block.id, event.currentTarget)} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
+      <div className={`fa-image-zone ${url ? "has-image" : ""}`} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
         if (!canEdit) return;
         event.preventDefault();
         event.stopPropagation();
         const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/"));
         if (file) void applyImageFile(block.id, file, blockPlacement(event.currentTarget));
       }}>
-        {url ? <img src={url} alt={block.imageName || "Hình trong note"} /> : <><ImageIcon size={24} /><b>Thả, dán hoặc chọn hình</b><small>Ảnh được nén và lưu cục bộ</small></>}
+        {url ? <img src={url} alt={block.imageName || "Hình trong note"} /> : <><ImageIcon size={24} /><b>Thả hình vào đây</b><div className="fa-image-actions"><button type="button" disabled={!canEdit} onClick={(event) => requestImage(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget)}><ImageIcon size={14} /> Browse từ máy</button><button type="button" disabled={!canEdit} onClick={(event) => requestPdfCrop(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget)}><Crop size={14} /> Crop từ PDF</button></div><small>Ảnh sẽ thành đối tượng kéo, resize, xoay và xếp lớp được</small></>}
       </div>
     );
   };
 
   const renderBlockBody = (block: FirstAidBlock) => {
-    if (block.type === "heading") return <input className="fa-heading-input" value={block.title ?? ""} readOnly={!canEdit} onChange={(event) => updateBlock(block.id, { title: event.target.value })} aria-label="Tiêu đề mục" />;
-    if (block.type === "label") return <div className="fa-label-layout"><AutoTextarea className="fa-label-input" value={block.label ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { label: value })} ariaLabel="Nhãn block" /><AutoTextarea className="fa-content-input" value={block.text ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { text: value })} ariaLabel="Nội dung block" /></div>;
-    if (block.type === "text") return <div className="fa-text-block"><div className="fa-text-style-switch">{(["paragraph", "bullets", "numbered"] as TextStyle[]).map((style) => <button key={style} className={block.textStyle === style ? "selected" : ""} disabled={!canEdit} onClick={() => updateBlock(block.id, { textStyle: style })}>{style === "paragraph" ? "Đoạn" : style === "bullets" ? "• Danh sách" : "1. Đánh số"}</button>)}</div><AutoTextarea className="fa-content-input" value={block.text ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { text: value })} ariaLabel="Đoạn hoặc danh sách" placeholder="Mỗi dòng là một ý…" /></div>;
-    if (block.type === "figure") return <div className="fa-figure-block">{renderImageZone(block)}<AutoTextarea className="fa-caption-input" value={block.caption ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { caption: value })} ariaLabel="Chú thích hình" /></div>;
-    if (block.type === "figure-text") return <div className={`fa-figure-text ${block.imageSide === "right" ? "image-right" : ""}`}><div className="fa-figure-block">{renderImageZone(block)}<AutoTextarea className="fa-caption-input" value={block.caption ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { caption: value })} ariaLabel="Chú thích hình" /></div><div className="fa-figure-copy"><button className="fa-side-toggle" disabled={!canEdit} onClick={() => updateBlock(block.id, { imageSide: block.imageSide === "right" ? "left" : "right" })}>{block.imageSide === "right" ? "Đưa hình sang trái" : "Đưa hình sang phải"}</button><AutoTextarea className="fa-content-input" value={block.text ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { text: value })} ariaLabel="Nội dung cạnh hình" /></div></div>;
+    if (block.type === "heading") return renderRichField(block, "title", "titleHtml", "fa-heading-input", "Tiêu đề mục", { singleLine: true, placeholder: "TIÊU ĐỀ MỤC" });
+    if (block.type === "label") return <div className="fa-label-layout">{renderRichField(block, "label", "labelHtml", "fa-label-input", "Nhãn block", { placeholder: "NHÃN" })}{renderRichField(block, "text", "textHtml", "fa-content-input", "Nội dung block", { placeholder: "Nhập nội dung…" })}</div>;
+    if (block.type === "text") return <div className="fa-text-block"><div className="fa-text-style-switch">{(["paragraph", "bullets", "numbered"] as TextStyle[]).map((style) => <button key={style} className={block.textStyle === style ? "selected" : ""} disabled={!canEdit} onClick={() => updateBlock(block.id, { textStyle: style, textHtml: richBlockHtml(undefined, block.text, style) })}>{style === "paragraph" ? "Đoạn" : style === "bullets" ? "• Danh sách" : "1. Đánh số"}</button>)}</div>{renderRichField(block, "text", "textHtml", "fa-content-input", "Đoạn hoặc danh sách", { placeholder: "Nhập đoạn văn hoặc dùng Bullet / Đánh số trên thanh Type…", textStyle: block.textStyle })}</div>;
+    if (block.type === "figure") return <div className="fa-figure-block">{renderImageZone(block)}{renderRichField(block, "caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Nhập chú thích hình…" })}</div>;
+    if (block.type === "figure-text") return <div className={`fa-figure-text ${block.imageSide === "right" ? "image-right" : ""}`}><div className="fa-figure-block">{renderImageZone(block)}{renderRichField(block, "caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Chú thích hình…" })}</div><div className="fa-figure-copy"><button className="fa-side-toggle" disabled={!canEdit} onClick={() => updateBlock(block.id, { imageSide: block.imageSide === "right" ? "left" : "right" })}>{block.imageSide === "right" ? "Đưa hình sang trái" : "Đưa hình sang phải"}</button>{renderRichField(block, "text", "textHtml", "fa-content-input", "Nội dung cạnh hình", { placeholder: "Nhập nội dung liên quan…" })}</div></div>;
     if (block.type === "table") {
       const rows = block.rows ?? [["", ""]];
       const columns = Math.max(1, rows[0]?.length ?? 2);
-      return <div className="fa-table-block"><div className="fa-table-actions"><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: [...rows, Array.from({ length: columns }, () => "Nội dung")] })}>+ Hàng</button><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: rows.map((row, index) => [...row, index === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung"]) })}>+ Cột</button><button disabled={!canEdit || rows.length <= 1} onClick={() => updateBlock(block.id, { rows: rows.slice(0, -1) })}>− Hàng</button><button disabled={!canEdit || columns <= 1} onClick={() => updateBlock(block.id, { rows: rows.map((row) => row.slice(0, -1)) })}>− Cột</button></div><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <AutoTextarea key={`${rowIndex}-${columnIndex}`} className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"} value={cell} readOnly={!canEdit} onChange={(value) => updateTableCell(block, rowIndex, columnIndex, value)} ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`} />))}</div></div>;
+      return <div className="fa-table-block"><div className="fa-table-actions"><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: [...rows, Array.from({ length: columns }, () => "Nội dung")], rowsHtml: [...(block.rowsHtml ?? []), Array.from({ length: columns }, () => plainTextToRichHtml("Nội dung"))] })}>+ Hàng</button><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: rows.map((row, index) => [...row, index === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung"]), rowsHtml: rows.map((row, rowIndex) => [...row.map((cell, columnIndex) => block.rowsHtml?.[rowIndex]?.[columnIndex] ?? plainTextToRichHtml(cell)), plainTextToRichHtml(rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung")]) })}>+ Cột</button><button disabled={!canEdit || rows.length <= 1} onClick={() => updateBlock(block.id, { rows: rows.slice(0, -1), rowsHtml: block.rowsHtml?.slice(0, -1) })}>− Hàng</button><button disabled={!canEdit || columns <= 1} onClick={() => updateBlock(block.id, { rows: rows.map((row) => row.slice(0, -1)), rowsHtml: block.rowsHtml?.map((row) => row.slice(0, -1)) })}>− Cột</button></div><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <BlockRichEditor key={`${rowIndex}-${columnIndex}`} editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`} className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"} html={block.rowsHtml?.[rowIndex]?.[columnIndex]} text={cell} editable={canEdit} ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`} onChange={(cellHtml, value) => updateTableCellRich(block, rowIndex, columnIndex, cellHtml, value)} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />))}</div></div>;
     }
     if (block.type === "flow") {
       const steps = block.steps ?? ["Bước 1"];
-      return <div className="fa-flow-layout"><AutoTextarea className="fa-flow-label" value={block.label ?? "CƠ CHẾ"} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { label: value })} ariaLabel="Nhãn diễn tiến" /><div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><AutoTextarea value={step} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item) })} ariaLabel={`Bước ${index + 1}`} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, `Bước ${steps.length + 1}`] })}><Plus size={14} /> Thêm bước</button></div></div>;
+      return <div className="fa-flow-layout">{renderRichField(block, "label", "labelHtml", "fa-flow-label", "Nhãn diễn tiến", { placeholder: "CƠ CHẾ" })}<div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><BlockRichEditor editorId={`first-aid:${block.id}:step:${index}`} html={block.stepsHtml?.[index]} text={step} editable={canEdit} ariaLabel={`Bước ${index + 1}`} onChange={(stepHtml, value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item), stepsHtml: steps.map((item, itemIndex) => itemIndex === index ? stepHtml : block.stepsHtml?.[itemIndex] ?? plainTextToRichHtml(item)) })} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index), stepsHtml: block.stepsHtml?.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, `Bước ${steps.length + 1}`], stepsHtml: [...(block.stepsHtml ?? steps.map((step) => plainTextToRichHtml(step))), plainTextToRichHtml(`Bước ${steps.length + 1}`)] })}><Plus size={14} /> Thêm bước</button></div></div>;
     }
-    return <div className="fa-pearl-layout"><AutoTextarea className="fa-pearl-label" value={block.label ?? "HIGH-YIELD"} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { label: value })} ariaLabel="Nhãn pearl" /><AutoTextarea className="fa-pearl-text" value={block.text ?? ""} readOnly={!canEdit} onChange={(value) => updateBlock(block.id, { text: value })} ariaLabel="Nội dung pearl" /></div>;
+    return <div className="fa-pearl-layout">{renderRichField(block, "label", "labelHtml", "fa-pearl-label", "Nhãn pearl", { placeholder: "HIGH-YIELD" })}{renderRichField(block, "text", "textHtml", "fa-pearl-text", "Nội dung pearl", { placeholder: "Điểm dễ nhầm hoặc mẹo nhớ…" })}</div>;
   };
 
   return (
