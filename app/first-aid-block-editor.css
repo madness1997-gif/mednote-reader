@@ -307,6 +307,25 @@
 .fa-image-zone small { font-size: 7px; }
 .fa-image-zone.has-image { min-height: 0; background: #fff; }
 .fa-image-zone img { display: block; width: 100%; max-height: 310px; object-fit: contain; }
+.fa-linked-image-space {
+  position: relative;
+  width: 100%;
+  min-height: 28px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+}
+.fa-linked-image-space > span {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(239,247,248,.86);
+  color: #5e747c;
+  font: 600 7px/1.2 "Segoe UI", Arial, sans-serif;
+  pointer-events: none;
+}
 .fa-caption-input {
   min-height: 27px;
   padding: 5px 7px !important;

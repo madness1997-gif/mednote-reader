@@ -32,7 +32,9 @@ type FirstAidBlock = {
   text?: string;
   textStyle?: TextStyle;
   imageAssetId?: string;
+  imageObjectId?: string;
   imageName?: string;
+  imageAspectRatio?: number;
   caption?: string;
   imageSide?: "left" | "right";
   rows?: string[][];
@@ -48,8 +50,10 @@ type FirstAidBlockEditorProps = {
     blob: Blob;
     name: string;
     aspectRatio: number;
-    y: number;
-  }) => Promise<boolean>;
+    placement: { x: number; y: number; width: number };
+  }) => Promise<{ excerptId: string } | null>;
+  onRemoveImage: (excerptId: string) => void;
+  pageObjectIds: string[];
 };
 
 type BlockOption = {
@@ -59,7 +63,7 @@ type BlockOption = {
   icon: LucideIcon;
 };
 
-const SERIALIZATION_VERSION = 2;
+const SERIALIZATION_VERSION = 3;
 const ASSET_DB = "mednote-first-aid-assets";
 const ASSET_STORE = "assets";
 
@@ -158,7 +162,8 @@ function blockStaticHtml(block: FirstAidBlock) {
     return `<div style="padding:6px;${border}${content}">${body}</div>`;
   }
   if (block.type === "figure" || block.type === "figure-text") {
-    const figure = `<div data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;place-items:center;background:#eef3f4;color:#72828a;font:700 10px/1.3 'Segoe UI',Arial,sans-serif">${block.imageAssetId ? "Hình được lưu trong MedNote" : "Chưa có hình"}</div><div style="padding:4px 6px;background:#edf1f2;color:#43545d;font:600 9px/1.3 'Segoe UI',Arial,sans-serif">${escapeHtml(block.caption)}</div>`;
+    const objectAttribute = block.imageObjectId ? ` data-mednote-image-object-id="${escapeHtml(block.imageObjectId)}"` : "";
+    const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;place-items:center;background:#eef3f4;color:#72828a;font:700 10px/1.3 'Segoe UI',Arial,sans-serif">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:4px 6px;background:#edf1f2;color:#43545d;font:600 9px/1.3 'Segoe UI',Arial,sans-serif">${escapeHtml(block.caption)}</div>`;
     if (block.type === "figure") return `<div style="padding:6px;${border}">${figure}</div>`;
     const text = `<div style="padding:6px;white-space:pre-wrap;${content}">${escapeHtml(block.text)}</div>`;
     return `<div style="display:grid;grid-template-columns:44% 1fr;gap:8px;padding:6px;${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
@@ -324,7 +329,7 @@ function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void
   );
 }
 
-export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage }: FirstAidBlockEditorProps) {
+export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage, onRemoveImage, pageObjectIds }: FirstAidBlockEditorProps) {
   const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => parseBlocks(html, plainText));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -332,9 +337,10 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const assetUrlsRef = useRef<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingImageBlockRef = useRef<{ blockId: string; y: number } | null>(null);
+  const pendingImageBlockRef = useRef<{ blockId: string; placement: { x: number; y: number; width: number } } | null>(null);
   const canManage = mode !== "view";
   const canEdit = mode === "edit";
+  const pageObjectKey = [...pageObjectIds].sort().join("|");
   const assetIds = useMemo(() => Array.from(new Set(blocks.map((block) => block.imageAssetId).filter((value): value is string => Boolean(value)))).sort(), [blocks]);
 
   useEffect(() => {
@@ -368,6 +374,16 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     onChange(serializeBlocks(next), next.map(blockPlainText).filter(Boolean).join("\n\n"));
   };
 
+  useEffect(() => {
+    const knownObjects = new Set(pageObjectIds);
+    const next = blocks.map((block) => block.imageObjectId && !knownObjects.has(block.imageObjectId)
+      ? { ...block, imageObjectId: undefined, imageName: undefined, imageAspectRatio: undefined }
+      : block);
+    if (next.some((block, index) => block !== blocks[index])) commit(next);
+    // A deleted page object turns its anchored row back into a Browse row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageObjectKey]);
+
   const updateBlock = (id: string, changes: Partial<FirstAidBlock>) => commit(blocks.map((block) => block.id === id ? { ...block, ...changes } : block));
 
   const insertBlock = (type: BlockType, index: number) => {
@@ -380,15 +396,17 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   };
 
   const removeBlock = (id: string) => {
+    const imageObjectId = blocks.find((block) => block.id === id)?.imageObjectId;
     const next = blocks.filter((block) => block.id !== id);
     commit(next.length ? next : [createBlock("label")]);
+    if (imageObjectId) onRemoveImage(imageObjectId);
     setSelectedId(null);
   };
 
   const duplicateBlock = (id: string) => {
     const index = blocks.findIndex((block) => block.id === id);
     if (index < 0) return;
-    const copy = { ...blocks[index], id: uid(), rows: blocks[index].rows?.map((row) => [...row]), steps: blocks[index].steps ? [...blocks[index].steps] : undefined };
+    const copy = { ...blocks[index], id: uid(), imageObjectId: undefined, imageAssetId: undefined, imageName: undefined, imageAspectRatio: undefined, rows: blocks[index].rows?.map((row) => [...row]), steps: blocks[index].steps ? [...blocks[index].steps] : undefined };
     const next = [...blocks];
     next.splice(index + 1, 0, copy);
     commit(next);
@@ -425,6 +443,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     else if (type === "text" || type === "figure-text") replacement.text = seed || replacement.text;
     else if (type === "flow") replacement.steps = lines(seed).length ? lines(seed) : [seed || "Bước 1"];
     commit(blocks.map((block) => block.id === id ? replacement : block));
+    if (current.imageObjectId) onRemoveImage(current.imageObjectId);
   };
 
   const onBlockKeyDown = (event: KeyboardEvent<HTMLElement>, block: FirstAidBlock) => {
@@ -435,40 +454,30 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     }
   };
 
-  const blockPlacementY = (element: HTMLElement) => {
-    const block = element.closest<HTMLElement>(".fa-block");
+  const blockPlacement = (element: HTMLElement) => {
     const page = element.closest<HTMLElement>(".typed-layer");
-    if (!block || !page) return .28;
-    const blockRect = block.getBoundingClientRect();
+    if (!page) return { x: .1, y: .28, width: .8 };
+    const elementRect = element.getBoundingClientRect();
     const pageRect = page.getBoundingClientRect();
-    return Math.min(.88, Math.max(.08, (blockRect.top - pageRect.top) / Math.max(1, pageRect.height)));
+    const width = Math.min(.9, Math.max(.06, elementRect.width / Math.max(1, pageRect.width)));
+    return {
+      x: Math.min(1 - width, Math.max(0, (elementRect.left - pageRect.left) / Math.max(1, pageRect.width))),
+      y: Math.min(.94, Math.max(.04, (elementRect.top - pageRect.top) / Math.max(1, pageRect.height))),
+      width,
+    };
   };
 
   const requestImage = (blockId: string, element: HTMLElement) => {
     if (!canEdit) return;
-    pendingImageBlockRef.current = { blockId, y: blockPlacementY(element) };
+    pendingImageBlockRef.current = { blockId, placement: blockPlacement(element) };
     fileInputRef.current?.click();
   };
 
-  const replaceImageBlockAfterInsert = (blockId: string) => {
-    const current = blocks.find((block) => block.id === blockId);
-    if (!current) return;
-    const figureText = current.text === "Nhập nội dung liên quan đến hình…" ? "" : current.text;
-    const preservedText = current.type === "figure-text"
-      ? [figureText, current.caption && current.caption !== "Chú thích" ? current.caption : ""].filter(Boolean).join("\n")
-      : current.caption && current.caption !== "Nhập chú thích hình…" ? current.caption : "";
-    const next = preservedText
-      ? blocks.map((block) => block.id === blockId ? { ...createBlock("text"), id: blockId, text: preservedText, textStyle: "paragraph" as TextStyle } : block)
-      : blocks.filter((block) => block.id !== blockId);
-    commit(next.length ? next : [createBlock("label")]);
-    setSelectedId(null);
-  };
-
-  const applyImageFile = async (blockId: string, file: File, y: number) => {
+  const applyImageFile = async (blockId: string, file: File, placement: { x: number; y: number; width: number }) => {
     if (!file.type.startsWith("image/")) return;
     const { blob, aspectRatio } = await compressImage(file);
-    const inserted = await onInsertImage({ blob, name: file.name, aspectRatio, y });
-    if (inserted) replaceImageBlockAfterInsert(blockId);
+    const inserted = await onInsertImage({ blob, name: file.name, aspectRatio, placement });
+    if (inserted) updateBlock(blockId, { imageObjectId: inserted.excerptId, imageAssetId: undefined, imageName: file.name, imageAspectRatio: aspectRatio });
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -476,7 +485,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     const pending = pendingImageBlockRef.current;
     event.target.value = "";
     pendingImageBlockRef.current = null;
-    if (file && pending) void applyImageFile(pending.blockId, file, pending.y);
+    if (file && pending) void applyImageFile(pending.blockId, file, pending.placement);
   };
 
   const updateTableCell = (block: FirstAidBlock, rowIndex: number, columnIndex: number, value: string) => {
@@ -486,6 +495,9 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   };
 
   const renderImageZone = (block: FirstAidBlock) => {
+    if (block.imageObjectId) {
+      return <div className="fa-linked-image-space" style={{ aspectRatio: String(Math.max(.05, block.imageAspectRatio ?? 1.5)) }} aria-label="Ảnh là đối tượng có thể chọn và thao tác trên trang"><span>Ảnh đã là đối tượng trên trang</span></div>;
+    }
     const url = block.imageAssetId ? assetUrls[block.imageAssetId] : undefined;
     return (
       <div className={`fa-image-zone ${url ? "has-image" : ""}`} onClick={(event) => requestImage(block.id, event.currentTarget)} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
@@ -493,7 +505,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
         event.preventDefault();
         event.stopPropagation();
         const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/"));
-        if (file) void applyImageFile(block.id, file, blockPlacementY(event.currentTarget));
+        if (file) void applyImageFile(block.id, file, blockPlacement(event.currentTarget));
       }}>
         {url ? <img src={url} alt={block.imageName || "Hình trong note"} /> : <><ImageIcon size={24} /><b>Thả, dán hoặc chọn hình</b><small>Ảnh được nén và lưu cục bộ</small></>}
       </div>

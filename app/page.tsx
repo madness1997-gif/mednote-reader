@@ -225,6 +225,7 @@ type ExcerptLayout = {
   rotation: number;
   opacity: number;
   aspectRatio?: number;
+  autoFit?: boolean;
 };
 
 type Notebook = {
@@ -304,6 +305,8 @@ const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDe
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
+const DEFAULT_NEW_NOTE_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "first-aid", color: "white" };
+const DEFAULT_NEW_NOTE_TEXT: TextSettings = { ...DEFAULT_TEXT, size: 12 };
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
 const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "transparent" };
@@ -340,6 +343,8 @@ const FIRST_AID_TEMPLATE_HTML = [
   '</tbody>',
   '</table>',
 ].join("");
+
+const FIRST_AID_TEMPLATE_TEXT = "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL";
 
 const PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[] = [
   { id: "white", label: "Trắng", swatch: "#ffffff" },
@@ -654,8 +659,8 @@ function defaultExcerptLayout(index: number, kind: NoteExcerpt["kind"]): Excerpt
 
 function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, index: number, kind: NoteExcerpt["kind"]): ExcerptLayout {
   const fallback = defaultExcerptLayout(index, kind);
-  const width = Math.min(.9, Math.max(kind === "image" ? .06 : .2, layout?.width ?? fallback.width));
-  const height = Math.min(.82, Math.max(kind === "image" ? .04 : .16, layout?.height ?? fallback.height));
+  const width = Math.min(.9, Math.max(kind === "image" ? .035 : .025, layout?.width ?? fallback.width));
+  const height = Math.min(.82, Math.max(kind === "image" ? .025 : .018, layout?.height ?? fallback.height));
   const rawRotation = Number(layout?.rotation ?? 0);
   const rotation = Number.isFinite(rawRotation) ? ((rawRotation + 180) % 360 + 360) % 360 - 180 : 0;
   const rawAspectRatio = Number(layout?.aspectRatio);
@@ -669,6 +674,7 @@ function normalizeExcerptLayout(layout: Partial<ExcerptLayout> | undefined, inde
     rotation,
     opacity: Number.isFinite(rawOpacity) ? Math.min(1, Math.max(.1, rawOpacity)) : 1,
     aspectRatio: Number.isFinite(rawAspectRatio) && rawAspectRatio > 0 ? rawAspectRatio : undefined,
+    autoFit: kind === "text" && layout?.autoFit === true,
   };
 }
 
@@ -758,12 +764,13 @@ function normalizeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
   };
 }
 
-function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEFAULT_PAPER, text: TextSettings = DEFAULT_TEXT): NotePage {
+function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEFAULT_NEW_NOTE_PAPER, text: TextSettings = DEFAULT_NEW_NOTE_TEXT): NotePage {
+  const firstAid = paper.template === "first-aid";
   return {
     id: uid("page"),
-    title: `GHI CHÚ ${index}`,
-    body: "",
-    bodyHtml: "",
+    title: firstAid ? "TÊN CHỦ ĐỀ" : `GHI CHÚ ${index}`,
+    body: firstAid ? FIRST_AID_TEMPLATE_TEXT : "",
+    bodyHtml: firstAid ? FIRST_AID_TEMPLATE_HTML : "",
     citationPage,
     strokes: [],
     paper: { ...paper },
@@ -1115,7 +1122,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
 
   useEffect(() => {
     if (!interactionRef.current) setLayout(savedLayout);
-  }, [savedLayout.aspectRatio, savedLayout.contentScale, savedLayout.height, savedLayout.opacity, savedLayout.rotation, savedLayout.width, savedLayout.x, savedLayout.y]);
+  }, [savedLayout.aspectRatio, savedLayout.autoFit, savedLayout.contentScale, savedLayout.height, savedLayout.opacity, savedLayout.rotation, savedLayout.width, savedLayout.x, savedLayout.y]);
 
   useEffect(() => {
     if (!interactionRef.current) setCalloutAnchor(savedCallout);
@@ -1192,8 +1199,9 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
       state.current = {
           ...state.origin,
-          width: Math.min(1 - state.origin.x, Math.max(.18, state.origin.width + dx)),
-          height: Math.min(1 - state.origin.y, Math.max(.14, state.origin.height + dy)),
+          width: Math.min(1 - state.origin.x, Math.max(.025, state.origin.width + dx)),
+          height: Math.min(1 - state.origin.y, Math.max(.018, state.origin.height + dy)),
+          autoFit: false,
       };
     }
     setLayout(state.current);
@@ -1226,6 +1234,36 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     setLayout(next);
     onMove(excerpt.id, next);
   };
+
+  const fitTextBoxToContent = (keepAutoFit = true) => {
+    const article = articleRef.current;
+    const host = article?.parentElement;
+    const editor = article?.querySelector<HTMLElement>(".excerpt-rich-editor");
+    if (!article || !host || !editor) return;
+    const hostRect = host.getBoundingClientRect();
+    if (!hostRect.width || !hostRect.height) return;
+    const probe = editor.cloneNode(true) as HTMLElement;
+    probe.removeAttribute("data-rich-editor-id");
+    probe.removeAttribute("contenteditable");
+    probe.classList.add("excerpt-fit-probe");
+    article.appendChild(probe);
+    probe.style.maxWidth = `${hostRect.width * .86}px`;
+    const measured = probe.getBoundingClientRect();
+    probe.remove();
+    const width = Math.min(1 - layout.x, Math.max(.025, (measured.width + 18) / hostRect.width));
+    const height = Math.min(1 - layout.y, Math.max(.018, (measured.height + 16) / hostRect.height));
+    const next = { ...layout, width, height, autoFit: keepAutoFit };
+    setLayout(next);
+    onEdit(excerpt.id, { layout: next });
+  };
+
+  useEffect(() => {
+    if (excerpt.kind !== "text" || !savedLayout.autoFit || !(excerpt.text ?? "").trim()) return;
+    const frame = window.requestAnimationFrame(() => fitTextBoxToContent(true));
+    return () => window.cancelAnimationFrame(frame);
+    // Refit only when the saved text changes; layout updates are the result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [excerpt.richText, excerpt.text, savedLayout.autoFit]);
 
   const calloutTargetX = calloutAnchor ? (calloutAnchor.anchorX - layout.x) / layout.width * 100 : 50;
   const calloutTargetY = calloutAnchor ? (calloutAnchor.anchorY - layout.y) / layout.height * 100 : 50;
@@ -1294,6 +1332,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             <b>{Math.round(layout.contentScale * 100)}%</b>
             <button onClick={() => changeContentScale(.12)} disabled={!movable || layout.contentScale >= 2.4} title="Phóng to nội dung" aria-label="Phóng to nội dung"><Plus size={12} /></button>
           </span>}
+          {excerpt.kind === "text" && <button className={`excerpt-fit-control ${layout.autoFit ? "active" : ""}`} onClick={() => fitTextBoxToContent(true)} title="Ôm sát nội dung và tự co giãn khi nhập" aria-label="Cho hộp chữ ôm sát nội dung">Ôm chữ</button>}
           {excerpt.kind === "image" && <span className="excerpt-opacity-controls" aria-label="Độ trong suốt của ảnh">
             <Blend size={12} />
             <input type="range" min=".1" max="1" step=".05" value={layout.opacity} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => changeOpacity(Number(event.target.value))} aria-label="Độ trong suốt của ảnh" />
@@ -2945,7 +2984,7 @@ export default function Home() {
     }
   };
 
-  const addFirstAidImage = async ({ blob, name, aspectRatio, y }: { blob: Blob; name: string; aspectRatio: number; y: number }) => {
+  const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => {
     const assetId = uid("note-image");
     try {
       await saveLocalAsset(assetId, blob);
@@ -2953,12 +2992,14 @@ export default function Home() {
       const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
       const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
       const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
-      layout.x = .3;
       layout.aspectRatio = Math.max(.01, aspectRatio);
+      layout.width = Math.min(.9, Math.max(.06, placement.width));
+      layout.x = Math.min(1 - layout.width, Math.max(0, placement.x));
       layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / layout.aspectRatio));
-      layout.y = Math.min(1 - layout.height, Math.max(.065, y));
+      layout.y = Math.min(1 - layout.height, Math.max(.04, placement.y));
+      const excerptId = uid("excerpt");
       const excerpt: NoteExcerpt = {
-        id: uid("excerpt"),
+        id: excerptId,
         kind: "image",
         sourceKind: "manual",
         assetId,
@@ -2971,10 +3012,10 @@ export default function Home() {
       setActiveTool("pointer");
       setNotePanel(null);
       setToast("Đã đưa ảnh lên trang — có thể kéo, đổi cỡ, xoay, chỉnh độ trong suốt và xếp lớp");
-      return true;
+      return { excerptId };
     } catch {
       setToast("Không thể lưu ảnh trên thiết bị này");
-      return false;
+      return null;
     }
   };
 
@@ -3008,8 +3049,8 @@ export default function Home() {
     const host = event.currentTarget.querySelector<HTMLElement>(".typed-layer");
     if (!host) return;
     const rect = host.getBoundingClientRect();
-    const width = .36;
-    const height = .18;
+    const width = .24;
+    const height = .08;
     const x = Math.min(1 - width, Math.max(0, (event.clientX - rect.left) / rect.width));
     const y = Math.min(1 - height, Math.max(.065, (event.clientY - rect.top) / rect.height));
     const excerpt: NoteExcerpt = {
@@ -3019,7 +3060,7 @@ export default function Home() {
       text: "",
       richText: "",
       createdAt: Date.now(),
-      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1 },
+      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1, autoFit: true },
       appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
     };
     updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
@@ -3661,7 +3702,7 @@ export default function Home() {
   };
 
   const addNotePage = () => {
-    const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1, activeNote.paper, activeNote.text);
+    const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1);
     updateActiveNotebook((notebook) => ({ ...notebook, pages: [...notebook.pages, next], activePageId: next.id }));
     setActiveTool("text");
     setToast(`Đã thêm trang ${PAPER_SIZES[next.paper.size].label}`);
@@ -3684,7 +3725,7 @@ export default function Home() {
     const assetIds = activeNote.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!);
     await Promise.allSettled(assetIds.map(deleteLocalAsset));
     if (notePages.length === 1) {
-      const replacement = createBlankPage(sourcePage, 1, activeNote.paper, activeNote.text);
+      const replacement = createBlankPage(sourcePage, 1);
       updateActiveNotebook((notebook) => ({ ...notebook, pages: [replacement], activePageId: replacement.id }));
       setStrokeHistory((history) => {
         const next = { ...history };
@@ -3872,7 +3913,7 @@ export default function Home() {
         title: replaceDefaultTitle ? "TÊN CHỦ ĐỀ" : activeNote.title,
         titleHtml: replaceDefaultTitle ? undefined : activeNote.titleHtml,
         bodyHtml: FIRST_AID_TEMPLATE_HTML,
-        body: "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL",
+        body: FIRST_AID_TEMPLATE_TEXT,
       } : {}),
     });
     setActiveTool("text");
