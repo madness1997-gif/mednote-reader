@@ -1,9 +1,9 @@
 name: Validate First Aid Web
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/first-aid-block-editor-web
+      - main
 
 permissions:
   contents: read
