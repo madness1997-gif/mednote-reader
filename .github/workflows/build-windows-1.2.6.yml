@@ -5,6 +5,11 @@ on:
   push:
     paths:
       - .github/workflows/build-windows-1.2.6.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/build-windows-trigger-1.2.6.txt
 
 permissions:
   contents: write
@@ -50,6 +55,7 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.2.6
