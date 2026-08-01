@@ -114,7 +114,7 @@ import {
 import { pdfDocumentOptions } from "./pdf-config";
 import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 
-type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox";
+type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox" | "callout";
 type InkTool = "pen" | "highlight" | "shape";
 type PenStyle = "ballpoint" | "fountain" | "pencil" | "brush";
 type ShapeKind = "line" | "arrow" | "rectangle" | "ellipse" | "circle";
@@ -167,6 +167,7 @@ type TextToolbarState = TextSettings & {
 };
 type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
 type ExcerptAppearance = { borderStyle: TableBorderStyle; borderWidth: number; borderColor: string; backgroundColor: string };
+type CalloutSettings = { anchorX: number; anchorY: number };
 type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | null;
 type Point = { x: number; y: number; pressure: number };
 type Stroke = {
@@ -199,6 +200,8 @@ type NotePage = {
 type NoteExcerpt = {
   id: string;
   kind: "text" | "image";
+  annotationKind?: "callout";
+  callout?: Partial<CalloutSettings>;
   sourceKind?: "pdf" | "manual";
   text?: string;
   richText?: string;
@@ -300,6 +303,7 @@ const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "ruled", color: "white" };
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
 const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
+const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "#fff8cf" };
 const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
@@ -548,6 +552,7 @@ const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "shape", label: "Hình học", icon: Shapes },
   { id: "text", label: "Nhập chữ", icon: TextCursorInput },
   { id: "textbox", label: "Tạo hộp chữ", icon: ScanText },
+  { id: "callout", label: "Callout — hộp chú thích có mũi tên", icon: MessageSquareText },
 ];
 
 const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof MousePointer2 }[] = [
@@ -676,6 +681,17 @@ function normalizeExcerptAppearance(appearance?: Partial<ExcerptAppearance>): Ex
   };
 }
 
+function normalizeCalloutSettings(callout: Partial<CalloutSettings> | undefined, layout: ExcerptLayout): CalloutSettings {
+  const fallbackX = Math.max(0, layout.x - .06);
+  const fallbackY = Math.min(1, layout.y + layout.height + .06);
+  const anchorX = Number(callout?.anchorX ?? fallbackX);
+  const anchorY = Number(callout?.anchorY ?? fallbackY);
+  return {
+    anchorX: Number.isFinite(anchorX) ? Math.min(1, Math.max(0, anchorX)) : fallbackX,
+    anchorY: Number.isFinite(anchorY) ? Math.min(1, Math.max(0, anchorY)) : fallbackY,
+  };
+}
+
 function boundingPdfRect(rects: PdfRect[]): PdfRect | undefined {
   if (!rects.length) return undefined;
   return rects.reduce<PdfRect>((bounds, rect) => ({
@@ -701,13 +717,19 @@ function normalizePage(page: NotePage): NotePage {
     paper: normalizePaper(page.paper),
     text: page.bodyHtml == null && normalizedText.font === "handwriting" ? { ...normalizedText, font: "times" } : normalizedText,
     excerpts: Array.isArray(page.excerpts)
-      ? page.excerpts.map((excerpt, index) => ({
-          ...excerpt,
-          sourceKind: excerpt.sourceKind ?? "pdf",
-          richText: excerpt.kind === "text" ? sanitizeRichTextHtml(excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")) : undefined,
-          layout: normalizeExcerptLayout(excerpt.layout, index, excerpt.kind),
-          appearance: excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance) : undefined,
-        }))
+      ? page.excerpts.map((excerpt, index) => {
+          const layout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
+          return {
+            ...excerpt,
+            sourceKind: excerpt.sourceKind ?? "pdf",
+            richText: excerpt.kind === "text" ? sanitizeRichTextHtml(excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")) : undefined,
+            layout,
+            appearance: excerpt.kind === "text"
+              ? normalizeExcerptAppearance(excerpt.appearance ?? (excerpt.annotationKind === "callout" ? DEFAULT_CALLOUT_APPEARANCE : undefined))
+              : undefined,
+            callout: excerpt.annotationKind === "callout" ? normalizeCalloutSettings(excerpt.callout, layout) : undefined,
+          };
+        })
       : [],
   };
 }
@@ -1059,10 +1081,13 @@ type DraggableExcerptProps = {
 function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
-  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance) : null;
+  const isCallout = excerpt.annotationKind === "callout";
+  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance ?? (isCallout ? DEFAULT_CALLOUT_APPEARANCE : undefined)) : null;
+  const savedCallout = isCallout ? normalizeCalloutSettings(excerpt.callout, savedLayout) : null;
   const [layout, setLayout] = useState(savedLayout);
+  const [calloutAnchor, setCalloutAnchor] = useState(savedCallout);
   const interactionRef = useRef<{
-    mode: "move" | "resize" | "rotate";
+    mode: "move" | "resize" | "rotate" | "anchor";
     pointerId: number;
     startX: number;
     startY: number;
@@ -1074,13 +1099,19 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     hostHeight: number;
     moved: boolean;
     current: ExcerptLayout;
+    originAnchor: CalloutSettings | null;
+    currentAnchor: CalloutSettings | null;
   } | null>(null);
 
   useEffect(() => {
     if (!interactionRef.current) setLayout(savedLayout);
   }, [savedLayout.aspectRatio, savedLayout.contentScale, savedLayout.height, savedLayout.opacity, savedLayout.rotation, savedLayout.width, savedLayout.x, savedLayout.y]);
 
-  const startInteraction = (event: React.PointerEvent<HTMLElement>, mode: "move" | "resize" | "rotate") => {
+  useEffect(() => {
+    if (!interactionRef.current) setCalloutAnchor(savedCallout);
+  }, [savedCallout?.anchorX, savedCallout?.anchorY]);
+
+  const startInteraction = (event: React.PointerEvent<HTMLElement>, mode: "move" | "resize" | "rotate" | "anchor") => {
     if (!movable) return;
     const host = articleRef.current?.parentElement;
     const article = articleRef.current;
@@ -1105,6 +1136,8 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       hostHeight: Math.max(1, rect.height),
       moved: false,
       current: layout,
+      originAnchor: calloutAnchor,
+      currentAnchor: calloutAnchor,
     };
   };
 
@@ -1114,7 +1147,14 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     event.preventDefault();
     const dx = (event.clientX - state.startX) / state.hostWidth;
     const dy = (event.clientY - state.startY) / state.hostHeight;
-    if (state.mode === "rotate") {
+    if (state.mode === "anchor" && state.originAnchor) {
+      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
+      state.currentAnchor = {
+        anchorX: Math.min(1, Math.max(0, state.originAnchor.anchorX + dx)),
+        anchorY: Math.min(1, Math.max(0, state.originAnchor.anchorY + dy)),
+      };
+      setCalloutAnchor(state.currentAnchor);
+    } else if (state.mode === "rotate") {
       const angle = Math.atan2(event.clientY - state.centerY, event.clientX - state.centerX) * 180 / Math.PI;
       const delta = angle - state.startAngle;
       if (Math.abs(delta) > .5) state.moved = true;
@@ -1153,7 +1193,9 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     const state = interactionRef.current;
     if (!state || state.pointerId !== event.pointerId) return;
     interactionRef.current = null;
-    if (state.moved) onMove(excerpt.id, state.current);
+    if (!state.moved) return;
+    if (state.mode === "anchor" && state.currentAnchor) onEdit(excerpt.id, { callout: state.currentAnchor });
+    else onMove(excerpt.id, state.current);
   };
 
   const changeContentScale = (step: number) => {
@@ -1175,10 +1217,19 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
     onMove(excerpt.id, next);
   };
 
+  const calloutTargetX = calloutAnchor ? (calloutAnchor.anchorX - layout.x) / layout.width * 100 : 50;
+  const calloutTargetY = calloutAnchor ? (calloutAnchor.anchorY - layout.y) / layout.height * 100 : 50;
+  const calloutDeltaX = calloutTargetX - 50;
+  const calloutDeltaY = calloutTargetY - 50;
+  const calloutEdgeRatio = Math.max(Math.abs(calloutDeltaX) / 50, Math.abs(calloutDeltaY) / 50);
+  const calloutStartX = calloutEdgeRatio > 1 ? 50 + calloutDeltaX / calloutEdgeRatio : 50;
+  const calloutStartY = calloutEdgeRatio > 1 ? 50 + calloutDeltaY / calloutEdgeRatio : 50;
+  const calloutLineColor = appearance?.borderColor && appearance.borderColor !== "transparent" ? appearance.borderColor : "#1b7184";
+
   return (
     <article
       ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${excerpt.kind === "image" ? "excerpt-frameless" : ""} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
+      className={`note-excerpt excerpt-${excerpt.kind} ${isCallout ? "excerpt-callout" : ""} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${excerpt.kind === "image" ? "excerpt-frameless" : ""} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
       style={{
         left: `${layout.x * 100}%`,
         top: `${layout.y * 100}%`,
@@ -1191,6 +1242,8 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
         "--excerpt-border-width": appearance ? `${appearance.borderWidth}px` : undefined,
         "--excerpt-border-color": appearance?.borderColor,
         "--excerpt-background": appearance?.backgroundColor,
+        "--callout-line-color": calloutLineColor,
+        "--callout-line-width": `${Math.max(1.5, appearance?.borderWidth ?? 1.5)}px`,
       } as React.CSSProperties}
       onPointerDown={(event) => {
         if (!selectable) return;
@@ -1210,6 +1263,10 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       title={excerpt.sourceKind !== "manual" && excerpt.documentId && excerpt.page ? "Nhấp đúp để quay lại đúng vị trí trong PDF" : undefined}
       aria-selected={selected}
     >
+      {isCallout && calloutAnchor && <svg className="callout-leader" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <defs><marker id={`callout-arrow-${excerpt.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={calloutLineColor} /></marker></defs>
+        <line x1={calloutStartX} y1={calloutStartY} x2={calloutTargetX} y2={calloutTargetY} markerEnd={`url(#callout-arrow-${excerpt.id})`} />
+      </svg>}
       {selected && (movable || editable) && (
         <div className="excerpt-object-controls">
           <button
@@ -1237,7 +1294,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             <b>{Math.round(layout.rotation)}°</b>
             <button onClick={() => rotateBy(15)} title="Xoay phải 15°" aria-label="Xoay phải 15 độ"><RotateCw size={12} /></button>
           </span>}
-          {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : "Chữ"}</span>}
+          {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : isCallout ? "Callout" : "Chữ"}</span>}
           <button className="excerpt-delete-control" onClick={() => onDelete(excerpt.id)} aria-label="Xóa khung" title="Xóa khung"><Trash2 size={12} /></button>
         </div>
       )}
@@ -1249,8 +1306,8 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             html={excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}
             editable={editable}
             autoFocus={editable}
-            placeholder={excerpt.sourceKind === "manual" ? "Nhập nội dung…" : undefined}
-            ariaLabel={excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
+            placeholder={isCallout ? "Nhập chú thích…" : excerpt.sourceKind === "manual" ? "Nhập nội dung…" : undefined}
+            ariaLabel={isCallout ? "Nội dung callout" : excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
             onChange={(richText, text) => onEdit(excerpt.id, { richText, text })}
             onActivate={onTextActivate}
             onNormalizeInput={onNormalizeTextInput}
@@ -1259,6 +1316,16 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
           <div className="excerpt-image-viewport" style={{ opacity: layout.opacity }}><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
         ) : <span>Không tìm thấy ảnh</span>}
       </div>
+      {selected && movable && isCallout && calloutAnchor && <button
+        className="callout-anchor-handle"
+        style={{ left: `${calloutTargetX}%`, top: `${calloutTargetY}%` }}
+        onPointerDown={(event) => startInteraction(event, "anchor")}
+        onPointerMove={updateInteraction}
+        onPointerUp={finishInteraction}
+        onPointerCancel={finishInteraction}
+        aria-label="Kéo đầu mũi tên callout"
+        title="Kéo để đổi điểm mà callout chỉ tới"
+      ><Move size={11} /></button>}
       {selected && movable && excerpt.kind === "image" && <button
         className="excerpt-rotate-handle"
         onPointerDown={(event) => startInteraction(event, "rotate")}
@@ -2627,7 +2694,7 @@ export default function Home() {
       setNotePanel((panel) => panel === "ink" && activeTool === tool ? null : "ink");
     } else if (tool === "shape") {
       setNotePanel((panel) => panel === "shape" && activeTool === tool ? null : "shape");
-    } else if (tool === "text" || tool === "textbox") {
+    } else if (tool === "text" || tool === "textbox" || tool === "callout") {
       setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
       if (tool === "text") {
         const editorId = selectedExcerpt?.kind === "text" ? `excerpt:${selectedExcerpt.id}` : `body:${activeNote.id}`;
@@ -2911,6 +2978,39 @@ export default function Home() {
     setActiveTool("text");
     setNotePanel("text");
     setToast("Đã tạo hộp chữ — nhập nội dung ngay");
+  };
+
+  const addCalloutAt = (event: React.PointerEvent<HTMLElement>) => {
+    const host = event.currentTarget.querySelector<HTMLElement>(".typed-layer");
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const anchorX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const anchorY = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const width = .38;
+    const height = .18;
+    const x = anchorX + width + .055 <= .98
+      ? anchorX + .055
+      : Math.max(.02, anchorX - width - .055);
+    const y = anchorY - height - .055 >= .06
+      ? anchorY - height - .055
+      : Math.min(1 - height - .02, anchorY + .055);
+    const excerpt: NoteExcerpt = {
+      id: uid("callout"),
+      kind: "text",
+      annotationKind: "callout",
+      callout: { anchorX, anchorY },
+      sourceKind: "manual",
+      text: "",
+      richText: "",
+      createdAt: Date.now(),
+      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1 },
+      appearance: { ...DEFAULT_CALLOUT_APPEARANCE },
+    };
+    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
+    setSelectedExcerptId(excerpt.id);
+    setActiveTool("text");
+    setNotePanel("text");
+    setToast("Đã tạo callout — nhập chú thích, dùng Chọn để kéo đầu mũi tên");
   };
 
   const shiftExcerptLayer = (direction: "front" | "forward" | "backward" | "back") => {
@@ -3370,7 +3470,7 @@ export default function Home() {
           if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
         }
         const caption = excerpt.sourceKind === "manual"
-          ? "Hộp chữ"
+          ? excerpt.annotationKind === "callout" ? "Callout" : "Hộp chữ"
           : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
         excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
@@ -4016,9 +4116,9 @@ export default function Home() {
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster note-tool-cluster">
                 {tools.map(({ id, label, icon: Icon }) => {
-                  const hasPanel = ["pen", "highlight", "shape", "text", "textbox"].includes(id);
-                  const shortLabel = id === "text" ? "Type" : id === "textbox" ? "Text box" : label;
-                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
+                  const hasPanel = ["pen", "highlight", "shape", "text", "textbox", "callout"].includes(id);
+                  const shortLabel = id === "text" ? "Type" : id === "textbox" ? "Text box" : id === "callout" ? "Callout" : label;
+                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox" || id === "callout") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
                 })}
               </div>
               <span className="toolbar-spacer" />
@@ -4193,7 +4293,7 @@ export default function Home() {
           )}
 
           <div className="note-stage workspace-frame">
-            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+            <article className={`note-paper interactive ${activeTool === "text" ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
               if (!(event.target as HTMLElement).closest("[data-rich-editor-id]")) {
@@ -4201,6 +4301,7 @@ export default function Home() {
                 savedTextRangeRef.current = null;
               }
               if (activeTool === "textbox") addTextBoxAt(event);
+              if (activeTool === "callout") addCalloutAt(event);
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
@@ -4217,9 +4318,10 @@ export default function Home() {
               <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
               {activeTool === "textbox" && <div className="mode-hint">Bấm vị trí muốn đặt hộp chữ</div>}
-              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo trực tiếp ảnh để di chuyển · kéo góc để đổi cỡ · kéo nút tròn để xoay</div>}
+              {activeTool === "callout" && <div className="mode-hint">Bấm đúng vị trí muốn callout chỉ tới</div>}
+              {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo đối tượng · kéo góc đổi cỡ · callout: kéo đầu mũi tên</div>}
             </article>
-            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Ảnh: kéo trực tiếp để di chuyển, kéo góc để đổi cỡ, kéo nút tròn để xoay" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Chọn đối tượng để di chuyển, đổi cỡ hoặc sắp xếp lớp" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "callout" ? "Bấm vị trí cần chú thích để tạo hộp callout có mũi tên" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
 
