@@ -118,6 +118,16 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", .95));
 }
 
+function withRenderTimeout<T>(promise: Promise<T>, timeoutMs = 5_000) {
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error("PDFium render timed out")), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) window.clearTimeout(timer);
+  });
+}
+
 function normalizeRect(rect: PdfRect): PdfRect {
   return {
     x1: Math.min(rect.x1, rect.x2),
@@ -528,7 +538,7 @@ export function PdfPageView({
   useEffect(() => {
     let disposed = false;
     let renderTask: PDFRenderTask | null = null;
-    setLoading(true);
+    if (!hasRenderedRef.current) setLoading(true);
     // Repeated zoom clicks keep the previous bitmap visible. Once input settles,
     // only the final zoom level is rendered at full quality.
     const timer = window.setTimeout(() => {
@@ -548,11 +558,14 @@ export function PdfPageView({
         if (pdfiumDocument) {
           try {
             const unrotatedViewport = pdfPage.getViewport({ scale, rotation: 0 });
-            const pdfiumPage = await pdfiumDocument.getPage(page - 1);
-            const bitmap = await pdfiumPage.render({
-              width: Math.max(1, Math.round(unrotatedViewport.width * ratio)),
-              height: Math.max(1, Math.round(unrotatedViewport.height * ratio)),
-            });
+            const bitmap = await withRenderTimeout(
+              Promise.resolve(pdfiumDocument.getPage(page - 1)).then((pdfiumPage) => (
+                pdfiumPage.render({
+                  width: Math.max(1, Math.round(unrotatedViewport.width * ratio)),
+                  height: Math.max(1, Math.round(unrotatedViewport.height * ratio)),
+                })
+              )),
+            );
             if (disposed) return;
 
             const swapsAxes = normalizedRotation === 90 || normalizedRotation === 270;
