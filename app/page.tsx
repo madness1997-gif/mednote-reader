@@ -2680,19 +2680,13 @@ export default function Home() {
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const bytes = new Uint8Array(buffer);
       const task = pdfjs.getDocument(pdfDocumentOptions(bytes.slice()));
-      const [pdfjsResult, pdfiumResult] = await Promise.allSettled([
-        task.promise,
-        loadPdfiumDocument(bytes),
-      ]);
-      if (pdfjsResult.status === "rejected") throw pdfjsResult.reason;
-      document = pdfjsResult.value;
-      highFidelityDocument = pdfiumResult.status === "fulfilled" ? pdfiumResult.value : null;
+      // Open with PDF.js first. PDFium is only a later quality upgrade: a
+      // blocked blob/module worker must never hold the document loading state.
+      document = await task.promise;
       if (disposed) {
         void document.destroy();
-        highFidelityDocument?.destroy();
       } else {
         setPdfDocument(document);
-        setPdfiumDocument(highFidelityDocument);
         setLoadedDocumentId(pdfSource.documentId);
         setWorkspaces((items) => items.map((workspace) => ({
           ...workspace,
@@ -2705,6 +2699,17 @@ export default function Home() {
         })));
         setPdfStatus("idle");
         setToast(`Đã mở ${document.numPages} trang`);
+        // Upgrade visible pages when PDFium becomes ready. A rejected or timed
+        // out worker quietly leaves the reliable PDF.js renderer in place.
+        void loadPdfiumDocument(bytes).then((candidate) => {
+          highFidelityDocument = candidate;
+          if (disposed) {
+            highFidelityDocument = null;
+            void candidate.destroy();
+          } else {
+            setPdfiumDocument(candidate);
+          }
+        }).catch(() => undefined);
       }
     }).catch(() => {
       if (!disposed) {
