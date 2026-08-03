@@ -137,6 +137,52 @@ function normalizeRect(rect: PdfRect): PdfRect {
   };
 }
 
+type VisualRect = { left: number; top: number; right: number; bottom: number };
+
+function mergeVisualRects(rects: VisualRect[], gapTolerance = 1.5) {
+  const merged: VisualRect[] = [];
+
+  rects
+    .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
+    .sort((a, b) => {
+      const smallestHeight = Math.min(a.bottom - a.top, b.bottom - b.top);
+      return Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) <= smallestHeight * .25
+        ? a.left - b.left
+        : a.top - b.top;
+    })
+    .forEach((rect) => {
+      let candidate = { ...rect };
+      let matchIndex = -1;
+
+      // Chrome may expose the same PDF.js glyph through several nested spans.
+      // Union only fragments that overlap on the same visual line; separated
+      // columns and meaningful inline gaps remain independent rectangles.
+      do {
+        matchIndex = merged.findIndex((other) => {
+          const verticalOverlap = Math.min(other.bottom, candidate.bottom) - Math.max(other.top, candidate.top);
+          const smallestHeight = Math.min(other.bottom - other.top, candidate.bottom - candidate.top);
+          const sameLine = verticalOverlap >= smallestHeight * .55;
+          const touchesHorizontally = candidate.left <= other.right + gapTolerance
+            && candidate.right >= other.left - gapTolerance;
+          return sameLine && touchesHorizontally;
+        });
+        if (matchIndex >= 0) {
+          const other = merged.splice(matchIndex, 1)[0];
+          candidate = {
+            left: Math.min(candidate.left, other.left),
+            top: Math.min(candidate.top, other.top),
+            right: Math.max(candidate.right, other.right),
+            bottom: Math.max(candidate.bottom, other.bottom),
+          };
+        }
+      } while (matchIndex >= 0);
+
+      merged.push(candidate);
+    });
+
+  return merged.sort((a, b) => Math.abs(a.top - b.top) < 2 ? a.left - b.left : a.top - b.top);
+}
+
 function selectionClientRects(rects: DOMRect[], clip: DOMRect) {
   const clipped = rects
     .map((rect) => ({
@@ -144,22 +190,9 @@ function selectionClientRects(rects: DOMRect[], clip: DOMRect) {
       top: Math.max(clip.top, rect.top),
       right: Math.min(clip.right, rect.right),
       bottom: Math.min(clip.bottom, rect.bottom),
-    }))
-    .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
-    .sort((a, b) => Math.abs(a.top - b.top) < 2 ? a.left - b.left : a.top - b.top);
+    }));
 
-  // Keep the browser's character-accurate range rectangles. Merging neighbouring
-  // PDF.js text runs into a single line box makes short selections look like a
-  // large rectangular block and can paint across columns or inline gaps.
-  return clipped.filter((rect, index, all) => !all.some((other, otherIndex) => (
-    otherIndex !== index
-    && other.left <= rect.left + .5
-    && other.top <= rect.top + .5
-    && other.right >= rect.right - .5
-    && other.bottom >= rect.bottom - .5
-    && (other.right - other.left) * (other.bottom - other.top)
-      < (rect.right - rect.left) * (rect.bottom - rect.top) * 1.05
-  )));
+  return mergeVisualRects(clipped);
 }
 
 function viewportRect(viewport: PageViewport, rect: PdfRect) {
@@ -686,6 +719,19 @@ export function PdfPageView({
   const inkAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfInkAnnotation => annotation.kind === "ink"), [pageAnnotations]);
   const markupAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfMarkupAnnotation => "rects" in annotation), [pageAnnotations]);
   const objectAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfObjectAnnotation => "rect" in annotation), [pageAnnotations]);
+  const highlightGroups = useMemo(() => {
+    if (!viewport) return [];
+    const groups = new Map<string, VisualRect[]>();
+    markupAnnotations.forEach((annotation) => {
+      if (annotation.kind !== "highlight") return;
+      const boxes = annotation.rects.map((rect) => {
+        const box = viewportRect(viewport, rect);
+        return { left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height };
+      });
+      groups.set(annotation.color, [...(groups.get(annotation.color) ?? []), ...boxes]);
+    });
+    return Array.from(groups, ([color, boxes]) => ({ color, boxes: mergeVisualRects(boxes) }));
+  }, [markupAnnotations, viewport]);
 
   const captureSelection = useCallback((delay = 18) => {
     if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout", "squiggly"].includes(tool)) return;
@@ -909,7 +955,19 @@ export function PdfPageView({
         <canvas ref={canvasRef} className="pdf-page-canvas" />
         {viewport && (
           <div className="pdf-markup-layer" aria-hidden="true">
-            {markupAnnotations.flatMap((annotation) => annotation.rects.map((rect, index) => {
+            {highlightGroups.length > 0 && (
+              <svg className="pdf-highlight-svg" viewBox={`0 0 ${viewport.width} ${viewport.height}`} preserveAspectRatio="none">
+                {highlightGroups.map(({ color, boxes }) => (
+                  <path
+                    key={color}
+                    className="pdf-highlight-shape"
+                    fill={color}
+                    d={boxes.map((box) => `M ${box.left} ${box.top} H ${box.right} V ${box.bottom} H ${box.left} Z`).join(" ")}
+                  />
+                ))}
+              </svg>
+            )}
+            {markupAnnotations.filter((annotation) => annotation.kind !== "highlight").flatMap((annotation) => annotation.rects.map((rect, index) => {
               const box = viewportRect(viewport, rect);
               return <span key={`${annotation.id}-${index}`} className={`pdf-markup pdf-markup-${annotation.kind}`} style={{ left: box.left, top: box.top, width: box.width, height: box.height, "--markup-color": annotation.color } as React.CSSProperties} />;
             }))}

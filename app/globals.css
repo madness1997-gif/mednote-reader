@@ -257,7 +257,8 @@ body {
 .pdf-page-placeholder { width: min(100%, 720px); height: 100%; min-height: 620px; display: grid; place-items: center; border: 1px solid #dce3e5; background: #eef2f3; color: #9aa7ad; font-size: 11px; }
 .pdf-markup-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .pdf-markup { --markup-color: #f6d96b; position: absolute; border-radius: 2px; }
-.pdf-markup-highlight { background: color-mix(in srgb, var(--markup-color) 48%, transparent); mix-blend-mode: multiply; }
+.pdf-highlight-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.pdf-highlight-shape { fill-opacity: .48; mix-blend-mode: multiply; }
 .pdf-markup-underline::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; border-radius: 2px; background: var(--markup-color); }
 .pdf-markup-strikeout::after { content: ""; position: absolute; top: 52%; right: 0; left: 0; height: 2px; border-radius: 2px; background: var(--markup-color); }
 .pdf-markup-squiggly::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 4px; background-image: linear-gradient(135deg, transparent 42%, var(--markup-color) 43%, var(--markup-color) 57%, transparent 58%), linear-gradient(45deg, transparent 42%, var(--markup-color) 43%, var(--markup-color) 57%, transparent 58%); background-position: 0 0, 3px 0; background-size: 6px 4px; }
