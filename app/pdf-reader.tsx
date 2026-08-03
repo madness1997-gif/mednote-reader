@@ -78,6 +78,46 @@ export type PdfCropResult = {
 
 type PageViewport = ReturnType<PDFPageProxy["getViewport"]>;
 
+const PDF_DISPLAY_MAX_PIXELS = 14_000_000;
+const PDF_DISPLAY_MAX_DIMENSION = 12_288;
+const PDF_CROP_MAX_PIXELS = 16_000_000;
+const PDF_CROP_MAX_DIMENSION = 8_192;
+
+function boundedRenderRatio(
+  cssWidth: number,
+  cssHeight: number,
+  preferredRatio: number,
+  maxPixels = PDF_DISPLAY_MAX_PIXELS,
+  maxDimension = PDF_DISPLAY_MAX_DIMENSION,
+) {
+  const width = Math.max(1, cssWidth);
+  const height = Math.max(1, cssHeight);
+  const pixelBound = Math.sqrt(maxPixels / (width * height));
+  const dimensionBound = Math.min(maxDimension / width, maxDimension / height);
+  return Math.max(.5, Math.min(preferredRatio, pixelBound, dimensionBound));
+}
+
+function displayRenderRatio(cssWidth: number, cssHeight: number) {
+  const screenRatio = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  // A modest supersample on standard-density displays noticeably improves small
+  // glyphs. HiDPI screens use their real density, up to 3x, while the pixel cap
+  // prevents a zoomed A4 page from allocating an unbounded RGBA bitmap.
+  return boundedRenderRatio(cssWidth, cssHeight, Math.min(3, Math.max(1.5, screenRatio)));
+}
+
+function bitmapImageData(bitmap: { data: Uint8Array; width: number; height: number }) {
+  const pixels = new Uint8ClampedArray(
+    bitmap.data.buffer as ArrayBuffer,
+    bitmap.data.byteOffset,
+    bitmap.data.byteLength,
+  );
+  return new ImageData(pixels, bitmap.width, bitmap.height);
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", .95));
+}
+
 function normalizeRect(rect: PdfRect): PdfRect {
   return {
     x1: Math.min(rect.x1, rect.x2),
@@ -120,6 +160,42 @@ function viewportRect(viewport: PageViewport, rect: PdfRect) {
     width: Math.abs(converted[2] - converted[0]),
     height: Math.abs(converted[3] - converted[1]),
   };
+}
+
+async function renderPdfCrop(
+  document: PDFDocumentProxy,
+  page: number,
+  viewport: PageViewport,
+  rotation: number,
+  box: { left: number; top: number; width: number; height: number },
+) {
+  const pdfPage = await document.getPage(page);
+  const screenRatio = window.devicePixelRatio || 1;
+  // Keep crops useful in notes even when the source page is fitted very small.
+  // 2.5 output pixels per PDF point is roughly 180 dpi; the selected-region
+  // render avoids allocating a full high-resolution page for a small table.
+  const preferredRatio = Math.min(6, Math.max(2.5, screenRatio, 2.5 / Math.max(.1, viewport.scale)));
+  const ratio = boundedRenderRatio(
+    box.width,
+    box.height,
+    preferredRatio,
+    PDF_CROP_MAX_PIXELS,
+    PDF_CROP_MAX_DIMENSION,
+  );
+  const output = window.document.createElement("canvas");
+  output.width = Math.max(1, Math.round(box.width * ratio));
+  output.height = Math.max(1, Math.round(box.height * ratio));
+  const context = output.getContext("2d", { alpha: false });
+  if (!context) throw new Error("Không thể tạo canvas crop PDF");
+  const highResolutionViewport = pdfPage.getViewport({ scale: viewport.scale * ratio, rotation });
+  const renderTask = pdfPage.render({
+    canvas: output,
+    canvasContext: context,
+    viewport: highResolutionViewport,
+    transform: [1, 0, 0, 1, -box.left * ratio, -box.top * ratio],
+  });
+  await renderTask.promise;
+  return canvasToBlob(output);
 }
 
 function annotationRects(annotation: Exclude<PdfAnnotation, PdfInkAnnotation>) {
@@ -400,8 +476,9 @@ export function PdfPageView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<PageViewport | null>(null);
-  const [hostSize, setHostSize] = useState({ width: 700, height: 850 });
+  const [hostSize, setHostSize] = useState({ width: 700, height: 850, pixelRatio: 1 });
   const [loading, setLoading] = useState(true);
+  const hasRenderedRef = useRef(false);
   const selectionTimerRef = useRef<number | null>(null);
   const cropStartRef = useRef<{ x: number; y: number } | null>(null);
   const objectStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -421,100 +498,161 @@ export function PdfPageView({
       const verticalPadding = stageStyle
         ? Number.parseFloat(stageStyle.paddingTop) + Number.parseFloat(stageStyle.paddingBottom)
         : 0;
-      setHostSize({
+      const nextSize = {
         width: Math.max(280, (stage?.clientWidth ?? host.clientWidth) - horizontalPadding - 2),
         // Leave room for the page-number chip. This makes “Vừa toàn trang” a
         // true whole-page view instead of hiding the bottom edge below scroll.
         height: Math.max(320, (stage?.clientHeight ?? host.clientHeight) - verticalPadding - 28),
-      });
+        pixelRatio: window.devicePixelRatio || 1,
+      };
+      setHostSize((current) => (
+        current.width === nextSize.width
+        && current.height === nextSize.height
+        && current.pixelRatio === nextSize.pixelRatio
+          ? current
+          : nextSize
+      ));
     };
     update();
     const observer = new ResizeObserver(update);
     const stage = host.closest(".document-stage");
     if (stage) observer.observe(stage);
     else observer.observe(host);
-    return () => observer.disconnect();
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
   }, []);
 
   useEffect(() => {
     let disposed = false;
     let renderTask: PDFRenderTask | null = null;
-    let textLayer: { cancel: () => void } | null = null;
     setLoading(true);
-    void document.getPage(page).then(async (pdfPage) => {
-      if (disposed) return;
-      const base = pdfPage.getViewport({ scale: 1, rotation });
-      const widthScale = hostSize.width / base.width;
-      const pageScale = Math.min(widthScale, hostSize.height / base.height);
-      const scale = Math.max(.2, (fitMode === "page" && !continuous ? pageScale : widthScale) * zoom);
-      const nextViewport = pdfPage.getViewport({ scale, rotation });
-      const canvas = canvasRef.current;
-      const textContainer = textLayerRef.current;
-      if (!canvas || !textContainer || disposed) return;
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(nextViewport.width * ratio);
-      canvas.height = Math.floor(nextViewport.height * ratio);
-      canvas.style.width = `${nextViewport.width}px`;
-      canvas.style.height = `${nextViewport.height}px`;
-      const context = canvas.getContext("2d");
-      if (!context) return;
+    // Repeated zoom clicks keep the previous bitmap visible. Once input settles,
+    // only the final zoom level is rendered at full quality.
+    const timer = window.setTimeout(() => {
+      void document.getPage(page).then(async (pdfPage) => {
+        if (disposed) return;
+        const base = pdfPage.getViewport({ scale: 1, rotation });
+        const widthScale = hostSize.width / base.width;
+        const pageScale = Math.min(widthScale, hostSize.height / base.height);
+        const scale = Math.max(.2, (fitMode === "page" && !continuous ? pageScale : widthScale) * zoom);
+        const nextViewport = pdfPage.getViewport({ scale, rotation });
+        const canvas = canvasRef.current;
+        if (!canvas || disposed) return;
+        const ratio = displayRenderRatio(nextViewport.width, nextViewport.height);
+        const normalizedRotation = ((rotation % 360) + 360) % 360;
 
-      let renderedWithPdfium = false;
-      if (pdfiumDocument) {
-        try {
-          const unrotatedViewport = pdfPage.getViewport({ scale, rotation: 0 });
-          const pdfiumPage = pdfiumDocument.getPage(page - 1);
-          const bitmap = await pdfiumPage.render({
-            width: Math.max(1, Math.round(unrotatedViewport.width * ratio)),
-            height: Math.max(1, Math.round(unrotatedViewport.height * ratio)),
-          });
-          if (disposed) return;
-          const source = window.document.createElement("canvas");
-          source.width = bitmap.width;
-          source.height = bitmap.height;
-          const sourceContext = source.getContext("2d");
-          if (!sourceContext) throw new Error("Không thể tạo canvas PDFium");
-          sourceContext.putImageData(new ImageData(new Uint8ClampedArray(bitmap.data), bitmap.width, bitmap.height), 0, 0);
+        let renderedWithPdfium = false;
+        if (pdfiumDocument) {
+          try {
+            const unrotatedViewport = pdfPage.getViewport({ scale, rotation: 0 });
+            const pdfiumPage = await pdfiumDocument.getPage(page - 1);
+            const bitmap = await pdfiumPage.render({
+              width: Math.max(1, Math.round(unrotatedViewport.width * ratio)),
+              height: Math.max(1, Math.round(unrotatedViewport.height * ratio)),
+            });
+            if (disposed) return;
 
-          context.save();
-          context.setTransform(1, 0, 0, 1, 0, 0);
-          context.clearRect(0, 0, canvas.width, canvas.height);
-          const normalizedRotation = ((rotation % 360) + 360) % 360;
-          if (normalizedRotation === 90) {
-            context.translate(canvas.width, 0);
-            context.rotate(Math.PI / 2);
-          } else if (normalizedRotation === 180) {
-            context.translate(canvas.width, canvas.height);
-            context.rotate(Math.PI);
-          } else if (normalizedRotation === 270) {
-            context.translate(0, canvas.height);
-            context.rotate(-Math.PI / 2);
+            const swapsAxes = normalizedRotation === 90 || normalizedRotation === 270;
+            canvas.width = swapsAxes ? bitmap.height : bitmap.width;
+            canvas.height = swapsAxes ? bitmap.width : bitmap.height;
+            const context = canvas.getContext("2d", { alpha: false });
+            if (!context) throw new Error("Không thể tạo canvas PDFium");
+            context.setTransform(1, 0, 0, 1, 0, 0);
+            context.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (normalizedRotation === 0) {
+              // No staging canvas and no drawImage interpolation on the common
+              // path: PDFium pixels are committed directly to the display.
+              context.putImageData(bitmapImageData(bitmap), 0, 0);
+            } else {
+              const source = window.document.createElement("canvas");
+              source.width = bitmap.width;
+              source.height = bitmap.height;
+              const sourceContext = source.getContext("2d", { alpha: false });
+              if (!sourceContext) throw new Error("Không thể tạo canvas xoay PDFium");
+              sourceContext.putImageData(bitmapImageData(bitmap), 0, 0);
+              context.save();
+              context.imageSmoothingEnabled = false;
+              if (normalizedRotation === 90) {
+                context.translate(canvas.width, 0);
+                context.rotate(Math.PI / 2);
+              } else if (normalizedRotation === 180) {
+                context.translate(canvas.width, canvas.height);
+                context.rotate(Math.PI);
+              } else if (normalizedRotation === 270) {
+                context.translate(0, canvas.height);
+                context.rotate(-Math.PI / 2);
+              }
+              context.drawImage(source, 0, 0);
+              context.restore();
+            }
+            renderedWithPdfium = true;
+          } catch {
+            // PDF.js remains a safe fallback if PDFium cannot open a specific page.
           }
-          context.drawImage(source, 0, 0);
-          context.restore();
-          renderedWithPdfium = true;
-        } catch {
-          // PDF.js remains a safe fallback if PDFium cannot open a specific page.
         }
-      }
-      if (!renderedWithPdfium) {
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        renderTask = pdfPage.render({ canvas, canvasContext: context, viewport: nextViewport });
-        await renderTask.promise;
-      }
-      if (disposed) return;
 
-      textContainer.replaceChildren();
-      textContainer.style.setProperty("--scale-factor", `${nextViewport.scale}`);
-      textContainer.style.setProperty("--total-scale-factor", `${nextViewport.scale}`);
-      textContainer.style.setProperty("--scale-round-x", "1px");
-      textContainer.style.setProperty("--scale-round-y", "1px");
+        if (!renderedWithPdfium) {
+          // Render fallback content off-screen so the previous sharp frame does
+          // not disappear while the replacement is still being painted.
+          const staging = window.document.createElement("canvas");
+          staging.width = Math.max(1, Math.round(nextViewport.width * ratio));
+          staging.height = Math.max(1, Math.round(nextViewport.height * ratio));
+          const stagingContext = staging.getContext("2d", { alpha: false });
+          if (!stagingContext) throw new Error("Không thể tạo canvas PDF.js");
+          renderTask = pdfPage.render({
+            canvas: staging,
+            canvasContext: stagingContext,
+            viewport: nextViewport,
+            transform: [staging.width / nextViewport.width, 0, 0, staging.height / nextViewport.height, 0, 0],
+          });
+          await renderTask.promise;
+          if (disposed) return;
+          canvas.width = staging.width;
+          canvas.height = staging.height;
+          const context = canvas.getContext("2d", { alpha: false });
+          if (!context) throw new Error("Không thể tạo canvas hiển thị PDF.js");
+          context.drawImage(staging, 0, 0);
+        }
+        if (disposed) return;
+
+        canvas.style.width = `${nextViewport.width}px`;
+        canvas.style.height = `${nextViewport.height}px`;
+        setViewport(nextViewport);
+        hasRenderedRef.current = true;
+        setLoading(false);
+      }).catch((error) => {
+        if (!disposed && (error as Error).name !== "RenderingCancelledException") setLoading(false);
+      });
+    }, hasRenderedRef.current ? 130 : 0);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      renderTask?.cancel();
+    };
+  }, [continuous, document, fitMode, hostSize.height, hostSize.pixelRatio, hostSize.width, page, pdfiumDocument, rotation, zoom]);
+
+  useEffect(() => {
+    const textContainer = textLayerRef.current;
+    if (!viewport || !textContainer) return;
+    let disposed = false;
+    let textLayer: { cancel: () => void } | null = null;
+    textContainer.replaceChildren();
+    textContainer.style.setProperty("--scale-factor", `${viewport.scale}`);
+    textContainer.style.setProperty("--total-scale-factor", `${viewport.scale}`);
+    textContainer.style.setProperty("--scale-round-x", "1px");
+    textContainer.style.setProperty("--scale-round-y", "1px");
+    void document.getPage(page).then(async (pdfPage) => {
       const [{ TextLayer }, textContent] = await Promise.all([
         import("pdfjs-dist"),
         pdfPage.getTextContent(),
       ]);
       if (disposed) return;
-      const layer = new TextLayer({ textContentSource: textContent, container: textContainer, viewport: nextViewport });
+      const layer = new TextLayer({ textContentSource: textContent, container: textContainer, viewport });
       textLayer = layer;
       await layer.render();
       if (disposed) return;
@@ -524,17 +662,12 @@ export function PdfPageView({
           if (layer.textContentItemsStr[index]?.toLocaleLowerCase().includes(query)) element.classList.add("pdf-search-hit");
         });
       }
-      setViewport(nextViewport);
-      setLoading(false);
-    }).catch((error) => {
-      if (!disposed && (error as Error).name !== "RenderingCancelledException") setLoading(false);
-    });
+    }).catch(() => { /* a bitmap page remains readable if its text layer fails */ });
     return () => {
       disposed = true;
-      renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [continuous, document, fitMode, hostSize.height, hostSize.width, page, pdfiumDocument, rotation, searchQuery, zoom]);
+  }, [document, page, searchQuery, viewport]);
 
   const pageAnnotations = useMemo(() => annotations.filter((annotation) => annotation.page === page), [annotations, page]);
   const inkAnnotations = useMemo(() => pageAnnotations.filter((annotation): annotation is PdfInkAnnotation => annotation.kind === "ink"), [pageAnnotations]);
@@ -710,34 +843,45 @@ export function PdfPageView({
       if (tool === "crop") setCropBox(null);
       return;
     }
+    const box = cropBox;
+    const activeViewport = viewport;
     const sourceCanvas = canvasRef.current;
-    if (sourceCanvas) {
-      const cssWidth = viewport.width;
-      const cssHeight = viewport.height;
-      const scaleX = sourceCanvas.width / cssWidth;
-      const scaleY = sourceCanvas.height / cssHeight;
-      const output = window.document.createElement("canvas");
-      output.width = Math.max(1, Math.floor(cropBox.width * scaleX));
-      output.height = Math.max(1, Math.floor(cropBox.height * scaleY));
-      output.getContext("2d")?.drawImage(
-        sourceCanvas,
-        cropBox.left * scaleX,
-        cropBox.top * scaleY,
-        cropBox.width * scaleX,
-        cropBox.height * scaleY,
-        0,
-        0,
-        output.width,
-        output.height,
-      );
-      const [x1, y1] = viewport.convertToPdfPoint(cropBox.left, cropBox.top);
-      const [x2, y2] = viewport.convertToPdfPoint(cropBox.left + cropBox.width, cropBox.top + cropBox.height);
-      output.toBlob((blob) => {
-        if (blob) void onCrop({ page, blob, rect: normalizeRect({ x1, y1, x2, y2 }) });
-      }, "image/png", .92);
-    }
+    const [x1, y1] = activeViewport.convertToPdfPoint(box.left, box.top);
+    const [x2, y2] = activeViewport.convertToPdfPoint(box.left + box.width, box.top + box.height);
+    const rect = normalizeRect({ x1, y1, x2, y2 });
     cropStartRef.current = null;
     setCropBox(null);
+
+    void (async () => {
+      let blob: Blob | null = null;
+      try {
+        // Render the selected PDF region again from vector/source content. Crop
+        // quality is therefore independent of the current fit-to-page bitmap.
+        blob = await renderPdfCrop(document, page, activeViewport, rotation, box);
+      } catch {
+        // Keep crop available for unusual PDFs that PDF.js cannot re-render.
+        if (sourceCanvas) {
+          const scaleX = sourceCanvas.width / activeViewport.width;
+          const scaleY = sourceCanvas.height / activeViewport.height;
+          const output = window.document.createElement("canvas");
+          output.width = Math.max(1, Math.round(box.width * scaleX));
+          output.height = Math.max(1, Math.round(box.height * scaleY));
+          output.getContext("2d")?.drawImage(
+            sourceCanvas,
+            box.left * scaleX,
+            box.top * scaleY,
+            box.width * scaleX,
+            box.height * scaleY,
+            0,
+            0,
+            output.width,
+            output.height,
+          );
+          blob = await canvasToBlob(output);
+        }
+      }
+      if (blob) await onCrop({ page, blob, rect });
+    })();
   };
 
   return (
@@ -782,18 +926,33 @@ type LazyPdfPageViewProps = PdfPageViewProps & { estimatedHeight?: number };
 export function LazyPdfPageView(props: LazyPdfPageViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [measuredHeight, setMeasuredHeight] = useState(props.estimatedHeight ?? 780);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const root = host.closest(".document-stage");
-    const observer = new IntersectionObserver((entries) => setVisible(entries[0].isIntersecting), { root, rootMargin: "1200px 0px" });
+    // About one neighbouring page is pre-rendered in either direction. Pages
+    // farther away unmount their canvases, allowing Chromium to release bitmap
+    // memory instead of caching an entire book at HiDPI.
+    const observer = new IntersectionObserver((entries) => setVisible(entries[0].isIntersecting), { root, rootMargin: "700px 0px" });
     observer.observe(host);
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const host = hostRef.current;
+    const pageElement = host?.querySelector(".pdf-page-host");
+    if (!visible || !pageElement) return;
+    const update = () => setMeasuredHeight(Math.max(260, pageElement.getBoundingClientRect().height));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(pageElement);
+    return () => observer.disconnect();
+  }, [visible]);
+
   return (
-    <div ref={hostRef} className="lazy-pdf-page" data-pdf-page={props.page} style={{ minHeight: visible ? undefined : props.estimatedHeight ?? 780 }}>
+    <div ref={hostRef} className="lazy-pdf-page" data-pdf-page={props.page} style={{ minHeight: visible ? undefined : measuredHeight }}>
       {visible ? <PdfPageView {...props} continuous /> : <div className="pdf-page-placeholder"><span>Trang {props.page}</span></div>}
     </div>
   );
