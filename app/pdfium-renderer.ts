@@ -12,6 +12,16 @@ export type PDFiumDocument = {
 
 let desktopLibraryPromise: Promise<import("@hyzyla/pdfium").PDFiumLibrary> | null = null;
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 function pdfiumWasmLocation() {
   if (typeof window !== "undefined" && window.mednoteDesktop?.isDesktop) {
     const resolvedUrl = String(pdfiumWasmUrl);
@@ -38,9 +48,22 @@ export async function loadPdfiumDocument(data: Uint8Array): Promise<PDFiumDocume
   }
 
   const { PDFiumWorkerClient } = await import("@hyzyla/pdfium/worker");
-  const client = await PDFiumWorkerClient.spawn({ wasmUrl: pdfiumWasmLocation() });
+  const spawnPromise = PDFiumWorkerClient.spawn({ wasmUrl: pdfiumWasmLocation() });
+  let client: Awaited<typeof spawnPromise>;
   try {
-    const document = await client.loadDocument(data);
+    client = await withTimeout(spawnPromise, 6_000, "PDFium worker did not start in time");
+  } catch (error) {
+    // If a delayed worker eventually starts after the timeout, terminate it
+    // instead of leaving an unused worker alive in the page.
+    void spawnPromise.then((lateClient) => lateClient.destroy()).catch(() => undefined);
+    throw error;
+  }
+  try {
+    const document = await withTimeout(
+      client.loadDocument(data),
+      10_000,
+      "PDFium worker did not open the document in time",
+    );
     return {
       getPage: (pageIndex) => document.getPage(pageIndex),
       destroy: async () => {
@@ -49,7 +72,9 @@ export async function loadPdfiumDocument(data: Uint8Array): Promise<PDFiumDocume
       },
     };
   } catch (error) {
-    await client.destroy();
+    // Do not let a stalled worker make this rejection stall as well. destroy()
+    // is best-effort here; the caller immediately continues with PDF.js.
+    void client.destroy().catch(() => undefined);
     throw error;
   }
 }
