@@ -466,6 +466,7 @@ function equationMarkup(template: EquationTemplate, parts: string[]) {
 function pdfAnnotationLabel(annotation: PdfAnnotation) {
   const labels: Record<PdfAnnotation["kind"], string> = {
     highlight: "Tô sáng",
+    "area-highlight": "Tô vùng",
     underline: "Gạch chân",
     strikeout: "Gạch ngang",
     squiggly: "Lượn sóng",
@@ -595,9 +596,11 @@ const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
 ];
 
 const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof MousePointer2 }[] = [
+  { id: "smart", label: "Thông minh — kéo trên chữ để chọn, kéo khoảng trắng để di chuyển; giữ Space để kéo trang", shortLabel: "Thông minh", icon: MousePointer2 },
   { id: "pan", label: "Bàn tay — kéo trang", shortLabel: "Kéo", icon: Hand },
   { id: "select", label: "Chọn và sao chép chữ", shortLabel: "Chọn chữ", icon: TextSelect },
   { id: "highlight", label: "Tô sáng chữ", shortLabel: "Tô sáng", icon: Highlighter },
+  { id: "area-highlight", label: "Tô một vùng bất kỳ — dùng cho công thức, hình, bảng hoặc PDF scan", shortLabel: "Tô vùng", icon: PaintBucket },
   { id: "underline", label: "Gạch chân chữ", shortLabel: "Gạch chân", icon: Underline },
   { id: "strikeout", label: "Gạch ngang chữ", shortLabel: "Gạch ngang", icon: Strikethrough },
   { id: "squiggly", label: "Gạch lượn sóng dưới chữ", shortLabel: "Lượn sóng", icon: Blend },
@@ -2077,12 +2080,13 @@ export default function Home() {
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
+  const [pdfHighlightColor, setPdfHighlightColor] = useState("#f6d96b");
   const [inkWidth, setInkWidth] = useState(2);
   const [highlighterWidth, setHighlighterWidth] = useState(14);
   const [penStyle, setPenStyle] = useState<PenStyle>("ballpoint");
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
-  const [pdfTool, setPdfTool] = useState<PdfTool>("pan");
+  const [pdfTool, setPdfTool] = useState<PdfTool>("smart");
   const [pdfTextDraft, setPdfTextDraft] = useState("Ghi chú");
   const [pdfStampDraft, setPdfStampDraft] = useState("ĐÃ XEM");
   const [pdfSignatureDraft, setPdfSignatureDraft] = useState("Ký tên");
@@ -2474,6 +2478,9 @@ export default function Home() {
   const bookmarks = activeReader.bookmarks;
   const pdfAnnotations = activeReader.annotations;
   const pdfAnnotationText = pdfTool === "stamp" ? pdfStampDraft : pdfTool === "signature" ? pdfSignatureDraft : pdfTextDraft;
+  const isPdfHighlightTool = pdfTool === "highlight" || pdfTool === "area-highlight";
+  const pdfPanelColor = isPdfHighlightTool ? pdfHighlightColor : inkColor;
+  const updatePdfPanelColor = (color: string) => isPdfHighlightTool ? setPdfHighlightColor(color) : setInkColor(color);
   const documentName = activeWorkspace.name;
   const totalPages = currentPdfDocument?.numPages ?? (activeDocument ? 1 : 482);
 
@@ -2803,7 +2810,7 @@ export default function Home() {
   const choosePdfTool = (tool: PdfTool) => {
     setPdfTool(tool);
     if (tool !== "crop") setFirstAidCropTarget(null);
-    if (["pen", "highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
+    if (["pen", "highlight", "area-highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
       setPdfPanel((panel) => panel === "ink" && pdfTool === tool ? null : "ink");
     } else {
       setPdfPanel(null);
@@ -2824,7 +2831,7 @@ export default function Home() {
 
   const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
     if (!selection || !activeDocument) return;
-    const color = kind === "highlight" ? "#f6d96b" : kind === "underline" || kind === "squiggly" ? inkColor : "#c94b50";
+    const color = kind === "highlight" || kind === "area-highlight" ? pdfHighlightColor : kind === "underline" || kind === "squiggly" ? inkColor : "#c94b50";
     const annotation: PdfMarkupAnnotation = {
       id: uid(`pdf-${kind}`),
       kind,
@@ -2850,7 +2857,11 @@ export default function Home() {
     }
   };
 
-  const handlePdfSelection = (selection: PdfSelection) => {
+  const handlePdfSelection = (selection: PdfSelection | null) => {
+    if (!selection) {
+      setPdfSelection(null);
+      return;
+    }
     if (pdfTool === "highlight" || pdfTool === "underline" || pdfTool === "strikeout" || pdfTool === "squiggly") {
       addPdfMarkup(pdfTool, selection);
       return;
@@ -2987,7 +2998,7 @@ export default function Home() {
     if (!activeDocument) return;
     if (firstAidCropTarget && firstAidCropTarget.noteId !== activeNote.id) {
       setFirstAidCropTarget(null);
-      setPdfTool("pan");
+      setPdfTool("smart");
       setToast("Đã hủy Crop vì trang First Aid đích đã thay đổi");
       return;
     }
@@ -3031,7 +3042,7 @@ export default function Home() {
       setSelectedExcerptId(excerpt.id);
       setActiveTool("pointer");
       setNotePanel(null);
-      setPdfTool("pan");
+      setPdfTool("smart");
       if (cropTarget) {
         setFirstAidCropResult({ token: uid("crop-result"), blockId: cropTarget.blockId, excerptId, imageName: `${activeDocument.name} · trang ${result.page}`, aspectRatio });
         setFirstAidCropTarget(null);
@@ -3525,7 +3536,7 @@ export default function Home() {
             const y = Math.min(rect.y1, rect.y2);
             const width = Math.abs(rect.x2 - rect.x1);
             const height = Math.abs(rect.y2 - rect.y1);
-            if (annotation.kind === "highlight") {
+            if (annotation.kind === "highlight" || annotation.kind === "area-highlight") {
               target.drawRectangle({ x, y, width, height, color, opacity: .34 });
             } else if (annotation.kind === "underline") {
               target.drawLine({ start: { x, y: y + .6 }, end: { x: x + width, y: y + .6 }, color, thickness: 1.2 });
@@ -4276,7 +4287,7 @@ export default function Home() {
             </div>
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster" aria-label="Công cụ thao tác PDF">
-                {PDF_TOOLS.map(({ id, label, shortLabel, icon: Icon }) => <button key={id} className={`pdf-toolbar-button pdf-mode-button ${pdfTool === id ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => choosePdfTool(id)} title={label} aria-label={label}><Icon size={18} />{pdfTool === id && <span>{shortLabel}</span>}{["pen", "highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(id) && <ChevronDown className="tool-chevron" size={11} />}</button>)}
+                {PDF_TOOLS.map(({ id, label, shortLabel, icon: Icon }) => <button key={id} className={`pdf-toolbar-button pdf-mode-button ${pdfTool === id ? "active" : ""}`} disabled={!currentPdfDocument} onClick={() => choosePdfTool(id)} title={label} aria-label={label}><Icon size={18} />{pdfTool === id && <span>{shortLabel}</span>}{["pen", "highlight", "area-highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(id) && <ChevronDown className="tool-chevron" size={11} />}</button>)}
               </div>
               <span className="toolbar-spacer" />
               <button className="pdf-toolbar-button" disabled={!(pdfHistory[pdfHistoryKey]?.undo.length)} onClick={undoPdf} title="Hoàn tác chú thích"><Undo2 size={17} /></button>
@@ -4299,23 +4310,23 @@ export default function Home() {
 
           {pdfPanel === "ink" && (
             <div className="floating-tool-panel pdf-ink-panel" role="dialog" aria-label="Cài đặt công cụ PDF">
-              <div className="tool-panel-heading"><div><strong>{pdfTool === "pen" ? "Bút viết PDF" : pdfTool === "note" ? "Ghi chú dán" : pdfTool === "text" ? "Chèn chữ" : pdfTool === "stamp" ? "Đóng dấu" : pdfTool === "signature" ? "Chữ ký" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Hình vẽ" : "Đánh dấu văn bản"}</strong><span>{["note", "text", "stamp", "signature"].includes(pdfTool) ? "Nhập nội dung rồi bấm vị trí muốn đặt" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Kéo trực tiếp trên trang để vẽ" : "Chọn màu không làm đổi công cụ"}</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
+              <div className="tool-panel-heading"><div><strong>{pdfTool === "pen" ? "Bút viết PDF" : pdfTool === "area-highlight" ? "Tô vùng" : pdfTool === "note" ? "Ghi chú dán" : pdfTool === "text" ? "Chèn chữ" : pdfTool === "stamp" ? "Đóng dấu" : pdfTool === "signature" ? "Chữ ký" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Hình vẽ" : "Đánh dấu văn bản"}</strong><span>{pdfTool === "area-highlight" ? "Kéo khung lên công thức, hình, bảng hoặc trang scan" : ["note", "text", "stamp", "signature"].includes(pdfTool) ? "Nhập nội dung rồi bấm vị trí muốn đặt" : ["rectangle", "ellipse", "arrow"].includes(pdfTool) ? "Kéo trực tiếp trên trang để vẽ" : "Chọn màu không làm đổi công cụ"}</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
               {(pdfTool === "note" || pdfTool === "text") && <label className="pdf-annotation-input"><span>Nội dung</span><textarea value={pdfTextDraft} onChange={(event) => setPdfTextDraft(event.target.value)} rows={3} placeholder="Nhập ghi chú…" /></label>}
               {pdfTool === "stamp" && <>
                 <div className="panel-setting"><label>Mẫu dấu</label><div className="stamp-presets">{["ĐÃ XEM", "ĐÃ DUYỆT", "BẢN NHÁP", "QUAN TRỌNG"].map((stamp) => <button key={stamp} className={pdfStampDraft === stamp ? "selected" : ""} onClick={() => setPdfStampDraft(stamp)}>{stamp}</button>)}</div></div>
                 <label className="pdf-annotation-input"><span>Tùy chỉnh</span><input value={pdfStampDraft} onChange={(event) => setPdfStampDraft(event.target.value)} /></label>
               </>}
               {pdfTool === "signature" && <label className="pdf-annotation-input"><span>Chữ ký dạng chữ</span><input value={pdfSignatureDraft} onChange={(event) => setPdfSignatureDraft(event.target.value)} placeholder="Nhập tên ký…" /></label>}
-              <div className="panel-setting"><label>Màu</label><div className="color-options">{INK_COLORS.map((color) => <button key={color} className={`color-swatch ${inkColor === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onClick={() => setInkColor(color)} aria-label={`Chọn màu ${color}`} />)}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={inkColor} onChange={(event) => setInkColor(event.target.value)} /><span>+</span></label></div></div>
+              <div className="panel-setting"><label>Màu</label><div className="color-options">{INK_COLORS.map((color) => <button key={color} className={`color-swatch ${pdfPanelColor === color ? "selected" : ""}`} style={{ "--swatch": color } as React.CSSProperties} onClick={() => updatePdfPanelColor(color)} aria-label={`Chọn màu ${color}`} />)}<label className="custom-color" title="Màu tùy chỉnh"><input type="color" value={pdfPanelColor} onChange={(event) => updatePdfPanelColor(event.target.value)} /><span>+</span></label></div></div>
               {(pdfTool === "pen" || ["rectangle", "ellipse", "arrow"].includes(pdfTool)) && <div className="panel-setting"><label>Độ dày</label><div className="width-options">{[1, 2, 3, 5].map((width) => <button key={width} className={inkWidth === width ? "selected" : ""} onClick={() => setInkWidth(width)}><i style={{ height: width }} />{width}</button>)}</div></div>}
               {["note", "text", "stamp", "signature"].includes(pdfTool) && <p className="pdf-placement-help">Bấm nhiều vị trí để đặt lại cùng nội dung. Dùng công cụ Tẩy hoặc danh sách Chú thích để xóa.</p>}
             </div>
           )}
 
           <div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
-            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
               <div className="continuous-pages">
-                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
+                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
               </div>
             ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>

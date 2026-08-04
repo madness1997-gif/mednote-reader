@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFiumDocument } from "./pdfium-renderer";
 
 export type PdfTool =
+  | "smart"
   | "pan"
   | "select"
   | "highlight"
+  | "area-highlight"
   | "underline"
   | "strikeout"
   | "squiggly"
@@ -29,7 +31,7 @@ export type PdfRect = { x1: number; y1: number; x2: number; y2: number };
 
 export type PdfMarkupAnnotation = {
   id: string;
-  kind: "highlight" | "underline" | "strikeout" | "squiggly";
+  kind: "highlight" | "area-highlight" | "underline" | "strikeout" | "squiggly";
   page: number;
   color: string;
   rects: PdfRect[];
@@ -485,12 +487,13 @@ type PdfPageViewProps = {
   continuous?: boolean;
   tool: PdfTool;
   inkColor: string;
+  highlightColor: string;
   inkWidth: number;
   annotationText: string;
   annotations: PdfAnnotation[];
   searchQuery?: string;
   sourceFocus?: PdfRect | null;
-  onSelection: (selection: PdfSelection) => void;
+  onSelection: (selection: PdfSelection | null) => void;
   onAnnotationCommit: (next: PdfAnnotation[], previous: PdfAnnotation[]) => void;
   onCrop: (result: PdfCropResult) => void | Promise<void>;
 };
@@ -505,6 +508,7 @@ export function PdfPageView({
   continuous = false,
   tool,
   inkColor,
+  highlightColor,
   inkWidth,
   annotationText,
   annotations,
@@ -524,10 +528,15 @@ export function PdfPageView({
   const hasRenderedRef = useRef(false);
   const selectionTimerRef = useRef<number | null>(null);
   const cropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const areaHighlightStartRef = useRef<{ x: number; y: number } | null>(null);
   const objectStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const interactionModeRef = useRef<PdfTool | null>(null);
+  const pointerInsideRef = useRef(false);
   const [cropBox, setCropBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [areaHighlightBox, setAreaHighlightBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [objectBox, setObjectBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [spacePanning, setSpacePanning] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -723,7 +732,7 @@ export function PdfPageView({
     if (!viewport) return [];
     const groups = new Map<string, VisualRect[]>();
     markupAnnotations.forEach((annotation) => {
-      if (annotation.kind !== "highlight") return;
+      if (annotation.kind !== "highlight" && annotation.kind !== "area-highlight") return;
       const boxes = annotation.rects.map((rect) => {
         const box = viewportRect(viewport, rect);
         return { left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height };
@@ -734,7 +743,7 @@ export function PdfPageView({
   }, [markupAnnotations, viewport]);
 
   const captureSelection = useCallback((delay = 18) => {
-    if (!viewport || !surfaceRef.current || !textLayerRef.current || !["select", "highlight", "underline", "strikeout", "squiggly"].includes(tool)) return;
+    if (!viewport || !surfaceRef.current || !textLayerRef.current || !["smart", "select", "highlight", "underline", "strikeout", "squiggly"].includes(tool)) return;
     if (selectionTimerRef.current) window.clearTimeout(selectionTimerRef.current);
     selectionTimerRef.current = window.setTimeout(() => {
       const selection = window.getSelection();
@@ -781,7 +790,7 @@ export function PdfPageView({
   }, [onSelection, page, tool, viewport]);
 
   useEffect(() => {
-    if (tool !== "select") return;
+    if (tool !== "smart" && tool !== "select") return;
     const handleSelectionChange = () => {
       const selection = window.getSelection();
       const layer = textLayerRef.current;
@@ -795,6 +804,40 @@ export function PdfPageView({
     };
   }, [captureSelection, tool]);
 
+  useEffect(() => {
+    if (tool !== "smart") {
+      setSpacePanning(false);
+      return;
+    }
+    const editableTarget = (target: EventTarget | null) => (
+      target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
+    );
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat || editableTarget(event.target) || !pointerInsideRef.current) return;
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      setSpacePanning(true);
+    };
+    const stopSpacePan = (event: KeyboardEvent) => {
+      if (event.code === "Space") setSpacePanning(false);
+    };
+    const onWindowBlur = () => setSpacePanning(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", stopSpacePan);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", stopSpacePan);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [tool]);
+
+  useEffect(() => {
+    if (spacePanning || interactionModeRef.current !== "pan") return;
+    interactionModeRef.current = null;
+    panStartRef.current = null;
+  }, [spacePanning]);
+
   const pointerPosition = (event: React.PointerEvent<HTMLDivElement>) => {
     const surface = surfaceRef.current!;
     const rect = surface.getBoundingClientRect();
@@ -804,29 +847,38 @@ export function PdfPageView({
     };
   };
 
-  const onInteractionDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!viewport || !["crop", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) return;
+  const onInteractionDown = (event: React.PointerEvent<HTMLDivElement>, requestedMode: PdfTool = tool) => {
+    if (!viewport || !["crop", "area-highlight", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(requestedMode)) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (tool === "crop") {
+    interactionModeRef.current = requestedMode;
+    if (requestedMode === "crop") {
       const point = pointerPosition(event);
       cropStartRef.current = point;
       setCropBox({ left: point.x, top: point.y, width: 0, height: 0 });
       return;
     }
-    if (["rectangle", "ellipse", "arrow"].includes(tool)) {
+    if (requestedMode === "area-highlight") {
+      window.getSelection()?.removeAllRanges();
+      onSelection(null);
+      const point = pointerPosition(event);
+      areaHighlightStartRef.current = point;
+      setAreaHighlightBox({ left: point.x, top: point.y, width: 0, height: 0 });
+      return;
+    }
+    if (["rectangle", "ellipse", "arrow"].includes(requestedMode)) {
       const point = pointerPosition(event);
       objectStartRef.current = point;
       setObjectBox({ left: point.x, top: point.y, width: 0, height: 0 });
       return;
     }
-    if (["note", "text", "stamp", "signature"].includes(tool)) {
+    if (["note", "text", "stamp", "signature"].includes(requestedMode)) {
       const point = pointerPosition(event);
-      const dimensions = tool === "note"
+      const dimensions = requestedMode === "note"
         ? { width: 30, height: 30 }
-        : tool === "text"
+        : requestedMode === "text"
           ? { width: 210, height: 72 }
-          : tool === "stamp"
+          : requestedMode === "stamp"
             ? { width: 132, height: 44 }
             : { width: 168, height: 52 };
       const left = Math.min(Math.max(0, point.x - dimensions.width / 2), Math.max(0, viewport.width - dimensions.width));
@@ -834,13 +886,13 @@ export function PdfPageView({
       const [x1, y1] = viewport.convertToPdfPoint(left, top);
       const [x2, y2] = viewport.convertToPdfPoint(left + dimensions.width, top + dimensions.height);
       const annotation: PdfObjectAnnotation = {
-        id: `pdf-${tool}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        kind: tool as PdfObjectAnnotation["kind"],
+        id: `pdf-${requestedMode}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        kind: requestedMode as PdfObjectAnnotation["kind"],
         page,
         color: inkColor,
         width: Math.max(1, inkWidth / viewport.scale),
         rect: normalizeRect({ x1, y1, x2, y2 }),
-        text: annotationText.trim() || (tool === "stamp" ? "ĐÃ XEM" : tool === "signature" ? "Ký tên" : "Ghi chú"),
+        text: annotationText.trim() || (requestedMode === "stamp" ? "ĐÃ XEM" : requestedMode === "signature" ? "Ký tên" : "Ghi chú"),
         createdAt: Date.now(),
       };
       onAnnotationCommit([...pageAnnotations, annotation], pageAnnotations);
@@ -848,25 +900,35 @@ export function PdfPageView({
     }
     const stage = surfaceRef.current?.closest(".document-stage") as HTMLElement | null;
     if (!stage) return;
+    window.getSelection()?.removeAllRanges();
+    onSelection(null);
     panStartRef.current = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
   };
 
   const onInteractionMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (tool === "crop" && cropStartRef.current) {
+    const mode = interactionModeRef.current;
+    if (mode === "crop" && cropStartRef.current) {
       event.preventDefault();
       const point = pointerPosition(event);
       const start = cropStartRef.current;
       setCropBox({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
       return;
     }
-    if (["rectangle", "ellipse", "arrow"].includes(tool) && objectStartRef.current) {
+    if (mode === "area-highlight" && areaHighlightStartRef.current) {
+      event.preventDefault();
+      const point = pointerPosition(event);
+      const start = areaHighlightStartRef.current;
+      setAreaHighlightBox({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
+      return;
+    }
+    if (mode && ["rectangle", "ellipse", "arrow"].includes(mode) && objectStartRef.current) {
       event.preventDefault();
       const point = pointerPosition(event);
       const start = objectStartRef.current;
       setObjectBox({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
       return;
     }
-    if (tool === "pan" && panStartRef.current) {
+    if (mode === "pan" && panStartRef.current) {
       event.preventDefault();
       const stage = surfaceRef.current?.closest(".document-stage") as HTMLElement | null;
       if (!stage) return;
@@ -876,8 +938,30 @@ export function PdfPageView({
   };
 
   const finishInteraction = () => {
+    const mode = interactionModeRef.current;
+    interactionModeRef.current = null;
     panStartRef.current = null;
-    if (["rectangle", "ellipse", "arrow"].includes(tool)) {
+    pointerInsideRef.current = Boolean(surfaceRef.current?.matches(":hover"));
+    if (mode === "area-highlight") {
+      const box = areaHighlightBox;
+      areaHighlightStartRef.current = null;
+      setAreaHighlightBox(null);
+      if (!box || !viewport || box.width < 4 || box.height < 4) return;
+      const [x1, y1] = viewport.convertToPdfPoint(box.left, box.top);
+      const [x2, y2] = viewport.convertToPdfPoint(box.left + box.width, box.top + box.height);
+      const annotation: PdfMarkupAnnotation = {
+        id: `pdf-area-highlight-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        kind: "area-highlight",
+        page,
+        color: highlightColor,
+        rects: [normalizeRect({ x1, y1, x2, y2 })],
+        text: "",
+        createdAt: Date.now(),
+      };
+      onAnnotationCommit([...pageAnnotations, annotation], pageAnnotations);
+      return;
+    }
+    if (mode && ["rectangle", "ellipse", "arrow"].includes(mode)) {
       const box = objectBox;
       objectStartRef.current = null;
       setObjectBox(null);
@@ -885,8 +969,8 @@ export function PdfPageView({
       const [x1, y1] = viewport.convertToPdfPoint(box.left, box.top);
       const [x2, y2] = viewport.convertToPdfPoint(box.left + box.width, box.top + box.height);
       const annotation: PdfObjectAnnotation = {
-        id: `pdf-${tool}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        kind: tool as PdfObjectAnnotation["kind"],
+        id: `pdf-${mode}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        kind: mode as PdfObjectAnnotation["kind"],
         page,
         color: inkColor,
         width: Math.max(1, inkWidth / viewport.scale),
@@ -897,9 +981,9 @@ export function PdfPageView({
       onAnnotationCommit([...pageAnnotations, annotation], pageAnnotations);
       return;
     }
-    if (tool !== "crop" || !cropStartRef.current || !cropBox || !viewport || cropBox.width < 10 || cropBox.height < 10) {
+    if (mode !== "crop" || !cropStartRef.current || !cropBox || !viewport || cropBox.width < 10 || cropBox.height < 10) {
       cropStartRef.current = null;
-      if (tool === "crop") setCropBox(null);
+      if (mode === "crop") setCropBox(null);
       return;
     }
     const box = cropBox;
@@ -951,6 +1035,8 @@ export function PdfPageView({
         className={`pdf-page-surface pdf-tool-${tool}`}
         style={viewport ? { width: viewport.width, height: viewport.height } : undefined}
         onPointerUp={() => captureSelection(16)}
+        onPointerEnter={() => { pointerInsideRef.current = true; }}
+        onPointerLeave={() => { if (!panStartRef.current) pointerInsideRef.current = false; }}
       >
         <canvas ref={canvasRef} className="pdf-page-canvas" />
         {viewport && (
@@ -967,7 +1053,7 @@ export function PdfPageView({
                 ))}
               </svg>
             )}
-            {markupAnnotations.filter((annotation) => annotation.kind !== "highlight").flatMap((annotation) => annotation.rects.map((rect, index) => {
+            {markupAnnotations.filter((annotation) => annotation.kind !== "highlight" && annotation.kind !== "area-highlight").flatMap((annotation) => annotation.rects.map((rect, index) => {
               const box = viewportRect(viewport, rect);
               return <span key={`${annotation.id}-${index}`} className={`pdf-markup pdf-markup-${annotation.kind}`} style={{ left: box.left, top: box.top, width: box.width, height: box.height, "--markup-color": annotation.color } as React.CSSProperties} />;
             }))}
@@ -977,12 +1063,16 @@ export function PdfPageView({
             })()}
           </div>
         )}
-        <div ref={textLayerRef} className={`textLayer pdf-text-layer ${["select", "highlight", "underline", "strikeout", "squiggly"].includes(tool) ? "selectable" : ""}`} />
+        <div ref={textLayerRef} className={`textLayer pdf-text-layer ${["smart", "select", "highlight", "underline", "strikeout", "squiggly"].includes(tool) ? "selectable" : ""} ${tool === "smart" ? "smart-selectable" : ""}`} />
         {viewport && <PdfObjectLayer viewport={viewport} annotations={objectAnnotations} />}
         {viewport && <PdfInkLayer viewport={viewport} tool={tool} color={inkColor} width={inkWidth} annotations={inkAnnotations} allAnnotations={pageAnnotations} onCommit={onAnnotationCommit} />}
-        {["crop", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool) && (
-          <div className={`pdf-interaction-layer ${tool}`} onPointerDown={onInteractionDown} onPointerMove={onInteractionMove} onPointerUp={finishInteraction} onPointerCancel={finishInteraction}>
+        {tool === "smart" && !spacePanning && (
+          <div className="pdf-smart-pan-layer" onPointerDown={(event) => onInteractionDown(event, "pan")} onPointerMove={onInteractionMove} onPointerUp={finishInteraction} onPointerCancel={finishInteraction} />
+        )}
+        {(spacePanning || ["crop", "area-highlight", "pan", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) && (
+          <div className={`pdf-interaction-layer ${spacePanning ? "pan space-pan" : tool}`} onPointerDown={(event) => onInteractionDown(event, spacePanning ? "pan" : tool)} onPointerMove={onInteractionMove} onPointerUp={finishInteraction} onPointerCancel={finishInteraction}>
             {cropBox && <span className="pdf-crop-box" style={{ left: cropBox.left, top: cropBox.top, width: cropBox.width, height: cropBox.height }} />}
+            {areaHighlightBox && <span className="pdf-area-highlight-box" style={{ left: areaHighlightBox.left, top: areaHighlightBox.top, width: areaHighlightBox.width, height: areaHighlightBox.height, "--markup-color": highlightColor } as React.CSSProperties} />}
             {objectBox && <span className={`pdf-object-preview preview-${tool}`} style={{ left: objectBox.left, top: objectBox.top, width: objectBox.width, height: objectBox.height, "--pdf-object-color": inkColor, "--pdf-object-width": `${inkWidth}px` } as React.CSSProperties} />}
           </div>
         )}

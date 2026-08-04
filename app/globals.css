@@ -179,6 +179,7 @@ body {
 .annotation-row > button:first-child { width: 100%; min-height: 66px; display: grid; grid-template-columns: auto 1fr; gap: 4px 7px; padding: 8px 34px 8px 8px; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .annotation-row > button:first-child:hover { background: #f8fbfb; }
 .annotation-kind { width: max-content; padding: 2px 5px; border-radius: 999px; background: #fff4ad; color: #6d5b00; font-size: 8px; font-weight: 750; }
+.annotation-kind.kind-area-highlight { background: #e8f4f5; color: #0e6b70; }
 .annotation-kind.kind-underline { background: #e6f0fb; color: #2465a8; }
 .annotation-kind.kind-strikeout { background: #fde9e9; color: #b64d52; }
 .annotation-kind.kind-ink { background: var(--selected); color: var(--teal); }
@@ -275,6 +276,8 @@ body {
 .pdf-text-layer { pointer-events: none; user-select: none; }
 .pdf-text-layer.selectable { pointer-events: auto; -webkit-user-select: text; user-select: text; touch-action: pan-x pan-y; }
 .pdf-text-layer.selectable span { cursor: text; }
+.pdf-text-layer.smart-selectable { pointer-events: none; -webkit-user-select: none; user-select: none; }
+.pdf-text-layer.smart-selectable span:not([role="img"]) { pointer-events: auto; -webkit-user-select: text; user-select: text; cursor: text; }
 .pdf-text-layer ::selection { background: rgba(27,125,183,.3); }
 .pdf-text-layer .pdf-search-hit { border-radius: 2px; background: rgba(255,155,44,.44); }
 .pdf-object-layer { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
@@ -290,11 +293,14 @@ body {
 .pdf-ink-layer.active { pointer-events: auto; cursor: crosshair; }
 .pdf-ink-layer.tool-eraser { cursor: cell; }
 .pdf-interaction-layer { position: absolute; inset: 0; z-index: 4; touch-action: none; }
+.pdf-smart-pan-layer { position: absolute; inset: 0; z-index: 1; cursor: grab; touch-action: none; }
+.pdf-smart-pan-layer:active { cursor: grabbing; }
 .pdf-interaction-layer.pan { cursor: grab; }
 .pdf-interaction-layer.pan:active { cursor: grabbing; }
-.pdf-interaction-layer.crop, .pdf-interaction-layer.rectangle, .pdf-interaction-layer.ellipse, .pdf-interaction-layer.arrow { cursor: crosshair; }
+.pdf-interaction-layer.crop, .pdf-interaction-layer.area-highlight, .pdf-interaction-layer.rectangle, .pdf-interaction-layer.ellipse, .pdf-interaction-layer.arrow { cursor: crosshair; }
 .pdf-interaction-layer.note, .pdf-interaction-layer.text, .pdf-interaction-layer.stamp, .pdf-interaction-layer.signature { cursor: copy; }
 .pdf-crop-box { position: absolute; border: 1.5px solid white; outline: 1.5px solid var(--teal); background: rgba(14,107,112,.1); box-shadow: 0 0 0 9999px rgba(11,31,42,.28); }
+.pdf-area-highlight-box { --markup-color: #f6d96b; position: absolute; border: 1px solid color-mix(in srgb, var(--markup-color) 72%, #675a19); border-radius: 2px; background: color-mix(in srgb, var(--markup-color) 48%, transparent); }
 .pdf-object-preview { position: absolute; border: var(--pdf-object-width) dashed var(--pdf-object-color); background: color-mix(in srgb, var(--pdf-object-color) 7%, transparent); }
 .pdf-object-preview.preview-ellipse { border-radius: 50%; }
 .pdf-selection-menu { position: fixed; z-index: 60; width: min(390px, calc(100vw - 20px)); display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; border: 1px solid #c8d6da; border-radius: 12px; background: rgba(255,255,255,.99); box-shadow: 0 14px 38px rgba(24,50,74,.25); white-space: normal; }
