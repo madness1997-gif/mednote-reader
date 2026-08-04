@@ -253,8 +253,11 @@ body {
 .pdf-page-canvas { position: absolute; inset: 0; z-index: 0; display: block; background: white; }
 .pdf-page-number { align-self: center; margin-top: 8px; padding: 2px 8px; border-radius: 999px; background: #e7edef; color: #697b84; font-size: 9px; }
 .pdf-view-single .pdf-page-host { min-height: 100%; justify-content: center; }
-.continuous-pages { width: 100%; display: flex; flex-direction: column; gap: 22px; }
-.lazy-pdf-page { width: 100%; display: flex; align-items: flex-start; justify-content: center; }
+.continuous-pages { width: max-content; min-width: 100%; display: flex; flex-direction: column; gap: 22px; }
+/* The page host already centres a page while it fits. Centring the host again
+   here creates unreachable negative overflow on the left once the PDF is
+   zoomed wider than the reader, which makes it look hidden behind the rail. */
+.lazy-pdf-page { width: 100%; display: flex; align-items: flex-start; justify-content: flex-start; }
 .pdf-page-placeholder { width: min(100%, 720px); height: 100%; min-height: 620px; display: grid; place-items: center; border: 1px solid #dce3e5; background: #eef2f3; color: #9aa7ad; font-size: 11px; }
 .pdf-markup-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .pdf-markup { --markup-color: #f6d96b; position: absolute; border-radius: 2px; }
