@@ -2538,6 +2538,11 @@ export default function Home() {
     }
   };
 
+  const goToPageFromRail = (page: number) => {
+    goToPage(page);
+    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
+  };
+
   const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {
     const target = activeWorkspace.documents.find((document) => document.id === documentId);
     if (!target) return;
@@ -3482,7 +3487,8 @@ export default function Home() {
 
   const openSearchResult = (result: SearchResult) => {
     if (result.documentId && result.documentId !== activeDocument?.id) switchDocument(result.documentId, result.page);
-    else goToPage(result.page);
+    else goToPageFromRail(result.page);
+    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
     setPdfRailTab("search");
   };
 
@@ -4223,9 +4229,9 @@ export default function Home() {
           {pdfRailTab === "pages" && (
             <div className="thumb-list">
               {sourcePages.map((page) => currentPdfDocument ? (
-                <PdfThumbnail key={`${activeDocument?.id}-${page}`} document={currentPdfDocument} page={page} active={page === sourcePage} onClick={() => goToPage(page)} />
+                <PdfThumbnail key={`${activeDocument?.id}-${page}`} document={currentPdfDocument} page={page} active={page === sourcePage} onClick={() => goToPageFromRail(page)} />
               ) : (
-                <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => goToPage(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
+                <button className={`pdf-thumb ${page === sourcePage ? "active" : ""}`} key={page} onClick={() => goToPageFromRail(page)}><span className="mini-paper"><i /><i /><i /><i className="wide" /><b /></span><span>{page}</span></button>
               ))}
             </div>
           )}
@@ -4234,7 +4240,7 @@ export default function Home() {
             <div className="pdf-rail-content">
               <h3>Mục lục</h3>
               {outline.length ? outline.map((entry, index) => (
-                <button key={`${entry.title}-${index}`} className="outline-entry" style={{ paddingLeft: 10 + Math.min(entry.depth, 4) * 13 }} disabled={!entry.page} onClick={() => entry.page && goToPage(entry.page)}>
+                <button key={`${entry.title}-${index}`} className="outline-entry" style={{ paddingLeft: 10 + Math.min(entry.depth, 4) * 13 }} disabled={!entry.page} onClick={() => entry.page && goToPageFromRail(entry.page)}>
                   <span>{entry.title}</span>{entry.page && <b>{entry.page}</b>}
                 </button>
               )) : <div className="rail-empty"><ListTree size={25} /><span>PDF này không có mục lục nhúng.</span></div>}
@@ -4259,9 +4265,9 @@ export default function Home() {
           {pdfRailTab === "marks" && (
             <div className="pdf-rail-content marks-panel">
               <h3>Đánh dấu trang</h3>
-              {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPage(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => updateReader((reader) => ({ ...reader, bookmarks: reader.bookmarks.filter((item) => item !== page) }))}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
+              {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPageFromRail(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => updateReader((reader) => ({ ...reader, bookmarks: reader.bookmarks.filter((item) => item !== page) }))}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
               <h3>Chú thích</h3>
-              {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPage(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{pdfAnnotationLabel(annotation)}</span><b>Trang {annotation.page}</b><p>{pdfAnnotationSummary(annotation)}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight, hình vẽ, ghi chú và nét bút sẽ xuất hiện tại đây.</span></div>}
+              {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPageFromRail(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{pdfAnnotationLabel(annotation)}</span><b>Trang {annotation.page}</b><p>{pdfAnnotationSummary(annotation)}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight, hình vẽ, ghi chú và nét bút sẽ xuất hiện tại đây.</span></div>}
             </div>
           )}
         </aside>

@@ -729,9 +729,10 @@ body {
   .brand-name, .top-divider, .document-title, .top-actions > .icon-button { display: none; }
   .topbar { padding: 0 10px; }
   .top-actions .primary-button { padding: 0 10px; font-size: 12px; }
-  .workspace { display: block; }
+  .workspace { --mobile-pdf-rail-width: clamp(180px, 42vw, 286px); display: block; transition: padding-left .16s ease; }
+  .workspace:not(.pdf-rail-collapsed) { padding-left: var(--mobile-pdf-rail-width); }
   .pdf-thumbnails, .note-thumbnails { display: none; }
-  .workspace:not(.pdf-rail-collapsed) .pdf-thumbnails { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; width: min(286px, 88vw); display: block; border-right: 1px solid var(--line); background: rgba(250,252,252,.99); box-shadow: 12px 0 30px rgba(24,50,74,.22); }
+  .workspace:not(.pdf-rail-collapsed) .pdf-thumbnails { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; width: var(--mobile-pdf-rail-width); display: block; border-right: 1px solid var(--line); background: rgba(250,252,252,.99); box-shadow: 12px 0 30px rgba(24,50,74,.22); }
   .reader-pane, .notes-pane { height: auto; min-height: calc(100dvh - 56px); overflow: visible; }
   .reader-pane { border-bottom: 6px solid var(--line); }
   .split-divider { display: none; }
