@@ -1,0 +1,43 @@
+.advanced-equation-backdrop { position: fixed; inset: 0; z-index: 240; display: grid; place-items: center; padding: 18px; background: rgba(18,39,50,.38); backdrop-filter: blur(2px); }
+.advanced-equation-dialog { width: min(720px, calc(100vw - 28px)); max-height: min(820px, calc(100dvh - 28px)); overflow: auto; padding: 14px; border: 1px solid #c7d6da; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px rgba(18,39,50,.28); color: #263741; }
+.advanced-equation-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 2px 2px 11px; border-bottom: 1px solid #e4eaec; }
+.advanced-equation-dialog > header > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.advanced-equation-dialog > header strong { display: flex; align-items: center; gap: 7px; color: #173f49; font-size: 16px; }
+.advanced-equation-dialog > header strong span { color: #0e6b70; font: 21px "Cambria Math", "Times New Roman", serif; }
+.advanced-equation-dialog > header small { color: #72838a; font-size: 10px; line-height: 1.4; }
+.advanced-equation-dialog > header button { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #687a82; font-size: 22px; cursor: pointer; }
+.advanced-equation-dialog > header button:hover { background: #edf3f4; color: #0e6b70; }
+.advanced-equation-mode { width: max-content; display: grid; grid-template-columns: 1fr 1fr; margin: 11px 0 9px; padding: 3px; border-radius: 8px; background: #eef3f4; }
+.advanced-equation-mode button { height: 29px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: #61747c; font-size: 10px; font-weight: 700; cursor: pointer; }
+.advanced-equation-mode button.selected { background: #fff; color: #0e6b70; box-shadow: 0 1px 4px rgba(18,39,50,.12); }
+.advanced-equation-source { display: flex; flex-direction: column; gap: 5px; color: #556a73; font-size: 10px; font-weight: 750; }
+.advanced-equation-source textarea { width: 100%; min-height: 88px; resize: vertical; padding: 9px 11px; border: 1px solid #c9d7da; border-radius: 8px; outline: 0; background: #fbfcfc; color: #22363f; font: 15px/1.45 "Cascadia Mono", Consolas, monospace; tab-size: 2; }
+.advanced-equation-source textarea:focus { border-color: #0e6b70; box-shadow: 0 0 0 3px rgba(14,107,112,.11); background: #fff; }
+.advanced-equation-snippets { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 5px; margin-top: 9px; }
+.advanced-equation-snippets button { min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 5px 3px; border: 1px solid #dce5e7; border-radius: 7px; background: #fafcfc; color: #425860; cursor: pointer; }
+.advanced-equation-snippets button:hover { border-color: #75a9ad; background: #eaf5f5; color: #0e6b70; }
+.advanced-equation-snippets b { font: 17px/1.1 "Cambria Math", "Times New Roman", serif; }
+.advanced-equation-snippets span { overflow: hidden; font-size: 8px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.advanced-equation-preview { min-height: 88px; display: grid; place-items: center; margin-top: 10px; padding: 12px; overflow: auto; border: 1px solid #cbdadd; border-radius: 9px; background: #fff; color: #1f3139; font-size: 21px; }
+.advanced-equation-message { margin: 6px 2px 0; color: #71838a; font-size: 9px; line-height: 1.4; }
+.advanced-equation-presets { margin-top: 10px; padding-top: 9px; border-top: 1px solid #e8edef; }
+.advanced-equation-presets > span { display: block; margin-bottom: 6px; color: #60737b; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.advanced-equation-presets > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; }
+.advanced-equation-presets button { min-height: 31px; padding: 5px 7px; border: 1px solid #dce5e7; border-radius: 6px; background: #fafcfc; color: #40565f; font-size: 9px; font-weight: 700; cursor: pointer; }
+.advanced-equation-presets button:hover { border-color: #8bb5b8; background: #eef8f7; color: #0e6b70; }
+.advanced-equation-help { margin-top: 9px; padding: 7px 9px; border: 1px solid #e0e8ea; border-radius: 7px; background: #fafcfc; color: #687a82; font-size: 9px; }
+.advanced-equation-help summary { color: #496069; font-weight: 750; cursor: pointer; }
+.advanced-equation-help p { margin: 6px 0 0; line-height: 1.55; }
+.advanced-equation-help code { padding: 1px 3px; border-radius: 3px; background: #edf2f3; color: #244b54; font-family: "Cascadia Mono", Consolas, monospace; }
+.advanced-equation-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 11px; padding-top: 10px; border-top: 1px solid #e4eaec; }
+.advanced-equation-dialog > footer button { height: 35px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 13px; border-radius: 7px; font-size: 10px; font-weight: 750; cursor: pointer; }
+.advanced-equation-cancel { border: 1px solid #d4dfe1; background: #fff; color: #5d7078; }
+.advanced-equation-insert { border: 1px solid #0e6b70; background: #0e6b70; color: #fff; }
+.advanced-equation-insert kbd { padding: 2px 4px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; background: rgba(255,255,255,.12); font: 8px system-ui; }
+@media (max-width: 620px) {
+  .advanced-equation-backdrop { align-items: end; padding: 0; }
+  .advanced-equation-dialog { width: 100%; max-height: 92dvh; border-radius: 15px 15px 0 0; }
+  .advanced-equation-snippets { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .advanced-equation-presets > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .advanced-equation-dialog > footer { position: sticky; bottom: -14px; margin-right: -14px; margin-left: -14px; padding: 10px 14px 14px; background: rgba(255,255,255,.97); }
+}
