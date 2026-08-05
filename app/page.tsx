@@ -19,6 +19,7 @@ import {
   ChevronUp,
   Cloud,
   CloudOff,
+  Columns2,
   Copy,
   Crop,
   Download,
@@ -260,6 +261,7 @@ type ReaderState = {
 
 type PdfOutlineEntry = { title: string; page: number | null; depth: number };
 type PdfRailTab = "pages" | "outline" | "search" | "marks";
+type WorkspaceMode = "split" | "reader" | "note";
 type NotePanel = "ink" | "shape" | "text" | "paper" | null;
 type PdfPanel = "view" | "ink" | null;
 type SearchResult = { documentId: string | null; documentName: string; page: number; snippet: string; occurrences: number };
@@ -285,6 +287,7 @@ type PersistedLibrary = {
   workspaces: WorkspaceItem[];
   activeWorkspaceId: string;
   readerShare: number;
+  workspaceMode?: WorkspaceMode;
   noteZoom?: number;
   savedAt?: number;
 };
@@ -2103,7 +2106,7 @@ export default function Home() {
   const [searchWholeCollection, setSearchWholeCollection] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [readerFocus, setReaderFocus] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
   const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace()]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
@@ -2583,6 +2586,7 @@ export default function Home() {
             setWorkspaces(normalized);
             setActiveWorkspaceId(parsed.activeWorkspaceId || parsed.workspaces[0].id);
             setReaderShare(parsed.readerShare || 50);
+            setWorkspaceMode(parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split");
             setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
             localSavedAtRef.current = parsed.savedAt || Date.now();
             setReady(true);
@@ -2638,6 +2642,7 @@ export default function Home() {
         setWorkspaces([restoredWorkspace]);
         setActiveWorkspaceId(restoredWorkspace.id);
         setReaderShare(legacy?.readerShare || 50);
+        setWorkspaceMode("split");
         setNoteZoom(1);
         setReady(true);
       }
@@ -2655,9 +2660,9 @@ export default function Home() {
     try {
       const savedAt = Date.now();
       localSavedAtRef.current = savedAt;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, noteZoom, savedAt } satisfies PersistedLibrary));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt } satisfies PersistedLibrary));
     } catch { /* storage may be unavailable in private browsing */ }
-  }, [workspaces, activeWorkspaceId, readerShare, noteZoom, ready]);
+  }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -3226,7 +3231,7 @@ export default function Home() {
     } else {
       switchDocument(excerpt.documentId, excerpt.page, excerpt.rect);
     }
-    setReaderFocus(false);
+    setWorkspaceMode("split");
     setToast(`Đã quay lại ${excerpt.documentName} · trang ${excerpt.page}`);
   };
 
@@ -3278,7 +3283,7 @@ export default function Home() {
       }
 
       const savedAt = localSavedAtRef.current || Date.now();
-      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, noteZoom, savedAt };
+      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt };
       const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
       await upsertDriveFile(token, {
         name: "MedNote Workspace.json",
@@ -3347,6 +3352,7 @@ export default function Home() {
       setWorkspaces(normalized);
       setActiveWorkspaceId(normalized.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : normalized[0].id);
       setReaderShare(parsed.readerShare || 50);
+      setWorkspaceMode(parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split");
       setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
       setDriveReady(true);
       setDriveLastSyncedAt(savedAt);
@@ -3417,7 +3423,7 @@ export default function Home() {
     if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
     const timer = window.setTimeout(() => { void syncToDrive(driveToken, true); }, 2200);
     return () => window.clearTimeout(timer);
-  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaces]);
+  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces]);
 
   const performSearch = async () => {
     const query = searchQuery.trim();
@@ -3706,6 +3712,7 @@ export default function Home() {
       const isTyping = target?.matches("input, textarea, select, [contenteditable='true']");
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
         event.preventDefault();
+        setWorkspaceMode("reader");
         setShowPdfRail(true);
         setPdfRailTab("search");
         window.setTimeout(() => document.getElementById("pdf-search-input")?.focus(), 0);
@@ -3735,7 +3742,7 @@ export default function Home() {
       if (!isTyping && event.key === "ArrowRight" && viewMode === "single") goToPage(sourcePage + 1);
       if (event.key === "Escape") {
         setPdfSelection(null);
-        setReaderFocus(false);
+        setWorkspaceMode("split");
         window.getSelection()?.removeAllRanges();
       }
     };
@@ -4019,6 +4026,20 @@ export default function Home() {
     setToast("Đã lưu định dạng chữ cho trang này");
   };
 
+  const changeWorkspaceMode = (mode: WorkspaceMode) => {
+    setWorkspaceMode(mode);
+    if (mode === "note") {
+      setPdfSelection(null);
+      setPdfPanel(null);
+      window.getSelection()?.removeAllRanges();
+    }
+    if (mode === "reader") {
+      setNotePanel(null);
+      setTextInsertPopover(null);
+    }
+    setToast(mode === "split" ? "Đang dùng Reader và Note" : mode === "reader" ? "Đang chỉ xem Reader" : "Đang chỉ làm Note");
+  };
+
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     const move = (moveEvent: PointerEvent) => {
@@ -4083,6 +4104,11 @@ export default function Home() {
           <button className="document-title" onClick={() => setLibraryOpen(true)}><span>{documentName}</span><ChevronDown size={15} /></button>
         </div>
         <div className="top-actions">
+          <nav className="workspace-mode-switcher" aria-label="Chế độ không gian làm việc">
+            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} title="Hiện Reader và Note" aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
+            <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
+            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} title="Chỉ hiện Note" aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
+          </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button
             className={`drive-button ${driveToken ? "connected" : ""} ${driveStatus === "syncing" || driveStatus === "connecting" ? "busy" : ""}`}
@@ -4216,7 +4242,7 @@ export default function Home() {
         </div>
       )}
 
-      <section className={`workspace ${showPdfRail ? "" : "pdf-rail-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"} ${readerFocus ? "reader-focus" : ""}`} ref={workspaceRef} style={gridStyle}>
+      <section className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} ref={workspaceRef} style={gridStyle}>
         <aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">
           <div className="pdf-rail-tabs">
             <button className={pdfRailTab === "pages" ? "active" : ""} onClick={() => setPdfRailTab("pages")} title="Trang" aria-label="Hình thu nhỏ các trang"><ScanText size={17} /></button>
@@ -4309,7 +4335,7 @@ export default function Home() {
                 <button className={fitMode === "page" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "page", zoom: 1 }))}><Square size={18} /><span>Vừa toàn trang</span></button>
                 <button onClick={() => updateReader((reader) => ({ ...reader, rotation: (reader.rotation + 90) % 360 }))}><RotateCw size={18} /><span>Xoay 90°</span></button>
                 <button className={viewMode === "continuous" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, viewMode: reader.viewMode === "single" ? "continuous" : "single", fitMode: reader.viewMode === "single" ? "width" : "page", zoom: 1 }))}>{viewMode === "single" ? <Rows3 size={18} /> : <Square size={18} />}<span>{viewMode === "single" ? "Cuộn liên tục" : "Từng trang"}</span></button>
-                <button className={readerFocus ? "selected" : ""} onClick={() => setReaderFocus((focus) => !focus)}><Maximize2 size={18} /><span>{readerFocus ? "Trở lại chia đôi" : "Tập trung đọc"}</span></button>
+                <button className={workspaceMode === "reader" ? "selected" : ""} onClick={() => changeWorkspaceMode(workspaceMode === "reader" ? "split" : "reader")}><Maximize2 size={18} /><span>{workspaceMode === "reader" ? "Trở lại cả hai" : "Chỉ Reader"}</span></button>
               </div>
             </div>
           )}
