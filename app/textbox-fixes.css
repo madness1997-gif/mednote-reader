@@ -1,0 +1,29 @@
+/* Text boxes can be resized very small. Keep their native scrollbars from
+   covering most of the content while preserving wheel, touchpad, keyboard,
+   and caret scrolling during editing. */
+.excerpt-content {
+  min-width: 0;
+}
+
+.excerpt-rich-editor {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.excerpt-rich-editor::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* A selected but inactive tiny text box should look like a clean crop of its
+   contents, not a miniature scrolling panel. */
+.excerpt-rich-editor[contenteditable="false"] {
+  overflow: hidden;
+}
