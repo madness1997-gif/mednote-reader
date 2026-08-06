@@ -1,6 +1,6 @@
 import {
   META_WORKSPACE_ID, NOTE_WORKSPACE_PREFIX, SOURCE_WORKSPACE_PREFIX, type AnyObject, type AppState, type ContentRelation, type Relation, type RelationKind, type RelationLibrary, type RelationSource, type RelationTarget, type WorkspaceRelation,
-  clone, findNotebook, findPageContext, now, placeholderNotebook, sameEndpoints, sourceKey, targetKey, titleOf, uid, writeStateAndLibrary,
+  clone, dedupeRelations, findNotebook, findPageContext, now, placeholderNotebook, sameEndpoints, sourceKey, targetKey, titleOf, uid, writeStateAndLibrary,
 } from "./relation-library-shared";
 import { syncFromApp } from "./relation-library-store";
 
@@ -18,7 +18,7 @@ function sourceDocuments(state: AppState, library: RelationLibrary, source: Rela
 }
 
 function sourceName(library: RelationLibrary, source: RelationSource) {
-  if (source.type === "group") return library.groups.find((group) => group.id === source.id)?.name || "Khối tài liệu";
+  if (source.type === "group") return library.groups.find((group) => group.id === source.id)?.name || "Bộ tài liệu";
   return titleOf(library.documents.find((document) => document.id === source.id)?.name || "Tài liệu");
 }
 
@@ -29,20 +29,25 @@ function targetSpecificity(target: RelationTarget) {
 function matchingWorkspaceRelation(library: RelationLibrary, source: RelationSource) {
   return library.relations
     .filter((relation): relation is WorkspaceRelation => relation.kind === "workspace" && sourceKey(relation.source) === sourceKey(source))
-    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0) || targetSpecificity(b.target) - targetSpecificity(a.target))[0];
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0) || b.updatedAt - a.updatedAt || targetSpecificity(b.target) - targetSpecificity(a.target))[0];
+}
+
+function relationCoversTarget(relationTarget: RelationTarget, requested: RelationTarget) {
+  if (relationTarget.notebookId !== requested.notebookId) return false;
+  if (targetKey(relationTarget) === targetKey(requested)) return true;
+  if (relationTarget.type === "notebook") return true;
+  return relationTarget.type === "section" && relationTarget.id === requested.sectionId;
 }
 
 function relationForTarget(library: RelationLibrary, target: RelationTarget) {
-  const candidates = library.relations.filter((relation): relation is WorkspaceRelation => relation.kind === "workspace" && (
-    relation.target.notebookId === target.notebookId
-    && (relation.target.type === "notebook"
-      || relation.target.id === target.id
-      || (relation.target.type === "section" && relation.target.id === target.sectionId))
-  ));
+  const candidates = library.relations.filter((relation): relation is WorkspaceRelation => relation.kind === "workspace" && relationCoversTarget(relation.target, target));
   return candidates.sort((a, b) => {
     const exactA = targetKey(a.target) === targetKey(target) ? 1 : 0;
     const exactB = targetKey(b.target) === targetKey(target) ? 1 : 0;
-    return exactB - exactA || Number(b.isDefault) - Number(a.isDefault) || (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
+    return exactB - exactA
+      || targetSpecificity(b.target) - targetSpecificity(a.target)
+      || (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0)
+      || b.updatedAt - a.updatedAt;
   })[0];
 }
 
@@ -142,14 +147,29 @@ export function openNoteTarget(target: RelationTarget) {
 export function upsertRelation(kind: RelationKind, source: RelationSource, target: RelationTarget, isDefault = false) {
   const synced = syncFromApp();
   if (!synced) return false;
-  synced.library.relations = synced.library.relations.filter((relation) => !sameEndpoints(relation, source, target));
-  if (kind === "workspace" && isDefault) {
-    synced.library.relations = synced.library.relations.map((relation) => relation.kind === "workspace" && sourceKey(relation.source) === sourceKey(source)
-      ? { ...relation, isDefault: false, updatedAt: now() }
-      : relation);
+  const nextRelations: Relation[] = [];
+  for (const relation of synced.library.relations) {
+    if (sameEndpoints(relation, source, target)) continue;
+    if (kind === "workspace" && isDefault && relation.kind === "workspace" && sourceKey(relation.source) === sourceKey(source)) {
+      // A source has one primary study destination. Older primary destinations are
+      // preserved as ordinary references instead of being silently discarded.
+      nextRelations.push({
+        id: uid("content-relation"),
+        kind: "content",
+        source: relation.source,
+        target: relation.target,
+        createdAt: relation.createdAt,
+        updatedAt: now(),
+      });
+      continue;
+    }
+    nextRelations.push(relation);
   }
   const base = { id: uid(`${kind}-relation`), kind, source, target, createdAt: now(), updatedAt: now() } as Relation;
-  synced.library.relations.push(kind === "workspace" ? { ...base, kind, isDefault } as WorkspaceRelation : { ...base, kind } as ContentRelation);
+  nextRelations.push(kind === "workspace"
+    ? { ...base, kind, isDefault: true } as WorkspaceRelation
+    : { ...base, kind } as ContentRelation);
+  synced.library.relations = dedupeRelations(nextRelations);
   writeStateAndLibrary(synced.state, synced.library, true);
   return true;
 }
