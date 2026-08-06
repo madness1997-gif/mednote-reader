@@ -32,6 +32,8 @@ function applyRightLayout() {
       continue;
     }
     workspace.classList.add(WORKSPACE_CLASS);
+    if (aside.dataset.rightNavigationLayout === "1") continue;
+    aside.dataset.rightNavigationLayout = "1";
     aside.style.setProperty("order", "initial", "important");
     aside.style.setProperty("width", "100%", "important");
     aside.style.setProperty("min-width", "0", "important");
@@ -52,8 +54,8 @@ function schedule() {
   });
 }
 
-new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
 document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", schedule, { once: true }) : schedule();
-window.setInterval(schedule, 700);
+window.setInterval(schedule, 1000);
 
 export {};
