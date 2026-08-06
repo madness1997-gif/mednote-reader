@@ -1,2 +1,3 @@
-import "./independent-library-ui";
+import "./independent-library-repair";
+void import("./independent-library-ui");
 export {};
