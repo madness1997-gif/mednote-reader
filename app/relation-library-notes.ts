@@ -1,8 +1,27 @@
 import {
-  META_WORKSPACE_ID, NOTE_WORKSPACE_PREFIX, type AnyObject, type NoteSection,
+  META_WORKSPACE_ID, NOTE_WORKSPACE_PREFIX, type AnyObject, type NoteSection, type Relation,
   blankPage, clone, createNotebookObject, ensureVisibleWorkspace, findNotebook, now, placeholderNotebook, uid, writeStateAndLibrary,
 } from "./relation-library-shared";
 import { syncFromApp } from "./relation-library-store";
+
+function relationPageId(relation: Relation) {
+  if (relation.target.pageId) return relation.target.pageId;
+  return relation.target.type === "page" ? relation.target.id : undefined;
+}
+
+function retargetPages(relations: Relation[], notebookId: string, pageIds: string[], sectionId: string) {
+  const moved = new Set(pageIds);
+  return relations.map((relation) => {
+    if (relation.target.notebookId !== notebookId) return relation;
+    const pageId = relationPageId(relation);
+    if (!pageId || !moved.has(pageId) || relation.target.sectionId === sectionId) return relation;
+    return {
+      ...relation,
+      target: { ...relation.target, sectionId },
+      updatedAt: now(),
+    } as Relation;
+  });
+}
 
 export function createNotebook(title: string) {
   const synced = syncFromApp();
@@ -51,10 +70,12 @@ export function createSection(notebookId: string, title: string) {
 
 export function renameSection(notebookId: string, sectionId: string, title: string) {
   const synced = syncFromApp();
-  const section = synced?.library.notebooks.find((item) => item.id === notebookId)?.sections.find((item) => item.id === sectionId);
-  if (!synced || !section || !title.trim()) return false;
+  const record = synced?.library.notebooks.find((item) => item.id === notebookId);
+  const section = record?.sections.find((item) => item.id === sectionId);
+  if (!synced || !record || !section || !title.trim()) return false;
   section.title = title.trim();
   section.updatedAt = now();
+  record.updatedAt = now();
   writeStateAndLibrary(synced.state, synced.library, true);
   return true;
 }
@@ -66,11 +87,21 @@ export function deleteSection(notebookId: string, sectionId: string) {
   const section = record.sections.find((item) => item.id === sectionId);
   if (!section) return false;
   const fallback = record.sections.find((item) => item.id !== sectionId)!;
-  fallback.pageIds.push(...section.pageIds.filter((id) => !fallback.pageIds.includes(id)));
+  const movedPageIds = section.pageIds.filter((id) => !fallback.pageIds.includes(id));
+  fallback.pageIds.push(...movedPageIds);
   fallback.updatedAt = now();
   record.sections = record.sections.filter((item) => item.id !== sectionId);
   if (record.activeSectionId === sectionId) record.activeSectionId = fallback.id;
-  synced.library.relations = synced.library.relations.filter((relation) => relation.target.id !== sectionId);
+  record.updatedAt = now();
+
+  // Direct links to the deleted section disappear. Links to pages/blocks inside it
+  // follow those pages to the fallback section, so references never become stale.
+  synced.library.relations = retargetPages(
+    synced.library.relations.filter((relation) => !(relation.target.type === "section" && relation.target.id === sectionId)),
+    notebookId,
+    section.pageIds,
+    fallback.id,
+  );
   writeStateAndLibrary(synced.state, synced.library, true);
   return true;
 }
@@ -87,6 +118,7 @@ export function createPage(notebookId: string, sectionId: string, title = "Trang
   section.pageIds.push(page.id);
   section.updatedAt = now();
   record.activeSectionId = section.id;
+  record.updatedAt = now();
   for (const workspace of synced.state.workspaces) {
     workspace.notebooks = (workspace.notebooks || []).map((notebook: AnyObject) => String(notebook.id) === notebookId ? clone(found.notebook) : notebook);
   }
@@ -99,10 +131,16 @@ export function movePage(notebookId: string, pageId: string, sectionId: string) 
   const record = synced?.library.notebooks.find((item) => item.id === notebookId);
   const target = record?.sections.find((item) => item.id === sectionId);
   if (!synced || !record || !target) return false;
-  for (const section of record.sections) section.pageIds = section.pageIds.filter((id) => id !== pageId);
-  target.pageIds.push(pageId);
+  for (const section of record.sections) {
+    const hadPage = section.pageIds.includes(pageId);
+    section.pageIds = section.pageIds.filter((id) => id !== pageId);
+    if (hadPage) section.updatedAt = now();
+  }
+  if (!target.pageIds.includes(pageId)) target.pageIds.push(pageId);
   target.updatedAt = now();
   record.activeSectionId = target.id;
+  record.updatedAt = now();
+  synced.library.relations = retargetPages(synced.library.relations, notebookId, [pageId], target.id);
   writeStateAndLibrary(synced.state, synced.library, true);
   return true;
 }
