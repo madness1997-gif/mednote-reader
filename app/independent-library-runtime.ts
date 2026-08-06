@@ -1,4 +1,5 @@
 import "./independent-library-repair";
+import "./relation-library-compact-labels";
 void import("./independent-library-ui");
 void import("./relation-note-sidebar")
   .then(() => import("./relation-note-hide-native-thumbnails"))
