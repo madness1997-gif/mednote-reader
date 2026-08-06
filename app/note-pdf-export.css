@@ -1,0 +1,54 @@
+/* Export uses the paper's natural, unzoomed coordinate space so the generated
+   PDF is independent from the current viewing zoom. */
+.note-paper.note-pdf-exporting {
+  width: var(--note-natural-width, var(--paper-max-width, 720px)) !important;
+  height: var(--note-natural-height, auto) !important;
+  min-width: var(--note-natural-width, var(--paper-max-width, 720px)) !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  aspect-ratio: auto !important;
+  zoom: 1 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.note-paper.note-pdf-exporting > .paper-background,
+.note-paper.note-pdf-exporting > .typed-layer,
+.note-paper.note-pdf-exporting > .ink-surface {
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 0 !important;
+  width: var(--note-natural-width, var(--paper-max-width, 720px)) !important;
+  height: var(--note-natural-height, auto) !important;
+  transform: none !important;
+}
+
+.note-paper.note-pdf-exporting .note-excerpt,
+.note-paper.note-pdf-exporting .note-excerpt.selected {
+  outline: 0 !important;
+  box-shadow: none;
+}
+
+.note-paper.note-pdf-exporting .excerpt-object-controls,
+.note-paper.note-pdf-exporting .excerpt-resize-handle,
+.note-paper.note-pdf-exporting .excerpt-rotate-handle,
+.note-paper.note-pdf-exporting .callout-anchor-handle,
+.note-paper.note-pdf-exporting .mode-hint,
+.note-paper.note-pdf-exporting .citation-chip {
+  display: none !important;
+}
+
+.note-pdf-export-button:disabled {
+  min-width: 84px;
+  opacity: .72;
+  cursor: wait;
+}
+
+.note-pdf-export-active .note-thumb,
+.note-pdf-export-active .note-view-control,
+.note-pdf-export-active .note-tool-cluster {
+  pointer-events: none;
+}
