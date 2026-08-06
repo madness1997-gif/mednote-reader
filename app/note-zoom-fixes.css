@@ -1,0 +1,42 @@
+/* Reliable note zoom for Chromium/Electron and the web build.
+   The runtime calculates the scaled paper box in pixels. Each interactive
+   layer keeps its natural coordinate space and is visually scaled as a unit,
+   so text, images, callouts and ink stay aligned while the stage gets real
+   horizontal and vertical overflow. */
+.note-paper.note-zoom-runtime {
+  width: var(--note-zoom-width, var(--paper-max-width, 720px)) !important;
+  height: var(--note-zoom-height, auto) !important;
+  min-width: var(--note-zoom-width, var(--paper-max-width, 720px));
+  max-width: none !important;
+  min-height: 0;
+  aspect-ratio: auto !important;
+  zoom: 1 !important;
+  margin: 0 auto;
+}
+
+.note-paper.note-zoom-runtime > .paper-background,
+.note-paper.note-zoom-runtime > .typed-layer,
+.note-paper.note-zoom-runtime > .ink-surface {
+  top: 0;
+  right: auto;
+  bottom: auto;
+  left: 0;
+  width: var(--note-natural-width, var(--paper-max-width, 720px)) !important;
+  height: var(--note-natural-height, auto) !important;
+  transform: scale(var(--note-view-zoom, 1));
+  transform-origin: top left;
+}
+
+/* Keep the paper reachable when it becomes wider than the Note pane. */
+.note-stage {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.note-stage.note-zoom-gesture {
+  cursor: zoom-in;
+}
+
+.note-view-control select {
+  font-variant-numeric: tabular-nums;
+}
