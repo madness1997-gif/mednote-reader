@@ -74,6 +74,7 @@ export async function deleteDocument(documentId: string) {
   const record = synced.library.documents.find((document) => document.id === documentId);
   if (record) record.available = false;
   synced.library.groups = synced.library.groups.map((group) => ({ ...group, documentIds: group.documentIds.filter((id) => id !== documentId), updatedAt: now() })).filter((group) => group.documentIds.length);
+  // Workspace relations cannot open a deleted source. Content relations stay as an unavailable trace.
   synced.library.relations = synced.library.relations.filter((relation) => relation.kind === "content" || !(relation.source.type === "document" && relation.source.id === documentId));
   ensureVisibleWorkspace(synced.state);
   writeStateAndLibrary(synced.state, synced.library, true);
@@ -91,7 +92,6 @@ export function importPdf() {
   if (!view || !input) return false;
   sessionStorage.setItem(IMPORT_SESSION_KEY, JSON.stringify(view.documents.filter((document) => document.available).map((document) => document.id)));
   input.click();
-  watchImport();
   return true;
 }
 
