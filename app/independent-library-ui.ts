@@ -2,10 +2,10 @@ import {
   IMPORT_SESSION_KEY, createNotebook, createPage, createSection, deleteDocument, deleteGroup, deleteNotebook, deleteSection, getLibraryView, importPdf, openNoteTarget, openSource, renameDocument, renameGroup, renameNotebook, renameSection, syncFromApp, titleOf, watchImport, type RelationTarget,
 } from "./independent-library-core";
 import { buildPanel, closeLibrary, decodeSource, injectStyle, openAndReload, promptName, reload } from "./relation-library-ui-base";
-import { showGroupDialog, showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
+import { showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
 
 function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
-  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-group],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
   if (!target) return;
   const view = getLibraryView();
   if (!view) return;
@@ -15,7 +15,6 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
     else watchImport((source) => { openSource(source); reload(); });
     return;
   }
-  if (target.dataset.newGroup !== undefined) return showGroupDialog(panel, view);
   if (target.dataset.newNotebook !== undefined) {
     const name = promptName("Tên notebook", "Notebook mới");
     if (name) openAndReload(() => createNotebook(name));
