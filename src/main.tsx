@@ -11,6 +11,7 @@ import "../app/note-symbol-library.css";
 import "../app/note-zoom-runtime";
 import "../app/pdf-wheel-zoom-runtime";
 import "../app/note-symbol-library";
+import "../app/independent-library-runtime";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
