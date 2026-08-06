@@ -1,77 +1,119 @@
 import {
-  BOOT, IMPORT, addNotebook, current, deleteBook, deletePdf, importPdf, linkBook, migrateOnce,
-  reload, renameBook, renamePdf, titleOf, watchImport,
+  IMPORT_SESSION_KEY, createNotebook, createPage, createSection, deleteDocument, deleteGroup, deleteNotebook, deleteSection, getLibraryView, importPdf, openNoteTarget, openSource, renameDocument, renameGroup, renameNotebook, renameSection, syncFromApp, titleOf, watchImport, type RelationTarget,
 } from "./independent-library-core";
+import { buildPanel, closeLibrary, decodeSource, injectStyle, openAndReload, promptName, reload } from "./relation-library-ui-base";
+import { showGroupDialog, showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
 
-const esc = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
-const style = `
-.ind-lib{position:relative;z-index:3;width:min(980px,calc(100vw - 40px));max-height:min(820px,calc(100vh - 40px));display:flex;flex-direction:column;overflow:hidden;border:1px solid #c9d4d7;border-radius:18px;background:#f7f9f9;box-shadow:0 24px 80px #14252b47;color:#24383f}.ind-head{display:flex;align-items:center;justify-content:space-between;padding:20px 22px 16px;border-bottom:1px solid #dfe6e8;background:#fff}.ind-head div{display:grid;gap:3px}.ind-head strong{font-size:20px}.ind-head span,.ind-sec small,.ind-copy small{color:#71858c;font-size:11px}.ind-close,.ind-act{width:34px;height:34px;border:0;border-radius:9px;background:transparent;cursor:pointer}.ind-close:hover,.ind-act:hover{background:#eaf0f1}.ind-act.del:hover{background:#fdebec;color:#b43a43}.ind-tools,.ind-body{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ind-tools{padding:16px 22px;background:#fff}.ind-primary{min-height:52px;display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #1d7181;border-radius:13px;background:#1d7181;color:#fff;text-align:left;cursor:pointer}.ind-primary.alt{background:#f4f8f8;color:#31535d;border-color:#c8d5d8}.ind-primary span{display:grid;gap:2px}.ind-body{min-height:0;padding:0 22px 22px;overflow:auto}.ind-sec{min-width:0;padding:14px;border:1px solid #d9e1e3;border-radius:15px;background:#fff}.ind-sec h3{margin:0 0 10px;font-size:15px}.ind-list{display:grid;gap:8px}.ind-card{display:flex;align-items:center;border:1px solid #dde4e6;border-radius:12px;background:#fbfcfc}.ind-card:hover{border-color:#8dbbc4;background:#fff}.ind-open{min-width:0;flex:1;display:flex;align-items:center;gap:10px;padding:11px;border:0;background:transparent;text-align:left;cursor:pointer}.ind-icon{width:40px;height:40px;display:grid;place-items:center;border-radius:10px;background:#e4f1f3;color:#176a7a;font-weight:800}.ind-icon.note{background:#f3eddf;color:#846321}.ind-copy{min-width:0;display:grid;gap:3px}.ind-copy strong,.ind-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ind-actions{display:flex;padding-right:6px}.ind-note-main{min-width:0;flex:1}.ind-link{display:flex;align-items:center;gap:7px;padding:0 10px 10px 61px;color:#667c83;font-size:10px}.ind-link select{min-width:0;flex:1;height:28px;border:1px solid #cbd7da;border-radius:8px;background:#fff}.ind-empty{padding:30px 15px;border:1px dashed #cbd7da;border-radius:11px;color:#829297;text-align:center;font-size:12px}@media(max-width:760px){.ind-lib{width:calc(100vw - 20px);max-height:calc(100vh - 20px)}.ind-tools,.ind-body{grid-template-columns:1fr}.ind-head,.ind-tools{padding-left:14px;padding-right:14px}.ind-body{padding:0 14px 16px}}
-`;
-function injectStyle() {
-  if (document.getElementById("independent-library-style")) return;
-  const element = document.createElement("style");
-  element.id = "independent-library-style";
-  element.textContent = style;
-  document.head.append(element);
-}
-function panel(backdrop: HTMLElement) {
-  const result = current();
-  const pdfs = result?.meta.pdfs || [];
-  const books = result?.meta.notebooks || [];
-  const pdfHtml = pdfs.map((pdf) => `<article class="ind-card"><button class="ind-open" data-open-pdf="${esc(pdf.workspaceId)}"><b class="ind-icon">PDF</b><span class="ind-copy"><strong>${esc(titleOf(pdf.name))}</strong></span></button><span class="ind-actions"><button class="ind-act" data-rename-pdf="${esc(pdf.id)}">✎</button><button class="ind-act del" data-delete-pdf="${esc(pdf.id)}">⌫</button></span></article>`).join("") || '<div class="ind-empty">Chưa có PDF.</div>';
-  const bookHtml = books.map((book) => {
-    const ws = result?.state.workspaces.find((item) => item.id === book.workspaceId);
-    const count = ws?.notebooks?.[0]?.pages?.length || 0;
-    const options = ['<option value="">Không liên kết</option>', ...pdfs.map((pdf) => `<option value="${esc(pdf.id)}"${pdf.id === book.linkedDocumentId ? " selected" : ""}>${esc(titleOf(pdf.name))}</option>`)].join("");
-    return `<article class="ind-card"><div class="ind-note-main"><button class="ind-open" data-open-book="${esc(book.workspaceId)}" data-linked="${book.linkedDocumentId ? "1" : "0"}"><b class="ind-icon note">SỔ</b><span class="ind-copy"><strong>${esc(book.title)}</strong><small>${count} trang · ${book.linkedDocumentId ? "có liên kết PDF" : "không liên kết PDF"}</small></span></button><label class="ind-link">Liên kết PDF <select data-link-book="${esc(book.id)}">${options}</select></label></div><span class="ind-actions"><button class="ind-act" data-rename-book="${esc(book.id)}">✎</button><button class="ind-act del" data-delete-book="${esc(book.id)}">⌫</button></span></article>`;
-  }).join("") || '<div class="ind-empty">Chưa có sổ ghi chú.</div>';
-  const element = document.createElement("aside");
-  element.className = "ind-lib";
-  element.innerHTML = `<header class="ind-head"><div><strong>Thư viện</strong><span>PDF và sổ ghi chú là hai thư mục độc lập</span></div><button class="ind-close" data-close>✕</button></header><div class="ind-tools"><button class="ind-primary" data-import><b>＋</b><span><strong>Thêm PDF</strong></span></button><button class="ind-primary alt" data-new-book><b>＋</b><span><strong>Tạo sổ</strong></span></button></div><div class="ind-body"><section class="ind-sec"><h3>PDF <small>(${pdfs.length})</small></h3><div class="ind-list">${pdfHtml}</div></section><section class="ind-sec"><h3>Sổ ghi chú <small>(${books.length})</small></h3><div class="ind-list">${bookHtml}</div></section></div>`;
-  element.addEventListener("pointerdown", (event) => event.stopPropagation());
-  element.addEventListener("click", (event) => {
-    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-book],[data-open-pdf],[data-open-book],[data-rename-pdf],[data-delete-pdf],[data-rename-book],[data-delete-book]");
-    if (!target) return;
-    if (target.dataset.close !== undefined) backdrop.querySelector<HTMLButtonElement>('.library-panel button[aria-label="Đóng"]')?.click();
-    else if (target.dataset.import !== undefined) importPdf();
-    else if (target.dataset.newBook !== undefined) addNotebook();
-    else if (target.dataset.openPdf) reload(target.dataset.openPdf, "reader");
-    else if (target.dataset.openBook) reload(target.dataset.openBook, target.dataset.linked === "1" ? "split" : "note");
-    else if (target.dataset.renamePdf) renamePdf(target.dataset.renamePdf);
-    else if (target.dataset.deletePdf) void deletePdf(target.dataset.deletePdf);
-    else if (target.dataset.renameBook) renameBook(target.dataset.renameBook);
-    else if (target.dataset.deleteBook) deleteBook(target.dataset.deleteBook);
-  });
-  element.addEventListener("change", (event) => {
-    const select = (event.target as HTMLElement).closest<HTMLSelectElement>("select[data-link-book]");
-    if (select) linkBook(select.dataset.linkBook!, select.value || null);
-  });
-  return element;
-}
-function mount() {
-  injectStyle();
-  for (const backdrop of Array.from(document.querySelectorAll<HTMLElement>(".library-backdrop"))) {
-    if (backdrop.querySelector(".ind-lib")) continue;
-    const native = backdrop.querySelector<HTMLElement>(".library-panel");
-    if (!native) continue;
-    native.style.display = "none";
-    backdrop.append(panel(backdrop));
-  }
-}
-function init() {
-  if (migrateOnce() && sessionStorage.getItem(BOOT) !== "1") {
-    sessionStorage.setItem(BOOT, "1");
-    location.reload();
+function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-group],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
+  if (!target) return;
+  const view = getLibraryView();
+  if (!view) return;
+  if (target.dataset.close !== undefined) return closeLibrary(backdrop);
+  if (target.dataset.import !== undefined) {
+    if (!importPdf()) window.alert("Không tìm thấy bộ chọn PDF.");
+    else watchImport((source) => { openSource(source); reload(); });
     return;
   }
-  sessionStorage.removeItem(BOOT);
-  new MutationObserver(mount).observe(document.documentElement, { childList: true, subtree: true });
-  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", mount, { once: true }) : mount();
-  const pending = sessionStorage.getItem(IMPORT);
-  if (pending) {
-    try { watchImport(JSON.parse(pending) as string[]); }
-    catch { sessionStorage.removeItem(IMPORT); }
+  if (target.dataset.newGroup !== undefined) return showGroupDialog(panel, view);
+  if (target.dataset.newNotebook !== undefined) {
+    const name = promptName("Tên notebook", "Notebook mới");
+    if (name) openAndReload(() => createNotebook(name));
+    return;
+  }
+  if (target.dataset.openSource) return openAndReload(() => openSource(decodeSource(target.dataset.openSource!)));
+  if (target.dataset.openTarget) {
+    try { return openAndReload(() => openNoteTarget(JSON.parse(target.dataset.openTarget!) as RelationTarget)); }
+    catch { return; }
+  }
+  if (target.dataset.relateSource) return showRelationDialog(panel, view, decodeSource(target.dataset.relateSource));
+  if (target.dataset.renameDocument) {
+    const record = view.documents.find((item) => item.id === target.dataset.renameDocument);
+    const name = promptName("Đổi tên PDF", record ? titleOf(record.name) : "");
+    if (name) openAndReload(() => renameDocument(target.dataset.renameDocument!, name));
+    return;
+  }
+  if (target.dataset.deleteDocument) {
+    const record = view.documents.find((item) => item.id === target.dataset.deleteDocument);
+    if (window.confirm(`Xóa PDF “${record?.name || ""}”? Các quan hệ nội dung vẫn giữ vết nguồn nhưng tài liệu sẽ không còn khả dụng.`)) {
+      void deleteDocument(target.dataset.deleteDocument!).then((ok) => { if (ok) reload(); });
+    }
+    return;
+  }
+  if (target.dataset.renameGroup) {
+    const group = view.groups.find((item) => item.id === target.dataset.renameGroup);
+    const name = promptName("Đổi tên khối tài liệu", group?.name || "");
+    if (name) openAndReload(() => renameGroup(target.dataset.renameGroup!, name));
+    return;
+  }
+  if (target.dataset.deleteGroup) {
+    const group = view.groups.find((item) => item.id === target.dataset.deleteGroup);
+    if (window.confirm(`Xóa khối “${group?.name || ""}”? Các PDF bên trong vẫn được giữ.`)) openAndReload(() => deleteGroup(target.dataset.deleteGroup!));
+    return;
+  }
+  if (target.dataset.addSection) {
+    const name = promptName("Tên section", "Section mới");
+    if (name) openAndReload(() => createSection(target.dataset.addSection!, name));
+    return;
+  }
+  if (target.dataset.renameSection) {
+    const [notebookId, sectionId] = target.dataset.renameSection.split("|");
+    const section = view.notebooks.find((item) => item.id === notebookId)?.sections.find((item) => item.id === sectionId);
+    const name = promptName("Đổi tên section", section?.title || "");
+    if (name) openAndReload(() => renameSection(notebookId, sectionId, name));
+    return;
+  }
+  if (target.dataset.deleteSection) {
+    const [notebookId, sectionId] = target.dataset.deleteSection.split("|");
+    const record = view.notebooks.find((item) => item.id === notebookId);
+    if ((record?.sections.length || 0) <= 1) return window.alert("Notebook phải còn ít nhất một section.");
+    if (window.confirm("Xóa section? Các trang sẽ được chuyển sang section còn lại.")) openAndReload(() => deleteSection(notebookId, sectionId));
+    return;
+  }
+  if (target.dataset.addPage) {
+    const [notebookId, sectionId] = target.dataset.addPage.split("|");
+    const name = promptName("Tên trang", "Trang mới");
+    if (name) openAndReload(() => createPage(notebookId, sectionId, name));
+    return;
+  }
+  if (target.dataset.movePage) {
+    const [notebookId, pageId] = target.dataset.movePage.split("|");
+    return showMovePageDialog(panel, view, notebookId, pageId);
+  }
+  if (target.dataset.renameNotebook) {
+    const notebook = view.notebooks.find((item) => item.id === target.dataset.renameNotebook);
+    const name = promptName("Đổi tên notebook", notebook?.title || "");
+    if (name) openAndReload(() => renameNotebook(target.dataset.renameNotebook!, name));
+    return;
+  }
+  if (target.dataset.deleteNotebook) {
+    const notebook = view.notebooks.find((item) => item.id === target.dataset.deleteNotebook);
+    if (window.confirm(`Xóa notebook “${notebook?.title || ""}”? Tài liệu và khối tài liệu không bị xóa.`)) openAndReload(() => deleteNotebook(target.dataset.deleteNotebook!));
   }
 }
+
+function mount() {
+  injectStyle();
+  syncFromApp();
+  for (const backdrop of Array.from(document.querySelectorAll<HTMLElement>(".library-backdrop"))) {
+    if (backdrop.querySelector(".relation-library")) continue;
+    const nativePanel = backdrop.querySelector<HTMLElement>(".library-panel");
+    if (!nativePanel) continue;
+    nativePanel.style.display = "none";
+    const panel = buildPanel(backdrop);
+    if (panel) {
+      panel.addEventListener("click", (event) => handleClick(event, panel, backdrop));
+      backdrop.append(panel);
+    }
+  }
+}
+
+function init() {
+  new MutationObserver(mount).observe(document.documentElement, { childList: true, subtree: true });
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", mount, { once: true }) : mount();
+  window.setInterval(() => { if (!document.querySelector(".relation-library")) syncFromApp(); }, 1800);
+  if (sessionStorage.getItem(IMPORT_SESSION_KEY)) watchImport((source) => { openSource(source); reload(); });
+}
+
 init();
 export {};
