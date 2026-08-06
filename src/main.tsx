@@ -8,6 +8,7 @@ import "../app/textbox-fixes.css";
 import "../app/note-zoom-fixes.css";
 import "../app/note-pdf-export.css";
 import "../app/note-zoom-runtime";
+import "../app/pdf-wheel-zoom-runtime";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
