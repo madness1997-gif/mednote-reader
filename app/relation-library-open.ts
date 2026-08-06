@@ -144,13 +144,13 @@ export function openNoteTarget(target: RelationTarget) {
   return openTargetInternal(synced.state, synced.library, target, relation?.source, relation);
 }
 
-export function upsertRelation(kind: RelationKind, source: RelationSource, target: RelationTarget, isDefault = false) {
+export function upsertRelation(kind: RelationKind, source: RelationSource, target: RelationTarget, _isDefault = false) {
   const synced = syncFromApp();
   if (!synced) return false;
   const nextRelations: Relation[] = [];
   for (const relation of synced.library.relations) {
     if (sameEndpoints(relation, source, target)) continue;
-    if (kind === "workspace" && isDefault && relation.kind === "workspace" && sourceKey(relation.source) === sourceKey(source)) {
+    if (kind === "workspace" && relation.kind === "workspace" && sourceKey(relation.source) === sourceKey(source)) {
       // A source has one primary study destination. Older primary destinations are
       // preserved as ordinary references instead of being silently discarded.
       nextRelations.push({
