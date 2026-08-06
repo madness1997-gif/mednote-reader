@@ -2,10 +2,10 @@ import {
   IMPORT_SESSION_KEY, createNotebook, createPage, createSection, deleteDocument, deleteGroup, deleteNotebook, deleteSection, getLibraryView, importPdf, openNoteTarget, openSource, renameDocument, renameGroup, renameNotebook, renameSection, syncFromApp, titleOf, watchImport, type RelationTarget,
 } from "./independent-library-core";
 import { buildPanel, closeLibrary, decodeSource, injectStyle, openAndReload, promptName, reload } from "./relation-library-ui-base";
-import { showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
+import { showAttachSourceDialog, showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
 
 function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
-  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-relate-target],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
   if (!target) return;
   const view = getLibraryView();
   if (!view) return;
@@ -26,6 +26,10 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
     catch { return; }
   }
   if (target.dataset.relateSource) return showRelationDialog(panel, view, decodeSource(target.dataset.relateSource));
+  if (target.dataset.relateTarget) {
+    try { return showAttachSourceDialog(panel, view, JSON.parse(target.dataset.relateTarget) as RelationTarget); }
+    catch { return; }
+  }
   if (target.dataset.renameDocument) {
     const record = view.documents.find((item) => item.id === target.dataset.renameDocument);
     const name = promptName("Đổi tên PDF", record ? titleOf(record.name) : "");
@@ -34,20 +38,20 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.deleteDocument) {
     const record = view.documents.find((item) => item.id === target.dataset.deleteDocument);
-    if (window.confirm(`Xóa PDF “${record?.name || ""}”? Các quan hệ nội dung vẫn giữ vết nguồn nhưng tài liệu sẽ không còn khả dụng.`)) {
+    if (window.confirm(`Xóa PDF “${record?.name || ""}” khỏi thư viện? Notebook, section và trang ghi chú vẫn được giữ; các trích dẫn cũ chỉ còn dấu nguồn không khả dụng.`)) {
       void deleteDocument(target.dataset.deleteDocument!).then((ok) => { if (ok) reload(); });
     }
     return;
   }
   if (target.dataset.renameGroup) {
     const group = view.groups.find((item) => item.id === target.dataset.renameGroup);
-    const name = promptName("Đổi tên khối tài liệu", group?.name || "");
+    const name = promptName("Đổi tên bộ PDF", group?.name || "");
     if (name) openAndReload(() => renameGroup(target.dataset.renameGroup!, name));
     return;
   }
   if (target.dataset.deleteGroup) {
     const group = view.groups.find((item) => item.id === target.dataset.deleteGroup);
-    if (window.confirm(`Xóa khối “${group?.name || ""}”? Các PDF bên trong vẫn được giữ.`)) openAndReload(() => deleteGroup(target.dataset.deleteGroup!));
+    if (window.confirm(`Xóa bộ “${group?.name || ""}”? Các PDF bên trong và mọi ghi chú vẫn được giữ.`)) openAndReload(() => deleteGroup(target.dataset.deleteGroup!));
     return;
   }
   if (target.dataset.addSection) {
@@ -66,7 +70,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
     const [notebookId, sectionId] = target.dataset.deleteSection.split("|");
     const record = view.notebooks.find((item) => item.id === notebookId);
     if ((record?.sections.length || 0) <= 1) return window.alert("Notebook phải còn ít nhất một section.");
-    if (window.confirm("Xóa section? Các trang sẽ được chuyển sang section còn lại.")) openAndReload(() => deleteSection(notebookId, sectionId));
+    if (window.confirm("Xóa section? Các trang và liên kết PDF của chúng sẽ được chuyển sang section còn lại.")) openAndReload(() => deleteSection(notebookId, sectionId));
     return;
   }
   if (target.dataset.addPage) {
@@ -87,7 +91,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.deleteNotebook) {
     const notebook = view.notebooks.find((item) => item.id === target.dataset.deleteNotebook);
-    if (window.confirm(`Xóa notebook “${notebook?.title || ""}”? Tài liệu và khối tài liệu không bị xóa.`)) openAndReload(() => deleteNotebook(target.dataset.deleteNotebook!));
+    if (window.confirm(`Xóa notebook “${notebook?.title || ""}”? Các PDF và bộ PDF đã gắn không bị xóa.`)) openAndReload(() => deleteNotebook(target.dataset.deleteNotebook!));
   }
 }
 
