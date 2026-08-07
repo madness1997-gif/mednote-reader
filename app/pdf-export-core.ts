@@ -12,8 +12,13 @@ const CONTROL_SELECTOR = [
 ].join(",");
 
 const MOBILE_QUERY = "(max-width: 900px), (pointer: coarse)";
-const CAPTURE_TIMEOUT_MS = 18_000;
-const PDF_SAVE_TIMEOUT_MS = 10_000;
+const CAPTURE_TIMEOUT_MS = 30_000;
+const PDF_SAVE_TIMEOUT_MS = 15_000;
+const JPEG_TIMEOUT_MS = 10_000;
+const MOBILE_CAPTURE_SCALE = 2;
+const DESKTOP_CAPTURE_SCALE = 2.5;
+const MOBILE_MAX_CAPTURE_PIXELS = 6_000_000;
+const DESKTOP_MAX_CAPTURE_PIXELS = 12_000_000;
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -68,32 +73,42 @@ function paperNaturalSize(source: HTMLElement) {
   };
 }
 
+export function captureScaleForSize(width: number, height: number) {
+  const mobile = isMobile();
+  const preferredScale = mobile ? MOBILE_CAPTURE_SCALE : DESKTOP_CAPTURE_SCALE;
+  const maxPixels = mobile ? MOBILE_MAX_CAPTURE_PIXELS : DESKTOP_MAX_CAPTURE_PIXELS;
+  const naturalPixels = Math.max(1, width * height);
+  const memorySafeScale = Math.sqrt(maxPixels / naturalPixels);
+  return Math.max(1, Math.min(preferredScale, memorySafeScale));
+}
+
 async function canvasToJpegBytes(canvas: HTMLCanvasElement) {
   const blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (value) => value ? resolve(value) : reject(new Error("Không mã hóa được ảnh Sheet")),
       "image/jpeg",
-      isMobile() ? 0.88 : 0.93,
+      isMobile() ? 0.95 : 0.97,
     );
-  }), 7000, "Mã hóa ảnh Sheet quá lâu");
+  }), JPEG_TIMEOUT_MS, "Mã hóa ảnh Sheet quá lâu");
   return new Uint8Array(await blob.arrayBuffer());
 }
 
 async function capturePaper(source: HTMLElement, sheetNumber: number) {
   const { width, height } = paperNaturalSize(source);
+  const scale = captureScaleForSize(width, height);
   source.classList.add("note-pdf-exporting");
   await settleLayout();
 
   try {
     const canvas = await withTimeout(html2canvas(source, {
       backgroundColor: "#ffffff",
-      scale: isMobile() ? 0.9 : 1.25,
+      scale,
       logging: false,
       useCORS: true,
       allowTaint: false,
       foreignObjectRendering: false,
       removeContainer: true,
-      imageTimeout: 5000,
+      imageTimeout: 7000,
       width,
       height,
       scrollX: 0,
@@ -109,7 +124,7 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
         });
       },
     }), CAPTURE_TIMEOUT_MS, `Sheet ${sheetNumber} dựng quá ${CAPTURE_TIMEOUT_MS / 1000} giây`);
-    return { jpeg: await canvasToJpegBytes(canvas), width, height };
+    return { jpeg: await canvasToJpegBytes(canvas), width, height, scale };
   } finally {
     source.classList.remove("note-pdf-exporting");
   }
@@ -149,6 +164,7 @@ export async function appendPaperToPdf(pdf: PDFDocument, source: HTMLElement, sh
   const size = pdfPageSize(rendered.width, rendered.height);
   const page = pdf.addPage([size.width, size.height]);
   page.drawImage(embedded, { x: 0, y: 0, width: size.width, height: size.height });
+  return { scale: rendered.scale, pixelWidth: Math.round(rendered.width * rendered.scale), pixelHeight: Math.round(rendered.height * rendered.scale) };
 }
 
 export async function saveVerifiedPdf(pdf: PDFDocument) {
@@ -176,19 +192,22 @@ export async function runPdfCoreSelfTest() {
       <div style="height:26px;background:#0e6b70;color:#fff;font-weight:700;padding:7px 10px">MEDNOTE PDF SELF TEST</div>
       <h2 style="margin:24px 0 10px;font-size:22px">Sheet test</h2>
       <p style="font-size:15px;line-height:1.5">Nếu nội dung này được rasterize và nhúng vào PDF, bộ xuất PDF hoạt động.</p>
-      <div style="margin-top:24px;width:120px;height:120px;border-radius:60px;background:#c7d8eb"></div>
+      <div style="margin-top:24px;width:120px;height:120px;border-radius:60%;background:#c7d8eb"></div>
     </div>`;
   document.body.append(fixture);
 
   try {
     const pdf = await createPdfDocument();
-    await appendPaperToPdf(pdf, fixture, 1);
+    const rendered = await appendPaperToPdf(pdf, fixture, 1);
     const bytes = await saveVerifiedPdf(pdf);
     return {
       ok: true,
       bytes: bytes.length,
       header: new TextDecoder().decode(bytes.slice(0, 5)),
       pages: pdf.getPageCount(),
+      scale: rendered.scale,
+      pixelWidth: rendered.pixelWidth,
+      pixelHeight: rendered.pixelHeight,
     };
   } finally {
     fixture.remove();

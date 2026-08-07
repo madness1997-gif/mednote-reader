@@ -8,18 +8,23 @@ test.use({
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
-test('PDF export core produces a real one-page PDF in mobile Chromium', async ({ page }) => {
+test('PDF export core produces a high-resolution real PDF in mobile Chromium', async ({ page }) => {
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
 
   const result = await page.evaluate(async () => {
     const core = await import('/mednote-reader/app/pdf-export-core.ts');
-    return core.runPdfCoreSelfTest();
+    const a4Scale = core.captureScaleForSize(720, 1018);
+    return { ...(await core.runPdfCoreSelfTest()), a4Scale };
   });
 
   expect(result.ok).toBe(true);
   expect(result.header).toBe('%PDF-');
   expect(result.pages).toBe(1);
   expect(result.bytes).toBeGreaterThan(1000);
+  expect(result.scale).toBeGreaterThanOrEqual(2);
+  expect(result.a4Scale).toBeGreaterThanOrEqual(2);
+  expect(result.pixelWidth).toBeGreaterThanOrEqual(840);
+  expect(result.pixelHeight).toBeGreaterThanOrEqual(1188);
 });
 
 test('clicking Export PDF really creates a downloadable PDF blob', async ({ page }) => {
@@ -48,7 +53,7 @@ test('clicking Export PDF really creates a downloadable PDF blob', async ({ page
       return `failed:${detail}`;
     }
     return 'waiting';
-  }, { timeout: 25_000, intervals: [100, 250, 500] }).toBe('ready');
+  }, { timeout: 30_000, intervals: [100, 250, 500] }).toBe('ready');
 
   const downloadLink = page.locator('[data-pdf-download="1"]');
   await expect(downloadLink).toBeVisible();
