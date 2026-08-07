@@ -1,8 +1,6 @@
-import html2canvas from "html2canvas";
 import { ChevronDown, FileDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PDFDocument } from "pdf-lib";
 import { currentContext, pageGroups, type SheetPage } from "./page-sheet-state";
 
 const CONTROL_SELECTOR = [
@@ -15,9 +13,6 @@ const CONTROL_SELECTOR = [
   ".note-selection-box",
 ].join(",");
 
-const MOBILE_QUERY = "(max-width: 900px), (pointer: coarse)";
-const CAPTURE_TIMEOUT = 20_000;
-
 type ExportScope = "notebook" | "section" | "page" | "sheet";
 type ExportPlan = {
   scope: ExportScope;
@@ -27,6 +22,11 @@ type ExportPlan = {
   pageIndices: number[];
 };
 type ExportProgress = { page: number; total: number; scope: ExportScope };
+type PrintTarget = {
+  win: Window;
+  doc: Document;
+  cleanup: () => void;
+};
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -36,30 +36,10 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(message)), ms);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
-function isMobile() {
-  return window.matchMedia?.(MOBILE_QUERY).matches ?? window.innerWidth <= 900;
-}
-
 async function settleLayout() {
   await nextFrame();
   await nextFrame();
-  await delay(isMobile() ? 30 : 50);
+  await delay(24);
 }
 
 function safeFileName(value: string) {
@@ -173,141 +153,161 @@ async function activateNotePage(index: number) {
   await settleLayout();
   const paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
   if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
-  await withTimeout(document.fonts?.ready ?? Promise.resolve(), 2500, "Font tải quá lâu").catch(() => undefined);
   return paper;
 }
 
-function paperSize(source: HTMLElement) {
-  const computed = window.getComputedStyle(source);
-  const width = Number.parseFloat(computed.getPropertyValue("--note-natural-width"))
-    || Number.parseFloat(computed.getPropertyValue("--paper-max-width"))
-    || source.offsetWidth;
-  const ratioText = computed.getPropertyValue("--paper-ratio");
-  const ratioMatch = ratioText.match(/([\d.]+)\s*\/\s*([\d.]+)/);
-  const ratio = ratioMatch ? Number(ratioMatch[1]) / Number(ratioMatch[2]) : source.offsetWidth / Math.max(1, source.offsetHeight);
-  const height = Number.parseFloat(computed.getPropertyValue("--note-natural-height")) || width / ratio;
-  return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
+function copyCanvasPixels(source: HTMLElement, clone: HTMLElement) {
+  const sourceCanvases = Array.from(source.querySelectorAll<HTMLCanvasElement>("canvas"));
+  const clonedCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
+  sourceCanvases.forEach((canvas, index) => {
+    const target = clonedCanvases[index];
+    if (!target) return;
+    try {
+      const image = clone.ownerDocument.createElement("img");
+      image.src = canvas.toDataURL("image/png");
+      image.alt = "";
+      image.width = canvas.width;
+      image.height = canvas.height;
+      image.setAttribute("style", target.getAttribute("style") || "");
+      image.style.width = target.style.width || `${canvas.clientWidth || canvas.width}px`;
+      image.style.height = target.style.height || `${canvas.clientHeight || canvas.height}px`;
+      target.replaceWith(image);
+    } catch {
+      target.remove();
+    }
+  });
 }
 
-async function canvasToJpeg(canvas: HTMLCanvasElement) {
-  const blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (value) => value ? resolve(value) : reject(new Error("Không thể mã hóa ảnh Sheet")),
-      "image/jpeg",
-      isMobile() ? 0.9 : 0.94,
-    );
-  }), 7000, "Mã hóa ảnh Sheet quá lâu");
-  return new Uint8Array(await blob.arrayBuffer());
+function clonePaperForPrint(source: HTMLElement, targetDocument: Document) {
+  const clone = targetDocument.importNode(source, true) as HTMLElement;
+  clone.querySelectorAll(CONTROL_SELECTOR).forEach((element) => element.remove());
+  clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => element.setAttribute("contenteditable", "false"));
+  clone.querySelectorAll<HTMLElement>(".selected,.editable,.movable").forEach((element) => {
+    element.classList.remove("selected", "editable", "movable");
+  });
+  copyCanvasPixels(source, clone);
+  clone.classList.remove("note-pdf-exporting");
+  return clone;
 }
 
-async function captureSheet(source: HTMLElement, sheetNumber: number) {
-  const { width, height } = paperSize(source);
-  source.classList.add("note-pdf-exporting");
-  await settleLayout();
+function installPrintStyles(targetDocument: Document) {
+  const base = targetDocument.createElement("base");
+  base.href = document.baseURI;
+  targetDocument.head.append(base);
 
-  try {
-    const scale = isMobile() ? 1 : 1.35;
-    const canvas = await withTimeout(html2canvas(source, {
-      backgroundColor: "#ffffff",
-      scale,
-      logging: false,
-      useCORS: true,
-      allowTaint: false,
-      foreignObjectRendering: false,
-      removeContainer: true,
-      width,
-      height,
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: Math.max(width, document.documentElement.clientWidth),
-      windowHeight: Math.max(height, document.documentElement.clientHeight),
-      ignoreElements: (element) => element instanceof Element && Boolean(element.closest(CONTROL_SELECTOR)),
-      onclone: (_document, clonedElement) => {
-        clonedElement.querySelectorAll<HTMLElement>(CONTROL_SELECTOR).forEach((element) => element.remove());
-        clonedElement.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => element.setAttribute("contenteditable", "false"));
-        clonedElement.querySelectorAll<HTMLElement>(".selected,.editable,.movable").forEach((element) => {
-          element.classList.remove("selected", "editable", "movable");
-        });
+  document.querySelectorAll("link[rel='stylesheet'], style").forEach((node) => {
+    targetDocument.head.append(targetDocument.importNode(node, true));
+  });
+
+  const style = targetDocument.createElement("style");
+  style.textContent = `
+    html,body{margin:0!important;padding:0!important;background:#fff!important;color-adjust:exact!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    body{overflow:visible!important}
+    #mednote-print-root{display:block!important;margin:0!important;padding:0!important;background:#fff!important}
+    .mednote-print-sheet{display:block!important;position:relative!important;margin:0 auto!important;padding:0!important;break-after:page!important;page-break-after:always!important;overflow:visible!important;background:#fff!important}
+    .mednote-print-sheet:last-child{break-after:auto!important;page-break-after:auto!important}
+    .mednote-print-sheet>.note-paper{display:block!important;position:relative!important;transform:none!important;scale:1!important;margin:0 auto!important;box-shadow:none!important;filter:none!important;outline:none!important}
+    ${CONTROL_SELECTOR}{display:none!important}
+    @media print{
+      @page{margin:0}
+      html,body,#mednote-print-root{width:100%!important;height:auto!important;overflow:visible!important}
+      .mednote-print-sheet{break-inside:avoid!important;page-break-inside:avoid!important}
+    }
+  `;
+  targetDocument.head.append(style);
+}
+
+function openPrintTarget(fileName: string): PrintTarget {
+  const title = fileName.replace(/\.pdf$/i, "");
+  const popup = window.open("", "_blank");
+  if (popup) {
+    popup.document.open();
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title.replace(/[<&>]/g, "")}</title></head><body><div id="mednote-print-root"></div></body></html>`);
+    popup.document.close();
+    installPrintStyles(popup.document);
+    return {
+      win: popup,
+      doc: popup.document,
+      cleanup: () => {
+        try { popup.close(); } catch { /* ignore */ }
       },
-    }), CAPTURE_TIMEOUT, `Sheet ${sheetNumber} dựng quá 20 giây`);
-    return { jpeg: await canvasToJpeg(canvas), width, height };
-  } finally {
-    source.classList.remove("note-pdf-exporting");
+    };
   }
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.width = "1px";
+  iframe.style.height = "1px";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.append(iframe);
+  const win = iframe.contentWindow;
+  const doc = iframe.contentDocument;
+  if (!win || !doc) {
+    iframe.remove();
+    throw new Error("Trình duyệt không cho mở tài liệu PDF");
+  }
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title.replace(/[<&>]/g, "")}</title></head><body><div id="mednote-print-root"></div></body></html>`);
+  doc.close();
+  installPrintStyles(doc);
+  return { win, doc, cleanup: () => iframe.remove() };
 }
 
-type PaperCandidate = { widthMm: number; heightMm: number; naturalWidth: number };
-const PAPER_CANDIDATES: PaperCandidate[] = [
-  { widthMm: 210, heightMm: 297, naturalWidth: 720 },
-  { widthMm: 148, heightMm: 210, naturalWidth: 590 },
-  { widthMm: 176, heightMm: 250, naturalWidth: 650 },
-  { widthMm: 216, heightMm: 279, naturalWidth: 740 },
-  { widthMm: 210, heightMm: 210, naturalWidth: 720 },
-];
-
-function pdfPageSize(width: number, height: number) {
-  const ratio = width / Math.max(1, height);
-  const candidates = PAPER_CANDIDATES.flatMap((candidate) => [
-    { widthMm: candidate.widthMm, heightMm: candidate.heightMm, expectedWidth: candidate.naturalWidth },
-    { widthMm: candidate.heightMm, heightMm: candidate.widthMm, expectedWidth: Math.min(920, candidate.naturalWidth * 1.32) },
-  ]);
-  const best = candidates.reduce((current, candidate) => {
-    const candidateRatio = candidate.widthMm / candidate.heightMm;
-    const score = Math.abs(Math.log(ratio / candidateRatio)) * 100 + Math.abs(width - candidate.expectedWidth) / 120;
-    return score < current.score ? { ...candidate, score } : current;
-  }, { ...candidates[0], score: Number.POSITIVE_INFINITY });
-  const pointsPerMm = 72 / 25.4;
-  return { width: best.widthMm * pointsPerMm, height: best.heightMm * pointsPerMm };
-}
-
-function downloadPdf(bytes: Uint8Array, fileName: string) {
-  const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.style.display = "none";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-async function exportPlanToPdf(plan: ExportPlan, onProgress: (page: number, total: number) => void) {
+async function exportPlanToPdf(plan: ExportPlan, target: PrintTarget, onProgress: (page: number, total: number) => void) {
   const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"));
   if (!thumbnails.length) throw new Error("Notebook chưa có Sheet nào");
   if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
   const originalIndex = Math.max(0, thumbnails.findIndex((thumbnail) => thumbnail.classList.contains("active")));
-  const pdf = await PDFDocument.create();
-  document.body.classList.add("note-pdf-export-active");
+  const root = target.doc.getElementById("mednote-print-root");
+  if (!root) throw new Error("Không tạo được tài liệu in");
 
   try {
     for (let position = 0; position < plan.pageIndices.length; position += 1) {
       const displayPage = position + 1;
       onProgress(displayPage, plan.pageIndices.length);
       document.dispatchEvent(new CustomEvent("mednote:pdf-export-progress", {
-        detail: { page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "render" },
+        detail: { page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" },
       }));
 
-      const paper = await activateNotePage(plan.pageIndices[position]);
-      const rendered = await captureSheet(paper, displayPage);
-      const embedded = await pdf.embedJpg(rendered.jpeg);
-      const size = pdfPageSize(rendered.width, rendered.height);
-      const page = pdf.addPage([size.width, size.height]);
-      page.drawImage(embedded, { x: 0, y: 0, width: size.width, height: size.height });
+      const source = await activateNotePage(plan.pageIndices[position]);
+      const wrapper = target.doc.createElement("section");
+      wrapper.className = "mednote-print-sheet";
+      wrapper.append(clonePaperForPrint(source, target.doc));
+      root.append(wrapper);
       await nextFrame();
     }
   } finally {
-    document.querySelectorAll<HTMLElement>(".note-pdf-exporting").forEach((paper) => paper.classList.remove("note-pdf-exporting"));
     await activateNotePage(originalIndex).catch(() => undefined);
-    document.body.classList.remove("note-pdf-export-active");
   }
 
   document.dispatchEvent(new CustomEvent("mednote:pdf-export-progress", {
-    detail: { page: plan.pageIndices.length, total: plan.pageIndices.length, scope: plan.scope, phase: "save" },
+    detail: { page: plan.pageIndices.length, total: plan.pageIndices.length, scope: plan.scope, phase: "print" },
   }));
-  downloadPdf(await withTimeout(pdf.save(), 10_000, "Ghép PDF quá lâu"), plan.fileName);
+
+  await Promise.race([
+    target.doc.fonts?.ready ?? Promise.resolve(),
+    delay(1200),
+  ]).catch(() => undefined);
+  await delay(120);
+
+  const cleanup = target.cleanup;
+  let cleaned = false;
+  const finish = () => {
+    if (cleaned) return;
+    cleaned = true;
+    window.setTimeout(cleanup, 300);
+  };
+  target.win.addEventListener("afterprint", finish, { once: true });
+  target.win.focus();
+  target.win.print();
+  window.setTimeout(() => {
+    if (target.win.closed) finish();
+  }, 30_000);
 }
 
 export default function NotePdfExporter() {
@@ -346,9 +346,20 @@ export default function NotePdfExporter() {
 
   const startExport = (plan: ExportPlan) => {
     setMenuOpen(false);
+    let printTarget: PrintTarget;
+    try {
+      printTarget = openPrintTarget(plan.fileName);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không mở được tài liệu in";
+      document.dispatchEvent(new CustomEvent("mednote:pdf-export-error", { detail: { message } }));
+      window.alert(`Không thể xuất PDF: ${message}`);
+      return;
+    }
+
     setProgress({ page: 0, total: plan.pageIndices.length, scope: plan.scope });
-    void exportPlanToPdf(plan, (page, total) => setProgress({ page, total, scope: plan.scope }))
+    void exportPlanToPdf(plan, printTarget, (page, total) => setProgress({ page, total, scope: plan.scope }))
       .catch((error) => {
+        printTarget.cleanup();
         const message = error instanceof Error ? error.message : "Không thể xuất PDF";
         document.dispatchEvent(new CustomEvent("mednote:pdf-export-error", { detail: { message } }));
         window.alert(`Không thể xuất PDF: ${message}`);
