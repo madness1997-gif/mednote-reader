@@ -98,37 +98,39 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   expect(hiddenState).toBe('1');
 });
 
-test('search, recent notes and notebook picker stay open across background maintenance', async ({ page }) => {
-  test.setTimeout(40_000);
+test('search, notebook list and more menu do not disappear after a few seconds', async ({ page }) => {
+  test.setTimeout(45_000);
   const nav = page.locator('.mednote-page-sheet-nav');
+  const bookbar = nav.locator('.mps-bookbar');
+  const search = bookbar.locator('[data-native-note-search]');
+  const more = bookbar.locator('[data-page-sheet-notebook-more]');
+  const pickerButton = bookbar.locator('[data-page-sheet-notebook-picker]');
+  const notebookSelect = bookbar.locator('[data-notebook-select]');
 
-  // Rail search must remain mounted for longer than several 900/1200 ms maintenance cycles.
-  const railSearch = nav.locator('[data-sidebar-mode-button="search"]');
-  await expect(railSearch).toBeVisible({ timeout: 5_000 });
-  await railSearch.click();
+  // Search must survive multiple 900/1200 ms maintenance cycles.
+  await search.click();
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
   await expect(nav.locator('.mps-search-input')).toBeVisible();
-  await page.waitForTimeout(3_500);
+  await page.waitForTimeout(4_000);
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
   await expect(nav.locator('.mps-search-input')).toBeVisible();
+  await nav.locator('[data-native-note-search-close]').click();
 
-  // Recent Notes is the other utility panel users reported disappearing.
-  const railRecent = nav.locator('[data-sidebar-mode-button="recent"]');
-  await railRecent.click();
-  await expect(nav).toHaveAttribute('data-sidebar-mode', 'recent');
-  await expect(nav.locator('.mps-sidebar-utility')).toBeVisible();
-  await page.waitForTimeout(3_500);
-  await expect(nav).toHaveAttribute('data-sidebar-mode', 'recent');
-  await expect(nav.locator('.mps-sidebar-utility')).toBeVisible();
+  // The Notebook actions menu must also stay open instead of being detached.
+  await more.click();
+  const menu = bookbar.locator('.mps-notebook-menu');
+  await expect(menu).toHaveClass(/open/);
+  await page.waitForTimeout(4_000);
+  await expect(menu).toHaveClass(/open/);
+  await more.click();
+  await expect(menu).not.toHaveClass(/open/);
 
-  // Return to navigation then verify the notebook picker element is not replaced.
-  await nav.locator('[data-sidebar-mode-button="navigation"]').click();
-  const pickerButton = nav.locator('[data-page-sheet-notebook-picker]');
-  const notebookSelect = nav.locator('[data-notebook-select]');
+  // Notebook list: the select must remain the same focused element while its
+  // native picker is open. Replacing the sidebar would remove focus and close it.
   await pickerButton.click();
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
-  await page.waitForTimeout(3_500);
+  await page.waitForTimeout(4_000);
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
 });
