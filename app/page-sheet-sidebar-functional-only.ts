@@ -1,5 +1,7 @@
 const STYLE_ID = "mednote-page-sheet-sidebar-functional-only-style";
 const NAV_CLASS = "mednote-page-sheet-nav";
+const SEARCH_BUTTON_CLASS = "mps-sidebar-search-button";
+const SEARCH_CLOSE_CLASS = "mps-sidebar-search-close";
 
 const FUNCTIONAL_BUTTON_SELECTORS = [
   "[data-new-notebook]",
@@ -19,18 +21,30 @@ const FUNCTIONAL_BUTTON_SELECTORS = [
   "[data-sheet-down]",
   "[data-move-page]",
   "[data-note-navigation-close]",
+  "[data-sidebar-mode-button]",
+  "[data-search-open-kind][data-search-open-value]",
 ].join(",");
 
 const style = `
-/* Keep the OneNote-like Notebook -> Section -> Page hierarchy, but do not show
-   placeholder navigation/search/recent controls. Every visible button must do something. */
+/* Keep the OneNote-like Notebook -> Section -> Page hierarchy. Search is the
+   only utility control kept because it has a real, complete interaction. */
 .${NAV_CLASS}{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:42px minmax(0,1fr)!important}
-.${NAV_CLASS}>.mps-onenote-rail,.${NAV_CLASS}>.mps-sidebar-utility{display:none!important}
+.${NAV_CLASS}>.mps-onenote-rail{display:none!important}
 .${NAV_CLASS} .mps-bookbar{grid-column:1!important;grid-row:1!important}
 .${NAV_CLASS} .mps-layout{grid-column:1!important;grid-row:2!important;display:grid!important}
-.${NAV_CLASS}[data-sidebar-mode="search"] .mps-layout,
+.${NAV_CLASS}[data-sidebar-mode="search"] .mps-layout{display:none!important}
 .${NAV_CLASS}[data-sidebar-mode="recent"] .mps-layout{display:grid!important}
+.${NAV_CLASS}>.mps-sidebar-utility{grid-column:1!important;grid-row:2!important}
+.${NAV_CLASS}[data-sidebar-mode="navigation"]>.mps-sidebar-utility,
+.${NAV_CLASS}[data-sidebar-mode="recent"]>.mps-sidebar-utility{display:none!important}
+.${NAV_CLASS}[data-sidebar-mode="search"]>.mps-sidebar-utility{display:flex!important}
 .workspace.onenote-right-navigation-layout{--onenote-nav-width:clamp(315px,28vw,390px)!important}
+
+.${NAV_CLASS} .${SEARCH_BUTTON_CLASS}{flex:0 0 30px!important;width:30px!important;height:30px!important;display:grid!important;place-items:center!important;border:0!important;border-radius:7px!important;background:transparent!important;color:#5f6368!important;font-size:17px!important;cursor:pointer!important}
+.${NAV_CLASS} .${SEARCH_BUTTON_CLASS}:hover{background:#eeeeef!important;color:#333!important}
+.${NAV_CLASS}[data-sidebar-mode="search"] .${SEARCH_BUTTON_CLASS}{background:#eee7f3!important;color:#6f238f!important}
+.${NAV_CLASS} .${SEARCH_CLOSE_CLASS}{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:#666;font-size:18px;cursor:pointer}
+.${NAV_CLASS} .${SEARCH_CLOSE_CLASS}:hover{background:#ececee;color:#222}
 
 /* Names are the main UI. Actions remain behind one real ellipsis menu. */
 .${NAV_CLASS} .mps-page-tools,
@@ -48,6 +62,35 @@ function injectStyle() {
   element.id = STYLE_ID;
   element.textContent = style;
   document.head.append(element);
+}
+
+function ensureSearchButton(nav: HTMLElement) {
+  const bookbar = nav.querySelector<HTMLElement>(":scope > .mps-bookbar");
+  if (!bookbar || bookbar.querySelector(`.${SEARCH_BUTTON_CLASS}`)) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `mps-icon ${SEARCH_BUTTON_CLASS}`;
+  button.dataset.sidebarModeButton = "search";
+  button.title = "Tìm kiếm ghi chú";
+  button.setAttribute("aria-label", "Tìm kiếm ghi chú");
+  button.setAttribute("aria-pressed", "false");
+  button.textContent = "⌕";
+  const close = bookbar.querySelector<HTMLElement>("[data-note-navigation-close]");
+  if (close) bookbar.insertBefore(button, close); else bookbar.append(button);
+}
+
+function ensureSearchClose(nav: HTMLElement) {
+  if (nav.dataset.sidebarMode !== "search") return;
+  const head = nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility .mps-utility-head");
+  if (!head || head.querySelector(`.${SEARCH_CLOSE_CLASS}`)) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = SEARCH_CLOSE_CLASS;
+  button.dataset.sidebarModeButton = "navigation";
+  button.title = "Đóng tìm kiếm";
+  button.setAttribute("aria-label", "Đóng tìm kiếm");
+  button.textContent = "×";
+  head.append(button);
 }
 
 function removeUnavailableActions(nav: HTMLElement) {
@@ -72,9 +115,11 @@ function removeFakeButtons(nav: HTMLElement) {
 }
 
 function cleanNavigator(nav: HTMLElement) {
-  nav.dataset.sidebarMode = "navigation";
+  if (nav.dataset.sidebarMode !== "search") nav.dataset.sidebarMode = "navigation";
   nav.querySelector<HTMLElement>(":scope > .mps-onenote-rail")?.remove();
-  nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility")?.remove();
+  if (nav.dataset.sidebarMode === "navigation") nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility")?.remove();
+  ensureSearchButton(nav);
+  ensureSearchClose(nav);
   removeUnavailableActions(nav);
   removeFakeButtons(nav);
 }
