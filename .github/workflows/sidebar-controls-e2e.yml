@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "app/page-sheet-navigation.ts"
+      - "app/page-sheet-runtime.ts"
       - "app/page-sheet-sidebar-functional-only.ts"
       - "app/page-sheet-sidebar-clean.ts"
       - "app/page-sheet-toolbar-actions.ts"
