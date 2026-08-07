@@ -41,14 +41,101 @@
   display: none !important;
 }
 
+.note-pdf-export-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.note-pdf-export-button {
+  white-space: nowrap;
+}
+
 .note-pdf-export-button:disabled {
   min-width: 84px;
   opacity: .72;
   cursor: wait;
 }
 
+.note-pdf-export-menu {
+  position: absolute;
+  z-index: 100020;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(310px, calc(100vw - 20px));
+  padding: 6px;
+  border: 1px solid #dce3e6;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px #1f2f3829;
+}
+
+.note-pdf-export-menu-title {
+  padding: 6px 8px 7px;
+  color: #78868c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.note-pdf-export-menu > button {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #2e383d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-pdf-export-menu > button:hover,
+.note-pdf-export-menu > button:focus-visible {
+  background: #f1f4f5;
+  outline: none;
+}
+
+.note-pdf-export-menu > button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.note-pdf-export-menu strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-pdf-export-menu small {
+  overflow: hidden;
+  color: #78868c;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .note-pdf-export-active .note-thumb,
 .note-pdf-export-active .note-view-control,
 .note-pdf-export-active .note-tool-cluster {
   pointer-events: none;
+}
+
+@media(max-width:650px) {
+  .note-pdf-export-menu {
+    position: fixed;
+    top: 92px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: calc(100vh - 112px);
+    overflow: auto;
+  }
+
+  .note-pdf-export-menu > button {
+    min-height: 48px;
+  }
 }
