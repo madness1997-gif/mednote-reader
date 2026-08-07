@@ -17,8 +17,7 @@ const style = `
 .mednote-pdf-status strong{display:block;color:#263238;font-size:15px!important}
 .mednote-pdf-status small{display:block;margin-top:5px;color:#6d7b82;font-size:11px!important;line-height:1.45}
 .mednote-pdf-status-progress{height:4px;margin-top:14px;overflow:hidden;border-radius:999px;background:#e6ebed}
-.mednote-pdf-status-progress::after{content:"";display:block;width:42%;height:100%;border-radius:inherit;background:#0e6b70;animation:mednote-pdf-progress 1.05s ease-in-out infinite alternate}
-@keyframes mednote-pdf-progress{from{transform:translateX(-90%)}to{transform:translateX(235%)}}
+.mednote-pdf-status-progress>i{display:block;width:0;height:100%;border-radius:inherit;background:#0e6b70;transition:width .18s ease}
 .mednote-pdf-ready-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
 .mednote-pdf-ready-actions a{min-height:42px;display:flex;align-items:center;justify-content:center;padding:8px 10px;border:1px solid #cfdadd;border-radius:8px;background:#fff;color:#40525b;font-size:12px;font-weight:700;text-decoration:none}
 .mednote-pdf-ready-actions a.primary{border-color:#0e6b70;background:#0e6b70;color:#fff}
@@ -65,29 +64,33 @@ function createLayer() {
   return { layer, panel };
 }
 
-function showFailure() {
+function showMessage(titleText: string, detailText: string, closeMenu = false) {
   const { layer, panel } = createLayer();
   const body = document.createElement("div");
   body.className = "mednote-pdf-status";
   const title = document.createElement("strong");
-  title.textContent = "Không mở được lựa chọn Xuất PDF";
+  title.textContent = titleText;
   const detail = document.createElement("small");
-  detail.textContent = "Hãy tải lại trang một lần. Nếu vẫn còn lỗi, module xuất PDF sẽ cần được kiểm tra tiếp.";
+  detail.textContent = detailText;
   const close = document.createElement("button");
   close.type = "button";
   close.className = "mednote-pdf-ready-close";
   close.textContent = "Đóng";
   close.addEventListener("click", () => {
     layer.remove();
-    closeOriginalMenu();
+    if (closeMenu) closeOriginalMenu();
   });
   body.append(title, detail, close);
   panel.append(body);
   layer.addEventListener("click", (event) => {
     if (event.target !== layer) return;
     layer.remove();
-    closeOriginalMenu();
+    if (closeMenu) closeOriginalMenu();
   });
+}
+
+function showFailure() {
+  showMessage("Không mở được lựa chọn Xuất PDF", "Hãy tải lại trang một lần. Nếu vẫn còn lỗi, module xuất PDF sẽ cần được kiểm tra tiếp.", true);
 }
 
 function showGenerating(label = "") {
@@ -98,20 +101,19 @@ function showGenerating(label = "") {
   const title = document.createElement("strong");
   title.textContent = "Đang tạo PDF…";
   const detail = document.createElement("small");
-  detail.textContent = label ? `Đang dựng ${label}. Vui lòng chờ.` : "Đang dựng các Sheet và ghép thành PDF. Vui lòng chờ.";
+  detail.dataset.pdfProgressDetail = "1";
+  detail.textContent = label ? `Đang chuẩn bị ${label}…` : "Đang chuẩn bị các Sheet…";
   const progress = document.createElement("div");
   progress.className = "mednote-pdf-status-progress";
+  const bar = document.createElement("i");
+  bar.dataset.pdfProgressBar = "1";
+  progress.append(bar);
   body.append(title, detail, progress);
   panel.append(body);
 
   statusTimer = window.setInterval(() => {
-    if (!document.body.contains(layer)) {
-      stopStatusTimer();
-      return;
-    }
-    const exportText = document.querySelector<HTMLElement>(".note-pdf-export-button span")?.textContent?.trim();
-    if (exportText?.startsWith("PDF ")) detail.textContent = `Đang tạo ${exportText}. Vui lòng chờ.`;
-  }, 250);
+    if (!document.body.contains(layer)) stopStatusTimer();
+  }, 500);
 }
 
 function showPdfReady(href: string, fileName: string) {
@@ -119,7 +121,6 @@ function showPdfReady(href: string, fileName: string) {
   layer.dataset.pdfState = "ready";
   const body = document.createElement("div");
   body.className = "mednote-pdf-status";
-
   const title = document.createElement("strong");
   title.textContent = "PDF đã tạo xong";
   const detail = document.createElement("small");
@@ -149,12 +150,9 @@ function showPdfReady(href: string, fileName: string) {
   close.className = "mednote-pdf-ready-close";
   close.textContent = "Đóng";
   close.addEventListener("click", () => layer.remove());
-
   body.append(title, detail, name, actions, close);
   panel.append(body);
-  layer.addEventListener("click", (event) => {
-    if (event.target === layer) layer.remove();
-  });
+  layer.addEventListener("click", (event) => { if (event.target === layer) layer.remove(); });
 }
 
 function mirrorOriginalMenu(original: HTMLElement) {
@@ -162,7 +160,6 @@ function mirrorOriginalMenu(original: HTMLElement) {
   const layer = document.createElement("div");
   layer.className = LAYER_CLASS;
   layer.setAttribute("role", "presentation");
-
   const floating = original.cloneNode(true) as HTMLElement;
   floating.classList.add(FLOATING_CLASS);
   floating.style.removeProperty("display");
@@ -188,7 +185,6 @@ function mirrorOriginalMenu(original: HTMLElement) {
     layer.remove();
     closeOriginalMenu();
   });
-
   layer.append(floating);
   document.body.append(layer);
   original.style.setProperty("visibility", "hidden", "important");
@@ -225,9 +221,24 @@ function handleGeneratedPdfClick(event: MouseEvent) {
   if (!link || link.dataset[MANUAL_LINK_ATTR] === "1") return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  const href = link.href;
-  const fileName = link.download || "MedNote.pdf";
-  showPdfReady(href, fileName);
+  showPdfReady(link.href, link.download || "MedNote.pdf");
+}
+
+function handleProgress(event: Event) {
+  const detail = (event as CustomEvent<{ page?: number; total?: number; phase?: string }>).detail || {};
+  const layer = document.querySelector<HTMLElement>(`.${LAYER_CLASS}[data-pdf-state='generating']`);
+  if (!layer) return;
+  const text = layer.querySelector<HTMLElement>("[data-pdf-progress-detail='1']");
+  const bar = layer.querySelector<HTMLElement>("[data-pdf-progress-bar='1']");
+  const page = Math.max(0, Number(detail.page) || 0);
+  const total = Math.max(1, Number(detail.total) || 1);
+  if (text) text.textContent = detail.phase === "save" ? "Đang ghép và lưu PDF…" : `Đang dựng Sheet ${page}/${total}…`;
+  if (bar) bar.style.width = `${detail.phase === "save" ? 96 : Math.min(92, Math.max(6, (page - 0.35) / total * 92))}%`;
+}
+
+function handleExportError(event: Event) {
+  const detail = (event as CustomEvent<{ message?: string }>).detail;
+  showMessage("Xuất PDF thất bại", detail?.message || "Không thể tạo PDF trên thiết bị này.");
 }
 
 function handleKey(event: KeyboardEvent) {
@@ -242,5 +253,7 @@ injectStyle();
 document.addEventListener("click", handleGeneratedPdfClick, true);
 document.addEventListener("click", handleExportButtonClick, true);
 document.addEventListener("keydown", handleKey, true);
+document.addEventListener("mednote:pdf-export-progress", handleProgress as EventListener);
+document.addEventListener("mednote:pdf-export-error", handleExportError as EventListener);
 
 export {};
