@@ -1,6 +1,7 @@
 const STYLE_ID = "mednote-pdf-export-scope-overlay-style";
 const LAYER_CLASS = "mednote-pdf-export-scope-layer";
 const FLOATING_CLASS = "mednote-pdf-export-scope-floating";
+let suppressExportButtonClick = false;
 
 const style = `
 .${LAYER_CLASS}{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:76px 12px 24px;background:rgba(18,31,39,.30);backdrop-filter:blur(1.5px)}
@@ -27,7 +28,9 @@ function removeLayer() {
 
 function closeOriginalMenu() {
   const button = document.querySelector<HTMLButtonElement>(".note-pdf-export-button[aria-expanded='true']");
-  if (button) button.click();
+  if (!button) return;
+  suppressExportButtonClick = true;
+  button.click();
 }
 
 function showFailure() {
@@ -37,8 +40,15 @@ function showFailure() {
   const panel = document.createElement("div");
   panel.className = FLOATING_CLASS;
   panel.innerHTML = `<div style="padding:12px"><strong style="display:block;margin-bottom:5px">Không mở được lựa chọn Xuất PDF</strong><small style="display:block;color:#6d7b82;line-height:1.45">Hãy tải lại trang một lần. Nếu vẫn còn lỗi, module xuất PDF sẽ cần được kiểm tra tiếp.</small><button type="button" style="margin-top:12px;width:100%;height:38px;border:1px solid #d6dfe2;border-radius:8px;background:#fff">Đóng</button></div>`;
-  panel.querySelector("button")?.addEventListener("click", () => layer.remove());
-  layer.addEventListener("click", (event) => { if (event.target === layer) layer.remove(); });
+  panel.querySelector("button")?.addEventListener("click", () => {
+    layer.remove();
+    closeOriginalMenu();
+  });
+  layer.addEventListener("click", (event) => {
+    if (event.target !== layer) return;
+    layer.remove();
+    closeOriginalMenu();
+  });
   layer.append(panel);
   document.body.append(layer);
 }
@@ -96,6 +106,10 @@ function handleClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   const button = target?.closest<HTMLButtonElement>(".note-pdf-export-button");
   if (!button || button.disabled) return;
+  if (suppressExportButtonClick) {
+    suppressExportButtonClick = false;
+    return;
+  }
   window.setTimeout(() => revealMenu(), 0);
 }
 
