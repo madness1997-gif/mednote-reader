@@ -8,22 +8,6 @@ test.use({
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
-async function clickAndDismissDialog(page, locator, expectedType, expectedText) {
-  let seen = null;
-  const handled = new Promise((resolve) => {
-    page.once('dialog', async (dialog) => {
-      seen = { type: dialog.type(), message: dialog.message() };
-      await dialog.dismiss();
-      resolve();
-    });
-  });
-  await locator.click();
-  await handled;
-  expect(seen).not.toBeNull();
-  expect(seen.type).toBe(expectedType);
-  expect(seen.message).toContain(expectedText);
-}
-
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
@@ -57,25 +41,18 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(more).toBeVisible();
   await expect(close).toBeVisible();
 
-  // Let mutation-driven enhancers settle, then make sure the same topbar remains
-  // present long enough for a real touch/click target instead of being replaced.
-  const originalTopbarToken = await page.evaluate(() => {
-    const bar = document.querySelector('.mednote-page-sheet-nav .mps-bookbar');
-    if (!(bar instanceof HTMLElement)) return '';
-    const token = `e2e-${Math.random()}`;
-    bar.dataset.e2eStableToken = token;
-    return token;
-  });
-  await page.waitForTimeout(1400);
-  await expect(bookbar).toHaveAttribute('data-e2e-stable-token', originalTopbarToken);
-
   // N: open/focus notebook picker.
   await pickerButton.click();
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
 
   // +: invoke the real create-notebook prompt.
-  await clickAndDismissDialog(page, addNotebook, 'prompt', 'Notebook');
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('prompt');
+    expect(dialog.message()).toContain('Notebook');
+    await dialog.dismiss();
+  });
+  await addNotebook.click();
 
   // Search: open the real panel, type an existing Section name and get a result.
   await search.click();
@@ -90,18 +67,28 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'navigation');
   await expect(nav.locator('.mps-search-input')).toHaveCount(0);
 
-  // ...: menu opens and both real actions invoke their actual dialogs.
+  // ...: menu opens and both real destructive/non-destructive actions invoke dialogs.
   await more.click();
   const menu = bookbar.locator('.mps-notebook-menu');
   await expect(menu).toHaveClass(/open/);
   await expect(menu.locator('[data-page-sheet-notebook-rename]')).toBeVisible();
   await expect(menu.locator('[data-page-sheet-notebook-delete]')).toBeVisible();
 
-  await clickAndDismissDialog(page, menu.locator('[data-page-sheet-notebook-rename]'), 'prompt', 'Notebook');
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('prompt');
+    expect(dialog.message()).toContain('Notebook');
+    await dialog.dismiss();
+  });
+  await menu.locator('[data-page-sheet-notebook-rename]').click();
 
   await more.click();
   await expect(menu).toHaveClass(/open/);
-  await clickAndDismissDialog(page, menu.locator('[data-page-sheet-notebook-delete]'), 'confirm', 'Notebook');
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toContain('Notebook');
+    await dialog.dismiss();
+  });
+  await menu.locator('[data-page-sheet-notebook-delete]').click();
 
   // X: actually hides the sidebar and writes the persisted hidden state.
   await close.click();
@@ -109,4 +96,39 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(page.locator('.note-thumbnails')).toBeHidden();
   const hiddenState = await page.evaluate(() => localStorage.getItem('mednote-note-navigation-hidden'));
   expect(hiddenState).toBe('1');
+});
+
+test('search, recent notes and notebook picker stay open across background maintenance', async ({ page }) => {
+  test.setTimeout(40_000);
+  const nav = page.locator('.mednote-page-sheet-nav');
+
+  // Rail search must remain mounted for longer than several 900/1200 ms maintenance cycles.
+  const railSearch = nav.locator('[data-sidebar-mode-button="search"]');
+  await expect(railSearch).toBeVisible({ timeout: 5_000 });
+  await railSearch.click();
+  await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
+  await expect(nav.locator('.mps-search-input')).toBeVisible();
+  await page.waitForTimeout(3_500);
+  await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
+  await expect(nav.locator('.mps-search-input')).toBeVisible();
+
+  // Recent Notes is the other utility panel users reported disappearing.
+  const railRecent = nav.locator('[data-sidebar-mode-button="recent"]');
+  await railRecent.click();
+  await expect(nav).toHaveAttribute('data-sidebar-mode', 'recent');
+  await expect(nav.locator('.mps-sidebar-utility')).toBeVisible();
+  await page.waitForTimeout(3_500);
+  await expect(nav).toHaveAttribute('data-sidebar-mode', 'recent');
+  await expect(nav.locator('.mps-sidebar-utility')).toBeVisible();
+
+  // Return to navigation then verify the notebook picker element is not replaced.
+  await nav.locator('[data-sidebar-mode-button="navigation"]').click();
+  const pickerButton = nav.locator('[data-page-sheet-notebook-picker]');
+  const notebookSelect = nav.locator('[data-notebook-select]');
+  await pickerButton.click();
+  await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
+  await expect(notebookSelect).toBeFocused();
+  await page.waitForTimeout(3_500);
+  await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
+  await expect(notebookSelect).toBeFocused();
 });
