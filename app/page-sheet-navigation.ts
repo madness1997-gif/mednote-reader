@@ -1,10 +1,14 @@
 import {
-  createNotebook, createSection, deleteSection, getLibraryView, openNoteTarget, renameSection,
+  createNotebook, createSection, deleteNotebook, deleteSection, getLibraryView, openNoteTarget, renameNotebook, renameSection,
   type LibraryView, type RelationTarget,
 } from "./independent-library-core";
 import { addSheet, createLogicalPage, deleteSheets, moveLogicalPage, openLogicalPage, openSheet, renameLogicalPage, reorderSheet, targetForGroup, targetForSheet, targetMatches } from "./page-sheet-actions";
 import { showLinkDialog } from "./page-sheet-link-ui";
 import { ACTIVE_SECTION_KEY, EXPANDED_PAGE_KEY, NAV_CLASS, STYLE_ID, currentContext, escapeHtml, normalizePageSheetModel, pageGroups, sheetLogicalId, sheetTitle, type PageGroup, type ScopedTarget, type SheetPage } from "./page-sheet-state";
+
+const NOTE_HIDDEN_KEY = "mednote-note-navigation-hidden";
+
+type NativeSearchEntry = { kind: "section" | "page" | "sheet"; value: string; title: string };
 
 export function injectStyle() {
   if (document.getElementById(STYLE_ID)) return;
@@ -15,10 +19,16 @@ export function injectStyle() {
 .note-thumbnails.onenote-navigation-active{width:360px!important;min-width:285px!important;max-width:520px!important;resize:horizontal}
 .${NAV_CLASS}{min-height:0;flex:1;display:flex;flex-direction:column;background:#fff;color:#292929;font-family:Segoe UI,Arial,sans-serif}
 .${NAV_CLASS} button,.${NAV_CLASS} select{font:inherit}
-.mps-bookbar{height:48px;display:flex;align-items:center;gap:5px;padding:7px 8px;border-bottom:1px solid #dedede;background:#fafafa}
-.mps-book-icon{width:28px;height:28px;display:grid;place-items:center;border-radius:5px;background:#7719aa;color:#fff;font-size:11px;font-weight:800}
-.mps-book-select{min-width:0;flex:1;height:32px;border:0;border-radius:5px;background:transparent;font-size:12px;font-weight:700}
-.mps-icon{width:30px;height:30px;border:0;border-radius:5px;background:transparent;cursor:pointer}.mps-icon:hover{background:#e8e8e8}
+.mps-bookbar{height:48px;display:flex;align-items:center;gap:5px;padding:7px 8px;border-bottom:1px solid #dedede;background:#fafafa;position:relative}
+.mps-book-icon{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:5px;background:#7719aa;color:#fff;font-size:11px;font-weight:800;cursor:pointer;touch-action:manipulation}
+.mps-book-select{min-width:0;flex:1;height:32px;border:0;border-radius:5px;background:transparent;font-size:12px;font-weight:700;cursor:pointer}
+.mps-icon{width:30px;height:30px;border:0;border-radius:5px;background:transparent;cursor:pointer;touch-action:manipulation}.mps-icon:hover{background:#e8e8e8}
+.mps-sidebar-search-button,.mps-notebook-more,.onenote-note-navigation-close{flex:0 0 30px;width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:#5f6368;cursor:pointer;touch-action:manipulation}
+.mps-sidebar-search-button:hover,.mps-notebook-more:hover,.onenote-note-navigation-close:hover{background:#ececef;color:#292929}
+.mps-notebook-menu{position:absolute;z-index:150;top:39px;right:35px;display:none;min-width:160px;padding:5px;border:1px solid #dfe4e6;border-radius:9px;background:#fff;box-shadow:0 8px 24px #24323a2b}
+.mps-notebook-menu.open{display:grid;gap:2px}
+.mps-notebook-menu button{min-height:32px;padding:6px 9px;border:0;border-radius:6px;background:transparent;text-align:left;color:#374047;cursor:pointer;touch-action:manipulation}
+.mps-notebook-menu button:hover{background:#f0f2f3}.mps-notebook-menu button.danger{color:#b3261e}
 .mps-layout{min-height:0;flex:1;display:grid;grid-template-columns:106px minmax(0,1fr)}
 .mps-sections{min-width:0;display:flex;flex-direction:column;border-right:1px solid #dedede;background:#f3f3f3}
 .mps-pages{min-width:0;display:flex;flex-direction:column;background:#fff}
@@ -57,6 +67,99 @@ export function linkCount(view: LibraryView, target: ScopedTarget) {
   return view.relations.filter((relation) => targetMatches(relation.target, target)).length;
 }
 
+function nativeSearchEntries(nav: HTMLElement, query: string): NativeSearchEntry[] {
+  const normalized = query.trim().toLocaleLowerCase("vi");
+  if (!normalized) return [];
+  const entries: NativeSearchEntry[] = [];
+  nav.querySelectorAll<HTMLElement>(".mps-section[data-open-section]").forEach((node) => {
+    const title = (node.querySelector("strong")?.textContent || "").trim();
+    if (title.toLocaleLowerCase("vi").includes(normalized)) entries.push({ kind: "section", value: node.dataset.openSection || "", title });
+  });
+  nav.querySelectorAll<HTMLElement>(".mps-page-open[data-open-page]").forEach((node) => {
+    const title = (node.querySelector("strong")?.textContent || "").trim();
+    if (title.toLocaleLowerCase("vi").includes(normalized)) entries.push({ kind: "page", value: node.dataset.openPage || "", title });
+  });
+  nav.querySelectorAll<HTMLElement>(".mps-sheet-open[data-open-sheet]").forEach((node) => {
+    const title = (node.textContent || "").trim();
+    if (title.toLocaleLowerCase("vi").includes(normalized)) entries.push({ kind: "sheet", value: node.dataset.openSheet || "", title });
+  });
+  return entries.slice(0, 50);
+}
+
+function renderNativeSearchResults(nav: HTMLElement, input: HTMLInputElement, body: HTMLElement) {
+  const entries = nativeSearchEntries(nav, input.value);
+  body.innerHTML = entries.length
+    ? entries.map((entry) => `<button type="button" class="mps-utility-result" data-native-note-search-open="${entry.kind}" data-native-note-search-value="${escapeHtml(entry.value)}"><i class="mps-utility-dot"></i><span>${escapeHtml(entry.title)}</span><small>${entry.kind === "section" ? "Section" : entry.kind === "sheet" ? "Tờ" : "Page"}</small></button>`).join("")
+    : `<div class="mps-utility-empty">${input.value.trim() ? "Không tìm thấy tên phù hợp." : "Nhập tên Section, Page hoặc tờ để tìm."}</div>`;
+}
+
+function openNativeSearch(nav: HTMLElement) {
+  nav.dataset.sidebarMode = "search";
+  let panel = nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.className = "mps-sidebar-utility";
+    nav.append(panel);
+  }
+  panel.innerHTML = `<div class="mps-utility-head"><strong>Tìm kiếm</strong><button type="button" class="mps-sidebar-search-close" data-native-note-search-close="1" title="Đóng tìm kiếm" aria-label="Đóng tìm kiếm">×</button></div><div style="padding:7px 8px;border-bottom:1px solid #ececee"><input class="mps-search-input" type="search" placeholder="Tìm theo tên…" aria-label="Tìm ghi chú"></div><div class="mps-utility-body"></div>`;
+  const input = panel.querySelector<HTMLInputElement>(".mps-search-input");
+  const body = panel.querySelector<HTMLElement>(".mps-utility-body");
+  if (!input || !body) return;
+  const render = () => renderNativeSearchResults(nav, input, body);
+  input.addEventListener("input", render);
+  render();
+  requestAnimationFrame(() => input.focus());
+}
+
+function closeNativeSearch(nav: HTMLElement) {
+  nav.dataset.sidebarMode = "navigation";
+  nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility")?.remove();
+}
+
+function openNativeSearchResult(nav: HTMLElement, kind: string, value: string) {
+  const selector = kind === "section" ? "[data-open-section]" : kind === "sheet" ? "[data-open-sheet]" : "[data-open-page]";
+  const key = kind === "section" ? "openSection" : kind === "sheet" ? "openSheet" : "openPage";
+  const target = Array.from(nav.querySelectorAll<HTMLElement>(selector)).find((node) => node.dataset[key as keyof DOMStringMap] === value);
+  closeNativeSearch(nav);
+  target?.click();
+}
+
+function toggleNativeNotebookMenu(nav: HTMLElement, button: HTMLElement) {
+  const menu = nav.querySelector<HTMLElement>(":scope > .mps-bookbar > .mps-notebook-menu");
+  if (!menu) return;
+  const open = !menu.classList.contains("open");
+  menu.classList.toggle("open", open);
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeNativeNotebookMenu(nav: HTMLElement) {
+  nav.querySelector<HTMLElement>(":scope > .mps-bookbar > .mps-notebook-menu")?.classList.remove("open");
+  nav.querySelector<HTMLElement>("[data-page-sheet-notebook-more]")?.setAttribute("aria-expanded", "false");
+}
+
+function openNativeNotebookPicker(nav: HTMLElement) {
+  const select = nav.querySelector<HTMLSelectElement>("[data-notebook-select]");
+  if (!select) return;
+  select.focus({ preventScroll: true });
+  const picker = select as HTMLSelectElement & { showPicker?: () => void };
+  try {
+    if (picker.showPicker) picker.showPicker();
+    else select.click();
+  } catch {
+    select.click();
+  }
+}
+
+function hideNativeNoteSidebar(nav: HTMLElement) {
+  localStorage.setItem(NOTE_HIDDEN_KEY, "1");
+  const aside = nav.closest<HTMLElement>(".note-thumbnails");
+  const workspace = nav.closest<HTMLElement>(".workspace");
+  workspace?.classList.add("onenote-note-navigation-hidden");
+  aside?.setAttribute("aria-hidden", "true");
+  aside?.style.setProperty("display", "none", "important");
+  window.dispatchEvent(new Event("resize"));
+}
+
 export function renderNavigator(context: NonNullable<ReturnType<typeof currentContext>>) {
   const { view, notebook, record, activeSection, activeSheet } = context;
   const groups = pageGroups(notebook, activeSection);
@@ -87,7 +190,7 @@ export function renderNavigator(context: NonNullable<ReturnType<typeof currentCo
     }).join("")}</div>` : "";
     return `<article class="mps-page-card${group.id === activeLogicalId ? " active" : ""}"><div class="mps-page-head"><button class="mps-page-open" data-open-page="${escapeHtml(group.id)}"><strong>${escapeHtml(group.title)}</strong><small>${group.sheets.length} tờ${pageLinks ? ` · 🔗${pageLinks}` : ""}</small></button><span class="mps-page-tools"><button class="mps-mini" title="Thêm tờ" data-add-sheet="${escapeHtml(group.id)}">＋</button><button class="mps-mini" title="Gắn PDF với toàn Page" data-link-page="${escapeHtml(group.id)}">⛓</button><button class="mps-mini" title="Chuyển Section" data-move-page="${escapeHtml(group.id)}">↪</button><button class="mps-mini" title="Đổi tên Page" data-rename-page="${escapeHtml(group.id)}">✎</button><button class="mps-mini" title="Xóa Page" data-delete-page="${escapeHtml(group.id)}">⌫</button></span></div>${sheets}</article>`;
   }).join("");
-  nav.innerHTML = `<div class="mps-bookbar"><b class="mps-book-icon">N</b><select class="mps-book-select" data-notebook-select>${notebookOptions}</select><button class="mps-icon" data-new-notebook title="Tạo Notebook">＋</button></div><div class="mps-layout"><section class="mps-sections"><div class="mps-pane-head"><strong>Section</strong><button class="mps-add" data-add-section>＋</button></div><div class="mps-section-list">${sectionRows}</div></section><section class="mps-pages"><div class="mps-pane-head" style="border-top:3px solid ${sectionColor(activeSection.id)}"><strong>${escapeHtml(activeSection.title)}</strong><button class="mps-add" data-add-page>＋ Page</button></div><div class="mps-page-list">${pageRows || '<div class="mps-empty">Section này chưa có Page.<br>Chọn “＋ Page” để bắt đầu.</div>'}</div></section></div>`;
+  nav.innerHTML = `<div class="mps-bookbar"><button type="button" class="mps-book-icon" data-page-sheet-notebook-picker="1" title="Chọn Notebook" aria-label="Chọn Notebook">N</button><select class="mps-book-select" data-notebook-select aria-label="Notebook">${notebookOptions}</select><button type="button" class="mps-icon" data-new-notebook title="Tạo Notebook" aria-label="Tạo Notebook">＋</button><button type="button" class="mps-icon mps-sidebar-search-button" data-native-note-search="1" title="Tìm kiếm ghi chú" aria-label="Tìm kiếm ghi chú">⌕</button><button type="button" class="mps-notebook-more" data-page-sheet-notebook-more="1" title="Thao tác Notebook" aria-label="Thao tác Notebook" aria-expanded="false">⋯</button><button type="button" class="onenote-note-navigation-close" data-note-navigation-close="1" title="Đóng thanh điều hướng note" aria-label="Đóng thanh điều hướng note">×</button><div class="mps-notebook-menu"><button type="button" data-page-sheet-notebook-rename="1">Đổi tên Notebook</button><button type="button" class="danger" data-page-sheet-notebook-delete="1">Xóa Notebook</button></div></div><div class="mps-layout"><section class="mps-sections"><div class="mps-pane-head"><strong>Section</strong><button class="mps-add" data-add-section>＋</button></div><div class="mps-section-list">${sectionRows}</div></section><section class="mps-pages"><div class="mps-pane-head" style="border-top:3px solid ${sectionColor(activeSection.id)}"><strong>${escapeHtml(activeSection.title)}</strong><button class="mps-add" data-add-page>＋ Page</button></div><div class="mps-page-list">${pageRows || '<div class="mps-empty">Section này chưa có Page.<br>Chọn “＋ Page” để bắt đầu.</div>'}</div></section></div>`;
   return nav;
 }
 
@@ -104,15 +207,60 @@ export function mountNavigator() {
 }
 
 export function handleNavigatorClick(event: Event) {
-  const element = (event.target as HTMLElement).closest<HTMLElement>("[data-new-notebook],[data-add-section],[data-open-section],[data-rename-section],[data-delete-section],[data-add-page],[data-open-page],[data-add-sheet],[data-open-sheet],[data-link-page],[data-link-sheet],[data-rename-page],[data-delete-page],[data-delete-sheet],[data-sheet-up],[data-sheet-down],[data-move-page]");
-  if (!element || !element.closest(`.${NAV_CLASS}`)) return;
+  const element = (event.target as HTMLElement).closest<HTMLElement>("[data-page-sheet-notebook-picker],[data-native-note-search],[data-native-note-search-close],[data-native-note-search-open],[data-page-sheet-notebook-more],[data-page-sheet-notebook-rename],[data-page-sheet-notebook-delete],[data-note-navigation-close],[data-new-notebook],[data-add-section],[data-open-section],[data-rename-section],[data-delete-section],[data-add-page],[data-open-page],[data-add-sheet],[data-open-sheet],[data-link-page],[data-link-sheet],[data-rename-page],[data-delete-page],[data-delete-sheet],[data-sheet-up],[data-sheet-down],[data-move-page]");
+  const nav = element?.closest<HTMLElement>(`.${NAV_CLASS}`);
+  if (!element || !nav) return;
   event.preventDefault();
-  event.stopPropagation();
+
+  const nativeTopbar = element.matches("[data-page-sheet-notebook-picker],[data-native-note-search],[data-native-note-search-close],[data-native-note-search-open],[data-page-sheet-notebook-more],[data-page-sheet-notebook-rename],[data-page-sheet-notebook-delete],[data-note-navigation-close]");
+  if (nativeTopbar) event.stopImmediatePropagation();
+  else event.stopPropagation();
+
+  if (element.dataset.pageSheetNotebookPicker !== undefined) {
+    closeNativeNotebookMenu(nav);
+    openNativeNotebookPicker(nav);
+    return;
+  }
+  if (element.dataset.nativeNoteSearch !== undefined) {
+    closeNativeNotebookMenu(nav);
+    openNativeSearch(nav);
+    return;
+  }
+  if (element.dataset.nativeNoteSearchClose !== undefined) {
+    closeNativeSearch(nav);
+    return;
+  }
+  if (element.dataset.nativeNoteSearchOpen) {
+    openNativeSearchResult(nav, element.dataset.nativeNoteSearchOpen, element.dataset.nativeNoteSearchValue || "");
+    return;
+  }
+  if (element.dataset.pageSheetNotebookMore !== undefined) {
+    if (nav.dataset.sidebarMode === "search") closeNativeSearch(nav);
+    toggleNativeNotebookMenu(nav, element);
+    return;
+  }
+  if (element.dataset.noteNavigationClose !== undefined) {
+    closeNativeNotebookMenu(nav);
+    hideNativeNoteSidebar(nav);
+    return;
+  }
+
   const context = currentContext();
   if (!context) return;
   const { record, activeSection, notebook, activeSheet } = context;
   const groups = pageGroups(notebook, activeSection);
 
+  if (element.dataset.pageSheetNotebookRename !== undefined) {
+    closeNativeNotebookMenu(nav);
+    const title = window.prompt("Đổi tên Notebook", record.title)?.trim();
+    if (title && renameNotebook(record.id, title)) window.location.reload();
+    return;
+  }
+  if (element.dataset.pageSheetNotebookDelete !== undefined) {
+    closeNativeNotebookMenu(nav);
+    if (window.confirm(`Xóa Notebook “${record.title}”? PDF liên quan sẽ không bị xóa.`) && deleteNotebook(record.id)) window.location.reload();
+    return;
+  }
   if (element.dataset.newNotebook !== undefined) {
     const title = window.prompt("Tên Notebook", "Notebook mới")?.trim();
     if (title && createNotebook(title)) window.location.reload();
