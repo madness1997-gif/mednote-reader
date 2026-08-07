@@ -23,6 +23,9 @@ const FUNCTIONAL_BUTTON_SELECTORS = [
   "[data-note-navigation-close]",
   "[data-sidebar-mode-button]",
   "[data-search-open-kind][data-search-open-value]",
+  "[data-page-sheet-notebook-more]",
+  "[data-page-sheet-notebook-rename]",
+  "[data-page-sheet-notebook-delete]",
 ].join(",");
 
 const style = `
@@ -40,11 +43,16 @@ const style = `
 .${NAV_CLASS}[data-sidebar-mode="search"]>.mps-sidebar-utility{display:flex!important}
 .workspace.onenote-right-navigation-layout{--onenote-nav-width:clamp(315px,28vw,390px)!important}
 
-.${NAV_CLASS} .${SEARCH_BUTTON_CLASS}{flex:0 0 30px!important;width:30px!important;height:30px!important;display:grid!important;place-items:center!important;border:0!important;border-radius:7px!important;background:transparent!important;color:#5f6368!important;font-size:17px!important;cursor:pointer!important}
+.${NAV_CLASS} .${SEARCH_BUTTON_CLASS}{flex:0 0 30px!important;width:30px!important;height:30px!important;display:grid!important;place-items:center!important;border:0!important;border-radius:7px!important;background:transparent!important;color:#5f6368!important;font-size:17px!important;cursor:pointer!important;touch-action:manipulation!important;pointer-events:auto!important}
 .${NAV_CLASS} .${SEARCH_BUTTON_CLASS}:hover{background:#eeeeef!important;color:#333!important}
 .${NAV_CLASS}[data-sidebar-mode="search"] .${SEARCH_BUTTON_CLASS}{background:#eee7f3!important;color:#6f238f!important}
-.${NAV_CLASS} .${SEARCH_CLOSE_CLASS}{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:#666;font-size:18px;cursor:pointer}
+.${NAV_CLASS} .${SEARCH_CLOSE_CLASS}{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:#666;font-size:18px;cursor:pointer;touch-action:manipulation}
 .${NAV_CLASS} .${SEARCH_CLOSE_CLASS}:hover{background:#ececee;color:#222}
+
+/* Every visible top-bar action must remain clickable. */
+.${NAV_CLASS} .mps-bookbar>button,
+.${NAV_CLASS} .mps-bookbar>select{pointer-events:auto!important;touch-action:manipulation!important}
+.${NAV_CLASS} .mps-notebook-menu button{pointer-events:auto!important;touch-action:manipulation!important}
 
 /* Names are the main UI. Actions remain behind one real ellipsis menu. */
 .${NAV_CLASS} .mps-page-tools,
@@ -75,8 +83,11 @@ function ensureSearchButton(nav: HTMLElement) {
   button.setAttribute("aria-label", "Tìm kiếm ghi chú");
   button.setAttribute("aria-pressed", "false");
   button.textContent = "⌕";
+  const more = bookbar.querySelector<HTMLElement>("[data-page-sheet-notebook-more]");
   const close = bookbar.querySelector<HTMLElement>("[data-note-navigation-close]");
-  if (close) bookbar.insertBefore(button, close); else bookbar.append(button);
+  if (more) bookbar.insertBefore(button, more);
+  else if (close) bookbar.insertBefore(button, close);
+  else bookbar.append(button);
 }
 
 function ensureSearchClose(nav: HTMLElement) {
