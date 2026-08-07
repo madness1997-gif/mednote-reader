@@ -22,6 +22,16 @@ const pageCache = new Map<string, object>();
 let knownWorkspaceIds = new Set<string>();
 let knownNotebookIds = new Set<string>();
 let knownPageIds = new Set<string>();
+let saveQueue: Promise<unknown> = Promise.resolve();
+
+function resetCaches() {
+  workspaceCache.clear();
+  notebookCache.clear();
+  pageCache.clear();
+  knownWorkspaceIds = new Set();
+  knownNotebookIds = new Set();
+  knownPageIds = new Set();
+}
 
 function openDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -77,14 +87,20 @@ export async function loadIncrementalLibrary() {
   const meta = await readOne<MetaRecord>(META_KEY);
   if (!meta || meta.version !== 3 || !meta.workspaceIds.length) return null;
 
-  const workspaceRecords = await readMany<WorkspaceRecord>(meta.workspaceIds.map((id) => `${WORKSPACE_PREFIX}${id}`));
-  const orderedWorkspaces = meta.workspaceIds.map((id) => workspaceRecords.get(`${WORKSPACE_PREFIX}${id}`)).filter((record): record is WorkspaceRecord => Boolean(record));
-  if (!orderedWorkspaces.length) return null;
+  const workspaceKeys = meta.workspaceIds.map((id) => `${WORKSPACE_PREFIX}${id}`);
+  const workspaceRecords = await readMany<WorkspaceRecord>(workspaceKeys);
+  if (workspaceRecords.size !== workspaceKeys.length) return null;
+  const orderedWorkspaces = meta.workspaceIds.map((id) => workspaceRecords.get(`${WORKSPACE_PREFIX}${id}`)!);
 
-  const notebookIds = orderedWorkspaces.flatMap((workspace) => workspace.notebookIds);
-  const notebookRecords = await readMany<NotebookRecord>(notebookIds.map((id) => `${NOTEBOOK_PREFIX}${id}`));
-  const pageIds = notebookIds.flatMap((id) => notebookRecords.get(`${NOTEBOOK_PREFIX}${id}`)?.pageIds ?? []);
-  const pageRecords = await readMany<unknown>(pageIds.map((id) => `${PAGE_PREFIX}${id}`));
+  const notebookIds = Array.from(new Set(orderedWorkspaces.flatMap((workspace) => workspace.notebookIds)));
+  const notebookKeys = notebookIds.map((id) => `${NOTEBOOK_PREFIX}${id}`);
+  const notebookRecords = await readMany<NotebookRecord>(notebookKeys);
+  if (notebookRecords.size !== notebookKeys.length) return null;
+
+  const pageIds = Array.from(new Set(notebookIds.flatMap((id) => notebookRecords.get(`${NOTEBOOK_PREFIX}${id}`)?.pageIds ?? [])));
+  const pageKeys = pageIds.map((id) => `${PAGE_PREFIX}${id}`);
+  const pageRecords = await readMany<unknown>(pageKeys);
+  if (pageRecords.size !== pageKeys.length) return null;
 
   const workspaces = orderedWorkspaces.map((workspace) => ({
     id: workspace.id,
@@ -94,14 +110,15 @@ export async function loadIncrementalLibrary() {
     activeDocumentId: workspace.activeDocumentId,
     activeNotebookId: workspace.activeNotebookId,
     sourcePage: workspace.sourcePage,
-    notebooks: workspace.notebookIds.flatMap((notebookId) => {
-      const notebook = notebookRecords.get(`${NOTEBOOK_PREFIX}${notebookId}`);
-      if (!notebook) return [];
-      const pages = notebook.pageIds.flatMap((pageId) => {
-        const page = pageRecords.get(`${PAGE_PREFIX}${pageId}`);
-        return page === undefined ? [] : [page];
-      });
-      return [{ id: notebook.id, title: notebook.title, activePageId: notebook.activePageId, createdAt: notebook.createdAt, pages }];
+    notebooks: workspace.notebookIds.map((notebookId) => {
+      const notebook = notebookRecords.get(`${NOTEBOOK_PREFIX}${notebookId}`)!;
+      return {
+        id: notebook.id,
+        title: notebook.title,
+        activePageId: notebook.activePageId,
+        createdAt: notebook.createdAt,
+        pages: notebook.pageIds.map((pageId) => pageRecords.get(`${PAGE_PREFIX}${pageId}`)!),
+      };
     }),
   }));
 
@@ -109,13 +126,7 @@ export async function loadIncrementalLibrary() {
 }
 
 export function primeIncrementalLibraryCache<P extends PageLike, N extends NotebookLike<P>, W extends WorkspaceLike<N>>(snapshot: SnapshotLike<W>) {
-  workspaceCache.clear();
-  notebookCache.clear();
-  pageCache.clear();
-  knownWorkspaceIds = new Set();
-  knownNotebookIds = new Set();
-  knownPageIds = new Set();
-
+  resetCaches();
   snapshot.workspaces.forEach((workspace) => {
     const notebookIds = workspace.notebooks.map((notebook) => notebook.id);
     knownWorkspaceIds.add(workspace.id);
@@ -129,12 +140,15 @@ export function primeIncrementalLibraryCache<P extends PageLike, N extends Noteb
   });
 }
 
-export async function saveIncrementalLibrary<P extends PageLike, N extends NotebookLike<P>, W extends WorkspaceLike<N>>(snapshot: SnapshotLike<W>) {
+async function performSave<P extends PageLike, N extends NotebookLike<P>, W extends WorkspaceLike<N>>(snapshot: SnapshotLike<W>) {
   const savedAt = snapshot.savedAt ?? Date.now();
   const workspaceIds = snapshot.workspaces.map((workspace) => workspace.id);
   const nextWorkspaceIds = new Set(workspaceIds);
   const nextNotebookIds = new Set<string>();
   const nextPageIds = new Set<string>();
+  const nextWorkspaceCache = new Map(workspaceCache);
+  const nextNotebookCache = new Map(notebookCache);
+  const nextPageCache = new Map(pageCache);
   const puts: Array<[string, unknown]> = [[META_KEY, { version: 3, workspaceIds, activeWorkspaceId: snapshot.activeWorkspaceId, readerShare: snapshot.readerShare, workspaceMode: snapshot.workspaceMode, noteZoom: snapshot.noteZoom, savedAt } satisfies MetaRecord]];
   const deletes: string[] = [];
 
@@ -143,7 +157,7 @@ export async function saveIncrementalLibrary<P extends PageLike, N extends Noteb
     const cachedWorkspace = workspaceCache.get(workspace.id);
     const workspaceChanged = !cachedWorkspace || cachedWorkspace.documents !== workspace.documents || cachedWorkspace.kind !== workspace.kind || cachedWorkspace.name !== workspace.name || cachedWorkspace.activeDocumentId !== workspace.activeDocumentId || cachedWorkspace.activeNotebookId !== workspace.activeNotebookId || cachedWorkspace.sourcePage !== workspace.sourcePage || !idOrderEqual(cachedWorkspace.notebookIds, notebookIds);
     if (workspaceChanged) puts.push([`${WORKSPACE_PREFIX}${workspace.id}`, { id: workspace.id, kind: workspace.kind, name: workspace.name, documents: workspace.documents, activeDocumentId: workspace.activeDocumentId, activeNotebookId: workspace.activeNotebookId, sourcePage: workspace.sourcePage, notebookIds } satisfies WorkspaceRecord]);
-    workspaceCache.set(workspace.id, { documents: workspace.documents, kind: workspace.kind, name: workspace.name, activeDocumentId: workspace.activeDocumentId, activeNotebookId: workspace.activeNotebookId, sourcePage: workspace.sourcePage, notebookIds });
+    nextWorkspaceCache.set(workspace.id, { documents: workspace.documents, kind: workspace.kind, name: workspace.name, activeDocumentId: workspace.activeDocumentId, activeNotebookId: workspace.activeNotebookId, sourcePage: workspace.sourcePage, notebookIds });
 
     workspace.notebooks.forEach((notebook) => {
       nextNotebookIds.add(notebook.id);
@@ -151,12 +165,12 @@ export async function saveIncrementalLibrary<P extends PageLike, N extends Noteb
       const cachedNotebook = notebookCache.get(notebook.id);
       const notebookChanged = !cachedNotebook || cachedNotebook.title !== notebook.title || cachedNotebook.activePageId !== notebook.activePageId || cachedNotebook.createdAt !== notebook.createdAt || !idOrderEqual(cachedNotebook.pageIds, pageIds);
       if (notebookChanged) puts.push([`${NOTEBOOK_PREFIX}${notebook.id}`, { id: notebook.id, title: notebook.title, activePageId: notebook.activePageId, createdAt: notebook.createdAt, pageIds } satisfies NotebookRecord]);
-      notebookCache.set(notebook.id, { title: notebook.title, activePageId: notebook.activePageId, createdAt: notebook.createdAt, pageIds });
+      nextNotebookCache.set(notebook.id, { title: notebook.title, activePageId: notebook.activePageId, createdAt: notebook.createdAt, pageIds });
 
       notebook.pages.forEach((page) => {
         nextPageIds.add(page.id);
         if (pageCache.get(page.id) !== page) puts.push([`${PAGE_PREFIX}${page.id}`, page]);
-        pageCache.set(page.id, page);
+        nextPageCache.set(page.id, page);
       });
     });
   });
@@ -176,15 +190,27 @@ export async function saveIncrementalLibrary<P extends PageLike, N extends Noteb
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
+  } catch (error) {
+    resetCaches();
+    throw error;
   } finally {
     db.close();
   }
 
+  workspaceCache.clear();
+  notebookCache.clear();
+  pageCache.clear();
+  nextWorkspaceCache.forEach((value, id) => { if (nextWorkspaceIds.has(id)) workspaceCache.set(id, value); });
+  nextNotebookCache.forEach((value, id) => { if (nextNotebookIds.has(id)) notebookCache.set(id, value); });
+  nextPageCache.forEach((value, id) => { if (nextPageIds.has(id)) pageCache.set(id, value); });
   knownWorkspaceIds = nextWorkspaceIds;
   knownNotebookIds = nextNotebookIds;
   knownPageIds = nextPageIds;
-  Array.from(workspaceCache.keys()).forEach((id) => { if (!nextWorkspaceIds.has(id)) workspaceCache.delete(id); });
-  Array.from(notebookCache.keys()).forEach((id) => { if (!nextNotebookIds.has(id)) notebookCache.delete(id); });
-  Array.from(pageCache.keys()).forEach((id) => { if (!nextPageIds.has(id)) pageCache.delete(id); });
   return savedAt;
+}
+
+export function saveIncrementalLibrary<P extends PageLike, N extends NotebookLike<P>, W extends WorkspaceLike<N>>(snapshot: SnapshotLike<W>) {
+  const run = saveQueue.then(() => performSave(snapshot));
+  saveQueue = run.catch(() => undefined);
+  return run;
 }
