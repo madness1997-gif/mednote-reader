@@ -7,6 +7,8 @@ const ADD_SHEET_ATTR = "pageSheetAddSheet";
 const NOTEBOOK_MORE_ATTR = "pageSheetNotebookMore";
 const NOTEBOOK_RENAME_ATTR = "pageSheetNotebookRename";
 const NOTEBOOK_DELETE_ATTR = "pageSheetNotebookDelete";
+const NOTEBOOK_PICKER_ATTR = "pageSheetNotebookPicker";
+const NOTE_HIDDEN_KEY = "mednote-note-navigation-hidden";
 
 function dataSelector(datasetKey: string) {
   return `[data-${datasetKey.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}]`;
@@ -18,11 +20,14 @@ function injectStyle() {
   style.id = STYLE_ID;
   style.textContent = `
 .mednote-page-sheet-nav>.mps-bookbar{position:relative!important}
-.mednote-page-sheet-nav .mps-notebook-more{flex:0 0 28px;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:#626b70;font:700 17px/1 Arial,sans-serif;cursor:pointer}
+.mednote-page-sheet-nav .mps-book-icon{cursor:pointer!important;touch-action:manipulation!important;user-select:none!important}
+.mednote-page-sheet-nav .mps-book-icon:focus-visible{outline:2px solid #8b50aa;outline-offset:2px}
+.mednote-page-sheet-nav .mps-book-select{cursor:pointer!important;pointer-events:auto!important;touch-action:manipulation!important}
+.mednote-page-sheet-nav .mps-notebook-more{flex:0 0 28px;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:#626b70;font:700 17px/1 Arial,sans-serif;cursor:pointer;touch-action:manipulation;pointer-events:auto}
 .mednote-page-sheet-nav .mps-notebook-more:hover,.mednote-page-sheet-nav .mps-notebook-more[aria-expanded="true"]{background:#eceff1;color:#343a3e}
 .mednote-page-sheet-nav .mps-notebook-menu{position:absolute;z-index:120;top:38px;right:34px;display:none;min-width:150px;padding:5px;border:1px solid #dfe4e6;border-radius:9px;background:#fff;box-shadow:0 8px 24px #24323a2b}
 .mednote-page-sheet-nav .mps-notebook-menu.open{display:grid;gap:2px}
-.mednote-page-sheet-nav .mps-notebook-menu button{min-height:31px;padding:6px 9px;border:0;border-radius:6px;background:transparent;text-align:left;color:#374047;font-size:11px;cursor:pointer}
+.mednote-page-sheet-nav .mps-notebook-menu button{min-height:31px;padding:6px 9px;border:0;border-radius:6px;background:transparent;text-align:left;color:#374047;font-size:11px;cursor:pointer;touch-action:manipulation;pointer-events:auto}
 .mednote-page-sheet-nav .mps-notebook-menu button:hover{background:#f0f2f3}
 .mednote-page-sheet-nav .mps-notebook-menu button.danger{color:#b3261e}
 `;
@@ -68,9 +73,20 @@ function prepareMainToolbar() {
   hideHierarchyButton(buttons.find((button) => button.classList.contains("danger")));
 }
 
+function ensureNotebookPicker(bookbar: HTMLElement) {
+  const icon = bookbar.querySelector<HTMLElement>(".mps-book-icon");
+  if (!icon) return;
+  icon.dataset[NOTEBOOK_PICKER_ATTR] = "1";
+  icon.setAttribute("role", "button");
+  icon.tabIndex = 0;
+  icon.title = "Chọn Notebook";
+  icon.setAttribute("aria-label", "Chọn Notebook");
+}
+
 function ensureNotebookMenu() {
   const bookbar = document.querySelector<HTMLElement>(".mednote-page-sheet-nav > .mps-bookbar");
   if (!bookbar) return;
+  ensureNotebookPicker(bookbar);
 
   let more = bookbar.querySelector<HTMLButtonElement>(`.mps-notebook-more`);
   if (!more) {
@@ -137,6 +153,20 @@ function toggleNotebookMenu(button: HTMLElement) {
   button.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+function openNotebookPicker(source: HTMLElement) {
+  const bookbar = source.closest<HTMLElement>(".mps-bookbar");
+  const select = bookbar?.querySelector<HTMLSelectElement>("[data-notebook-select]");
+  if (!select) return;
+  select.focus({ preventScroll: true });
+  const picker = select as HTMLSelectElement & { showPicker?: () => void };
+  try {
+    if (picker.showPicker) picker.showPicker();
+    else select.click();
+  } catch {
+    select.click();
+  }
+}
+
 function renameActiveNotebook() {
   const context = currentContext();
   if (!context) return;
@@ -151,6 +181,15 @@ function deleteActiveNotebook() {
   if (deleteNotebook(context.record.id)) window.location.reload();
 }
 
+function closeNoteSidebarFallback(button: HTMLElement) {
+  localStorage.setItem(NOTE_HIDDEN_KEY, "1");
+  const workspace = button.closest<HTMLElement>(".workspace");
+  const aside = button.closest<HTMLElement>(".note-thumbnails");
+  workspace?.classList.add("onenote-note-navigation-hidden");
+  aside?.style.setProperty("display", "none", "important");
+  window.dispatchEvent(new Event("resize"));
+}
+
 function handleClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   if (!target) return;
@@ -159,6 +198,14 @@ function handleClick(event: MouseEvent) {
     event.preventDefault();
     event.stopImmediatePropagation();
     addSheetFromActivePage();
+    return;
+  }
+
+  const picker = target.closest<HTMLElement>(dataSelector(NOTEBOOK_PICKER_ATTR));
+  if (picker) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openNotebookPicker(picker);
     return;
   }
 
@@ -186,7 +233,21 @@ function handleClick(event: MouseEvent) {
     return;
   }
 
+  const close = target.closest<HTMLElement>("[data-note-navigation-close]");
+  if (close) {
+    closeNoteSidebarFallback(close);
+    return;
+  }
+
   if (!target.closest(".mps-notebook-menu")) closeNotebookMenu();
+}
+
+function handleKeyDown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+  const picker = target?.closest<HTMLElement>(dataSelector(NOTEBOOK_PICKER_ATTR));
+  if (!picker || (event.key !== "Enter" && event.key !== " ")) return;
+  event.preventDefault();
+  openNotebookPicker(picker);
 }
 
 let scheduled = false;
@@ -203,6 +264,7 @@ function prepare() {
 }
 
 document.addEventListener("click", handleClick, true);
+document.addEventListener("keydown", handleKeyDown, true);
 new MutationObserver(prepare).observe(document.documentElement, { childList: true, subtree: true });
 document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", prepare, { once: true }) : prepare();
 window.setInterval(prepare, 900);
