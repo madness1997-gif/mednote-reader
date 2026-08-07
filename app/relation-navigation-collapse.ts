@@ -59,7 +59,7 @@ function ensureNoteRestoreButton(workspace: HTMLElement) {
 }
 
 function ensureNoteCloseButton(navigation: HTMLElement) {
-  const bookbar = navigation.querySelector<HTMLElement>(":scope > .onenote-note-navigation-bookbar");
+  const bookbar = navigation.querySelector<HTMLElement>(":scope > .mps-bookbar, :scope > .onenote-note-navigation-bookbar");
   if (!bookbar) return;
 
   for (const old of Array.from(bookbar.querySelectorAll<HTMLElement>(".onenote-note-navigation-hide-all"))) old.remove();
@@ -99,7 +99,7 @@ function applyNavigationState() {
 
   for (const workspace of Array.from(document.querySelectorAll<HTMLElement>(".workspace"))) {
     const noteAside = workspace.querySelector<HTMLElement>(":scope > .note-thumbnails.onenote-navigation-active");
-    const navigation = noteAside?.querySelector<HTMLElement>(":scope > .onenote-note-navigation");
+    const navigation = noteAside?.querySelector<HTMLElement>(":scope > .mednote-page-sheet-nav, :scope > .onenote-note-navigation");
     const readerAside = workspace.querySelector<HTMLElement>(":scope > .pdf-thumbnails");
 
     if (readerAside && !workspace.classList.contains("pdf-rail-collapsed")) ensureReaderCloseButton(readerAside);
