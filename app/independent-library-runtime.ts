@@ -6,5 +6,6 @@ void import("./relation-note-sidebar")
   .then(() => import("./relation-note-right-layout"))
   .then(() => import("./relation-navigation-collapse"))
   .then(() => import("./page-sheet-runtime"))
-  .then(() => import("./relation-library-names-only"));
+  .then(() => import("./relation-library-names-only"))
+  .then(() => import("./page-sheet-sidebar-clean"));
 export {};
