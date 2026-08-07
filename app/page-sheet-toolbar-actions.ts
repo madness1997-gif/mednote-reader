@@ -1,10 +1,15 @@
-import { deleteSection } from "./independent-library-core";
+import { createNotebook, deleteSection } from "./independent-library-core";
 import { addSheet, deleteSheets } from "./page-sheet-actions";
 import { currentContext, pageGroups, sheetLogicalId } from "./page-sheet-state";
 
 const ADD_SHEET_ATTR = "pageSheetAddSheet";
+const NEW_NOTEBOOK_ATTR = "pageSheetNewNotebook";
 const DELETE_SECTION_ATTR = "pageSheetDeleteSection";
 const DELETE_SHEET_ATTR = "pageSheetDeleteSheet";
+
+function dataSelector(datasetKey: string) {
+  return `[data-${datasetKey.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}]`;
+}
 
 function setButtonLabel(button: HTMLButtonElement | null, label: string) {
   if (!button) return;
@@ -35,7 +40,10 @@ function prepareMainToolbar() {
 
   const buttons = Array.from(cluster.querySelectorAll<HTMLButtonElement>(":scope > button.note-create-button"));
   const notebookButton = buttons.find((button) => /Sổ mới|Notebook mới/i.test(button.textContent || ""));
-  if (notebookButton) setButtonLabel(notebookButton, "Notebook mới");
+  if (notebookButton) {
+    notebookButton.dataset[NEW_NOTEBOOK_ATTR] = "1";
+    setButtonLabel(notebookButton, "Notebook mới");
+  }
 
   const deleteButton = buttons.find((button) => button.classList.contains("danger"));
   if (deleteButton) {
@@ -89,6 +97,11 @@ function normalizeHierarchyActionLabels() {
   }
 }
 
+function createNewNotebook() {
+  const title = window.prompt("Tên Notebook", "Notebook mới")?.trim();
+  if (title && createNotebook(title)) window.location.reload();
+}
+
 function addSheetFromActivePage() {
   const active = activeGroup();
   if (!active?.group) {
@@ -130,23 +143,28 @@ function handleClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   if (!target) return;
 
-  const addSheetButton = target.closest<HTMLElement>(`[data-${ADD_SHEET_ATTR.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}]`);
-  if (addSheetButton) {
+  if (target.closest<HTMLElement>(dataSelector(ADD_SHEET_ATTR))) {
     event.preventDefault();
     event.stopImmediatePropagation();
     addSheetFromActivePage();
     return;
   }
 
-  const deleteSectionButton = target.closest<HTMLElement>(`[data-${DELETE_SECTION_ATTR.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}]`);
-  if (deleteSectionButton) {
+  if (target.closest<HTMLElement>(dataSelector(NEW_NOTEBOOK_ATTR))) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    createNewNotebook();
+    return;
+  }
+
+  if (target.closest<HTMLElement>(dataSelector(DELETE_SECTION_ATTR))) {
     event.preventDefault();
     event.stopImmediatePropagation();
     deleteActiveSection();
     return;
   }
 
-  const deleteSheetButton = target.closest<HTMLElement>(`[data-${DELETE_SHEET_ATTR.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}]`);
+  const deleteSheetButton = target.closest<HTMLElement>(dataSelector(DELETE_SHEET_ATTR));
   if (deleteSheetButton && deleteSheetButton.matches(".note-thumb-delete")) {
     event.preventDefault();
     event.stopImmediatePropagation();
