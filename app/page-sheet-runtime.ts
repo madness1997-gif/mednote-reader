@@ -16,8 +16,8 @@ function init() {
     window.requestAnimationFrame(() => {
       scheduled = false;
       // Do not rebuild an existing navigator in response to its own DOM changes.
-      // The previous unconditional mount caused a feedback loop where the whole
-      // sidebar was replaced while a finger/click was targeting a button.
+      // Replacing the navigator destroys transient UI such as Search, Recent Notes,
+      // the notebook picker and open menus while the user is interacting with them.
       if (!document.querySelector(".mednote-page-sheet-nav")) mountNavigator();
       regroupLibraryTree();
     });
@@ -29,8 +29,12 @@ function init() {
     : scheduleMaintenance();
 
   window.setInterval(() => {
-    const changed = normalizePageSheetModel();
-    if (changed || !document.querySelector(".mednote-page-sheet-nav")) mountNavigator();
+    // Normalization is background data maintenance only. Never use its `changed`
+    // result as a reason to replace the live sidebar DOM. All user-visible model
+    // changes already navigate/reload through the action handlers, while replacing
+    // the DOM here made utility panels disappear after a few seconds.
+    normalizePageSheetModel();
+    if (!document.querySelector(".mednote-page-sheet-nav")) mountNavigator();
     regroupLibraryTree();
   }, 1200);
 }
