@@ -8,5 +8,6 @@ void import("./relation-note-sidebar")
   .then(() => import("./relation-library-names-only"))
   .then(() => import("./page-sheet-sidebar-clean"))
   .then(() => import("./page-sheet-sidebar-functional-only"))
+  .then(() => import("./pdf-search-toolbar-runtime"))
   .then(() => import("./page-sheet-toolbar-actions"));
 export {};
