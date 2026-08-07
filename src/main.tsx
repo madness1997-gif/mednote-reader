@@ -12,6 +12,7 @@ import "../app/note-zoom-runtime";
 import "../app/pdf-wheel-zoom-runtime";
 import "../app/note-symbol-library";
 import "../app/independent-library-runtime";
+import "../app/note-pdf-export-menu-fix";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
