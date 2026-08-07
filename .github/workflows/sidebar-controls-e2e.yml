@@ -1,0 +1,47 @@
+name: Note Sidebar Controls E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/page-sheet-navigation.ts"
+      - "app/page-sheet-sidebar-functional-only.ts"
+      - "app/page-sheet-sidebar-clean.ts"
+      - "app/page-sheet-toolbar-actions.ts"
+      - "app/relation-navigation-collapse.ts"
+      - "tests/sidebar-controls.spec.cjs"
+      - ".github/workflows/sidebar-controls-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  sidebar-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install app dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build web app
+        run: npm run build:pages
+      - name: Install Playwright test runner
+        run: npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start Vite and test sidebar controls in mobile Chromium
+        shell: bash
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/mednote-vite.log 2>&1 &
+          VITE_PID=$!
+          trap 'kill $VITE_PID || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/mednote-reader/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173/mednote-reader/ >/dev/null
+          npx playwright test tests/sidebar-controls.spec.cjs --reporter=line --workers=1
