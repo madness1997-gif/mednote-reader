@@ -1,17 +1,8 @@
 import { ChevronDown, FileDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { currentContext, pageGroups, type SheetPage } from "./page-sheet-state";
-
-const CONTROL_SELECTOR = [
-  ".excerpt-object-controls",
-  ".excerpt-resize-handle",
-  ".excerpt-rotate-handle",
-  ".callout-anchor-handle",
-  ".mode-hint",
-  ".citation-chip",
-  ".note-selection-box",
-].join(",");
+import { appendPaperToPdf, createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
 
 type ExportScope = "notebook" | "section" | "page" | "sheet";
 type ExportPlan = {
@@ -21,12 +12,13 @@ type ExportPlan = {
   fileName: string;
   pageIndices: number[];
 };
-type ExportProgress = { page: number; total: number; scope: ExportScope };
-type PrintTarget = {
-  win: Window;
-  doc: Document;
-  cleanup: () => void;
+type ExportProgress = {
+  page: number;
+  total: number;
+  scope: ExportScope;
+  phase: "prepare" | "capture" | "save";
 };
+type ReadyPdf = { url: string; fileName: string; bytes: number };
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -142,12 +134,12 @@ async function activateNotePage(index: number) {
   if (!thumbnail) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
   if (!thumbnail.classList.contains("active")) thumbnail.click();
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
     const current = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"))
       .findIndex((item) => item.classList.contains("active"));
     if (current === index) break;
     await nextFrame();
-    if (attempt === 29) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
+    if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
   }
 
   await settleLayout();
@@ -156,165 +148,46 @@ async function activateNotePage(index: number) {
   return paper;
 }
 
-function copyCanvasPixels(source: HTMLElement, clone: HTMLElement) {
-  const sourceCanvases = Array.from(source.querySelectorAll<HTMLCanvasElement>("canvas"));
-  const clonedCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
-  sourceCanvases.forEach((canvas, index) => {
-    const target = clonedCanvases[index];
-    if (!target) return;
-    try {
-      const image = clone.ownerDocument.createElement("img");
-      image.src = canvas.toDataURL("image/png");
-      image.alt = "";
-      image.width = canvas.width;
-      image.height = canvas.height;
-      image.setAttribute("style", target.getAttribute("style") || "");
-      image.style.width = target.style.width || `${canvas.clientWidth || canvas.width}px`;
-      image.style.height = target.style.height || `${canvas.clientHeight || canvas.height}px`;
-      target.replaceWith(image);
-    } catch {
-      target.remove();
-    }
-  });
-}
-
-function clonePaperForPrint(source: HTMLElement, targetDocument: Document) {
-  const clone = targetDocument.importNode(source, true) as HTMLElement;
-  clone.querySelectorAll(CONTROL_SELECTOR).forEach((element) => element.remove());
-  clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => element.setAttribute("contenteditable", "false"));
-  clone.querySelectorAll<HTMLElement>(".selected,.editable,.movable").forEach((element) => {
-    element.classList.remove("selected", "editable", "movable");
-  });
-  copyCanvasPixels(source, clone);
-  clone.classList.remove("note-pdf-exporting");
-  return clone;
-}
-
-function installPrintStyles(targetDocument: Document) {
-  const base = targetDocument.createElement("base");
-  base.href = document.baseURI;
-  targetDocument.head.append(base);
-
-  document.querySelectorAll("link[rel='stylesheet'], style").forEach((node) => {
-    targetDocument.head.append(targetDocument.importNode(node, true));
-  });
-
-  const style = targetDocument.createElement("style");
-  style.textContent = `
-    html,body{margin:0!important;padding:0!important;background:#fff!important;color-adjust:exact!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-    body{overflow:visible!important}
-    #mednote-print-root{display:block!important;margin:0!important;padding:0!important;background:#fff!important}
-    .mednote-print-sheet{display:block!important;position:relative!important;margin:0 auto!important;padding:0!important;break-after:page!important;page-break-after:always!important;overflow:visible!important;background:#fff!important}
-    .mednote-print-sheet:last-child{break-after:auto!important;page-break-after:auto!important}
-    .mednote-print-sheet>.note-paper{display:block!important;position:relative!important;transform:none!important;scale:1!important;margin:0 auto!important;box-shadow:none!important;filter:none!important;outline:none!important}
-    ${CONTROL_SELECTOR}{display:none!important}
-    @media print{
-      @page{margin:0}
-      html,body,#mednote-print-root{width:100%!important;height:auto!important;overflow:visible!important}
-      .mednote-print-sheet{break-inside:avoid!important;page-break-inside:avoid!important}
-    }
-  `;
-  targetDocument.head.append(style);
-}
-
-function openPrintTarget(fileName: string): PrintTarget {
-  const title = fileName.replace(/\.pdf$/i, "");
-  const popup = window.open("", "_blank");
-  if (popup) {
-    popup.document.open();
-    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title.replace(/[<&>]/g, "")}</title></head><body><div id="mednote-print-root"></div></body></html>`);
-    popup.document.close();
-    installPrintStyles(popup.document);
-    return {
-      win: popup,
-      doc: popup.document,
-      cleanup: () => {
-        try { popup.close(); } catch { /* ignore */ }
-      },
-    };
-  }
-
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.position = "fixed";
-  iframe.style.width = "1px";
-  iframe.style.height = "1px";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.opacity = "0";
-  iframe.style.pointerEvents = "none";
-  document.body.append(iframe);
-  const win = iframe.contentWindow;
-  const doc = iframe.contentDocument;
-  if (!win || !doc) {
-    iframe.remove();
-    throw new Error("Trình duyệt không cho mở tài liệu PDF");
-  }
-  doc.open();
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title.replace(/[<&>]/g, "")}</title></head><body><div id="mednote-print-root"></div></body></html>`);
-  doc.close();
-  installPrintStyles(doc);
-  return { win, doc, cleanup: () => iframe.remove() };
-}
-
-async function exportPlanToPdf(plan: ExportPlan, target: PrintTarget, onProgress: (page: number, total: number) => void) {
+async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
   const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"));
   if (!thumbnails.length) throw new Error("Notebook chưa có Sheet nào");
   if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
   const originalIndex = Math.max(0, thumbnails.findIndex((thumbnail) => thumbnail.classList.contains("active")));
-  const root = target.doc.getElementById("mednote-print-root");
-  if (!root) throw new Error("Không tạo được tài liệu in");
+  const pdf = await createPdfDocument();
+  document.body.classList.add("note-pdf-export-active");
 
   try {
     for (let position = 0; position < plan.pageIndices.length; position += 1) {
       const displayPage = position + 1;
-      onProgress(displayPage, plan.pageIndices.length);
-      document.dispatchEvent(new CustomEvent("mednote:pdf-export-progress", {
-        detail: { page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" },
-      }));
-
-      const source = await activateNotePage(plan.pageIndices[position]);
-      const wrapper = target.doc.createElement("section");
-      wrapper.className = "mednote-print-sheet";
-      wrapper.append(clonePaperForPrint(source, target.doc));
-      root.append(wrapper);
+      onProgress({ page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" });
+      const paper = await activateNotePage(plan.pageIndices[position]);
+      onProgress({ page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "capture" });
+      await appendPaperToPdf(pdf, paper, displayPage);
       await nextFrame();
     }
   } finally {
+    document.querySelectorAll<HTMLElement>(".note-pdf-exporting").forEach((paper) => paper.classList.remove("note-pdf-exporting"));
     await activateNotePage(originalIndex).catch(() => undefined);
+    document.body.classList.remove("note-pdf-export-active");
   }
 
-  document.dispatchEvent(new CustomEvent("mednote:pdf-export-progress", {
-    detail: { page: plan.pageIndices.length, total: plan.pageIndices.length, scope: plan.scope, phase: "print" },
-  }));
+  onProgress({ page: plan.pageIndices.length, total: plan.pageIndices.length, scope: plan.scope, phase: "save" });
+  return saveVerifiedPdf(pdf);
+}
 
-  await Promise.race([
-    target.doc.fonts?.ready ?? Promise.resolve(),
-    delay(1200),
-  ]).catch(() => undefined);
-  await delay(120);
-
-  const cleanup = target.cleanup;
-  let cleaned = false;
-  const finish = () => {
-    if (cleaned) return;
-    cleaned = true;
-    window.setTimeout(cleanup, 300);
-  };
-  target.win.addEventListener("afterprint", finish, { once: true });
-  target.win.focus();
-  target.win.print();
-  window.setTimeout(() => {
-    if (target.win.closed) finish();
-  }, 30_000);
+function makePdfUrl(bytes: Uint8Array) {
+  const buffer = bytes.slice().buffer as ArrayBuffer;
+  return URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }));
 }
 
 export default function NotePdfExporter() {
   const [target, setTarget] = useState<HTMLElement | null>(null);
-  const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [progress, setProgress] = useState<ExportProgress | null>(null);
+  const [ready, setReady] = useState<ReadyPdf | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const readyUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const findTarget = () => setTarget(document.querySelector<HTMLElement>(".note-file-actions"));
@@ -324,76 +197,129 @@ export default function NotePdfExporter() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const close = (event: MouseEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close, true);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("mousedown", close, true);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [menuOpen]);
+  useEffect(() => () => {
+    if (readyUrlRef.current) URL.revokeObjectURL(readyUrlRef.current);
+  }, []);
 
+  const plans = useMemo(() => buildExportPlans(), [target, menuOpen, progress, ready, error]);
   if (!target) return null;
   const exporting = progress !== null;
-  const plans = buildExportPlans();
+
+  const clearReady = () => {
+    if (readyUrlRef.current) {
+      URL.revokeObjectURL(readyUrlRef.current);
+      readyUrlRef.current = null;
+    }
+    setReady(null);
+  };
 
   const startExport = (plan: ExportPlan) => {
     setMenuOpen(false);
-    let printTarget: PrintTarget;
-    try {
-      printTarget = openPrintTarget(plan.fileName);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không mở được tài liệu in";
-      document.dispatchEvent(new CustomEvent("mednote:pdf-export-error", { detail: { message } }));
-      window.alert(`Không thể xuất PDF: ${message}`);
-      return;
-    }
+    setError(null);
+    clearReady();
+    setProgress({ page: 0, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" });
 
-    setProgress({ page: 0, total: plan.pageIndices.length, scope: plan.scope });
-    void exportPlanToPdf(plan, printTarget, (page, total) => setProgress({ page, total, scope: plan.scope }))
-      .catch((error) => {
-        printTarget.cleanup();
-        const message = error instanceof Error ? error.message : "Không thể xuất PDF";
-        document.dispatchEvent(new CustomEvent("mednote:pdf-export-error", { detail: { message } }));
-        window.alert(`Không thể xuất PDF: ${message}`);
+    void exportPlanToPdfBytes(plan, setProgress)
+      .then((bytes) => {
+        const url = makePdfUrl(bytes);
+        readyUrlRef.current = url;
+        setReady({ url, fileName: plan.fileName, bytes: bytes.length });
+      })
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "Không thể xuất PDF");
       })
       .finally(() => setProgress(null));
   };
 
-  return createPortal(
-    <div className="note-pdf-export-wrap" ref={wrapperRef}>
+  const toolbar = createPortal(
+    <div className="note-pdf-export-wrap">
       <button
         className="note-create-button note-pdf-export-button"
         disabled={exporting || !plans.length}
-        onClick={() => setMenuOpen((open) => !open)}
+        onClick={() => {
+          setError(null);
+          setMenuOpen(true);
+        }}
         title="Xuất PDF theo Notebook, Section, Page hoặc Sheet"
         aria-label="Xuất note thành PDF"
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={menuOpen}
       >
         <FileDown size={16} />
-        <span>{exporting ? `PDF ${progress.page}/${progress.total}` : "Xuất PDF"}</span>
-        {!exporting && <ChevronDown size={13} />}
+        <span>Xuất PDF</span>
+        <ChevronDown size={13} />
       </button>
-      {menuOpen && !exporting && (
-        <div className="note-pdf-export-menu" role="menu" aria-label="Chọn phạm vi xuất PDF">
-          <div className="note-pdf-export-menu-title">Xuất PDF</div>
-          {plans.map((plan) => (
-            <button key={plan.scope} type="button" role="menuitem" onClick={() => startExport(plan)} disabled={!plan.pageIndices.length}>
-              <strong>{plan.title}</strong>
-              <small>{plan.detail}</small>
-            </button>
-          ))}
-        </div>
-      )}
     </div>,
     target,
   );
+
+  const overlay = (menuOpen || exporting || ready || error) ? createPortal(
+    <div className="note-pdf-export-layer" role="presentation" onMouseDown={(event) => {
+      if (event.target !== event.currentTarget || exporting) return;
+      setMenuOpen(false);
+      if (ready) clearReady();
+      setError(null);
+    }}>
+      <div className="note-pdf-export-dialog" role="dialog" aria-modal="true" aria-label="Xuất PDF">
+        {menuOpen && !exporting && !ready && !error && (
+          <>
+            <div className="note-pdf-export-dialog-title">Xuất PDF</div>
+            <div className="note-pdf-export-dialog-hint">Chọn phạm vi cần xuất</div>
+            <div className="note-pdf-export-menu note-pdf-export-menu-portal">
+              {plans.map((plan) => (
+                <button
+                  key={plan.scope}
+                  type="button"
+                  onClick={() => startExport(plan)}
+                  disabled={!plan.pageIndices.length}
+                  data-export-scope={plan.scope}
+                >
+                  <strong>{plan.title}</strong>
+                  <small>{plan.detail}</small>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="note-pdf-export-close" onClick={() => setMenuOpen(false)}>Hủy</button>
+          </>
+        )}
+
+        {exporting && progress && (
+          <div className="note-pdf-export-status">
+            <strong>Đang tạo PDF…</strong>
+            <small>
+              {progress.phase === "save"
+                ? "Đang ghép và kiểm tra file PDF…"
+                : progress.phase === "capture"
+                  ? `Đang dựng Sheet ${progress.page}/${progress.total}…`
+                  : `Đang chuẩn bị Sheet ${Math.max(1, progress.page)}/${progress.total}…`}
+            </small>
+            <div className="note-pdf-export-progress"><i style={{ width: `${progress.phase === "save" ? 96 : Math.max(8, (progress.page / Math.max(1, progress.total)) * 88)}%` }} /></div>
+          </div>
+        )}
+
+        {ready && !exporting && (
+          <div className="note-pdf-export-status">
+            <strong>PDF đã tạo xong</strong>
+            <small>{ready.fileName} · {Math.max(1, Math.round(ready.bytes / 1024))} KB</small>
+            <div className="note-pdf-export-ready-actions">
+              <a className="primary" href={ready.url} download={ready.fileName} data-pdf-download="1">Tải PDF</a>
+              <a href={ready.url} target="_blank" rel="noopener noreferrer">Mở PDF</a>
+            </div>
+            <button type="button" className="note-pdf-export-close" onClick={clearReady}>Đóng</button>
+          </div>
+        )}
+
+        {error && !exporting && (
+          <div className="note-pdf-export-status">
+            <strong>Xuất PDF thất bại</strong>
+            <small>{error}</small>
+            <button type="button" className="note-pdf-export-close" onClick={() => setError(null)}>Đóng</button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  return <>{toolbar}{overlay}</>;
 }
