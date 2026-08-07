@@ -13,6 +13,10 @@ const CONTROL_SELECTOR = [
   ".citation-chip",
 ].join(",");
 
+const MOBILE_EXPORT_QUERY = "(max-width: 900px), (pointer: coarse)";
+const IMAGE_WAIT_TIMEOUT = 4500;
+const SHEET_RENDER_TIMEOUT = 12000;
+
 type ExportScope = "notebook" | "section" | "page" | "sheet";
 type ExportPlan = {
   scope: ExportScope;
@@ -31,10 +35,30 @@ function delay(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isMobileExport() {
+  return window.matchMedia?.(MOBILE_EXPORT_QUERY).matches ?? window.innerWidth <= 900;
+}
+
 async function settleLayout() {
   await nextFrame();
   await nextFrame();
-  await delay(70);
+  await delay(isMobileExport() ? 24 : 45);
 }
 
 function safeFileName(value: string) {
@@ -46,16 +70,23 @@ function safeFileName(value: string) {
     .slice(0, 120) || "MedNote";
 }
 
+let cachedStyleText: string | null = null;
 function styleSheetText() {
+  if (cachedStyleText !== null) return cachedStyleText;
   const chunks: string[] = [];
   for (const sheet of Array.from(document.styleSheets)) {
     try {
-      chunks.push(Array.from(sheet.cssRules).map((rule) => rule.cssText).join("\n"));
+      const css = Array.from(sheet.cssRules)
+        .filter((rule) => rule.type !== CSSRule.FONT_FACE_RULE && rule.type !== CSSRule.KEYFRAMES_RULE)
+        .map((rule) => rule.cssText)
+        .join("\n");
+      if (css) chunks.push(css);
     } catch {
       // Ignore stylesheets the browser does not allow us to read.
     }
   }
-  return chunks.join("\n");
+  cachedStyleText = chunks.join("\n");
+  return cachedStyleText;
 }
 
 function blobToDataUrl(blob: Blob) {
@@ -69,10 +100,17 @@ function blobToDataUrl(blob: Blob) {
 
 async function imageSourceAsDataUrl(image: HTMLImageElement) {
   if (!image.src || image.src.startsWith("data:")) return image.src;
+  if (image.src.startsWith("blob:")) {
+    try {
+      return await withTimeout(fetch(image.src).then((response) => response.blob()).then(blobToDataUrl), IMAGE_WAIT_TIMEOUT, "Hình trong Sheet tải quá lâu");
+    } catch {
+      return "";
+    }
+  }
   try {
-    const response = await fetch(image.src);
+    const response = await withTimeout(fetch(image.src), IMAGE_WAIT_TIMEOUT, "Hình trong Sheet tải quá lâu");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await blobToDataUrl(await response.blob());
+    return await withTimeout(blobToDataUrl(await response.blob()), IMAGE_WAIT_TIMEOUT, "Không thể đọc hình trong Sheet");
   } catch {
     // A missing optional image must not prevent the whole notebook from exporting.
     return "";
@@ -81,12 +119,13 @@ async function imageSourceAsDataUrl(image: HTMLImageElement) {
 
 async function waitForImages(root: HTMLElement) {
   const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
-  await Promise.all(images.map((image) => image.complete
+  const wait = Promise.all(images.map((image) => image.complete
     ? Promise.resolve()
     : new Promise<void>((resolve) => {
         image.addEventListener("load", () => resolve(), { once: true });
         image.addEventListener("error", () => resolve(), { once: true });
       })));
+  await withTimeout(wait.then(() => undefined), IMAGE_WAIT_TIMEOUT, "Hình trong Sheet chưa tải xong").catch(() => undefined);
 }
 
 async function prepareClone(source: HTMLElement) {
@@ -99,13 +138,13 @@ async function prepareClone(source: HTMLElement) {
 
   const sourceImages = Array.from(source.querySelectorAll<HTMLImageElement>("img"));
   const cloneImages = Array.from(clone.querySelectorAll<HTMLImageElement>("img"));
-  await Promise.all(sourceImages.map(async (image, index) => {
+  await withTimeout(Promise.all(sourceImages.map(async (image, index) => {
     const target = cloneImages[index];
     if (!target) return;
     const sourceUrl = await imageSourceAsDataUrl(image);
     if (sourceUrl) target.src = sourceUrl;
     else target.removeAttribute("src");
-  }));
+  })).then(() => undefined), IMAGE_WAIT_TIMEOUT + 1500, "Chuẩn bị hình cho Sheet quá lâu").catch(() => undefined);
 
   const sourceCanvases = Array.from(source.querySelectorAll<HTMLCanvasElement>("canvas"));
   const cloneCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
@@ -113,7 +152,11 @@ async function prepareClone(source: HTMLElement) {
     const target = cloneCanvases[index];
     if (!target) return;
     const image = document.createElement("img");
-    image.src = canvas.toDataURL("image/png");
+    try {
+      image.src = canvas.toDataURL("image/png");
+    } catch {
+      image.src = "";
+    }
     image.alt = "";
     image.setAttribute("style", target.getAttribute("style") ?? "");
     image.style.display = "block";
@@ -135,23 +178,26 @@ async function elementToPng(source: HTMLElement, width: number, height: number) 
     const image = new Image();
     image.decoding = "async";
     image.src = svgUrl;
-    await new Promise<void>((resolve, reject) => {
+    await withTimeout(new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
       image.onerror = () => reject(new Error("Không thể dựng ảnh Sheet"));
-    });
-    const pixelRatio = 2;
+    }), SHEET_RENDER_TIMEOUT, "Dựng Sheet quá 12 giây");
+
+    const pixelRatio = isMobileExport() ? 1 : 1.5;
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * pixelRatio));
     canvas.height = Math.max(1, Math.round(height * pixelRatio));
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("Thiết bị không hỗ trợ dựng PDF");
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
-    const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+    const png = await withTimeout(new Promise<Blob>((resolve, reject) => canvas.toBlob(
       (blob) => blob ? resolve(blob) : reject(new Error("Không thể tạo ảnh Sheet")),
       "image/png",
-      1,
-    ));
+      isMobileExport() ? 0.9 : 1,
+    )), 8000, "Mã hóa ảnh Sheet quá lâu");
     return new Uint8Array(await png.arrayBuffer());
   } finally {
     URL.revokeObjectURL(svgUrl);
@@ -282,7 +328,7 @@ async function activateNotePage(index: number) {
   const paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
   if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
   await waitForImages(paper);
-  await (document.fonts?.ready ?? Promise.resolve());
+  await withTimeout(document.fonts?.ready ?? Promise.resolve(), 2500, "Font tải quá lâu").catch(() => undefined);
   return paper;
 }
 
@@ -305,12 +351,14 @@ async function exportPlanToPdf(plan: ExportPlan, onProgress: (page: number, tota
   if (!thumbnails.length) throw new Error("Notebook chưa có Sheet nào");
   if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
+  cachedStyleText = null;
   const originalIndex = Math.max(0, thumbnails.findIndex((thumbnail) => thumbnail.classList.contains("active")));
   const pdf = await PDFDocument.create();
   document.body.classList.add("note-pdf-export-active");
   try {
     for (let position = 0; position < plan.pageIndices.length; position += 1) {
       onProgress(position + 1, plan.pageIndices.length);
+      document.dispatchEvent(new CustomEvent("mednote:pdf-export-progress", { detail: { page: position + 1, total: plan.pageIndices.length, scope: plan.scope } }));
       const paper = await activateNotePage(plan.pageIndices[position]);
       paper.classList.add("note-pdf-exporting");
       await settleLayout();
@@ -322,12 +370,17 @@ async function exportPlanToPdf(plan: ExportPlan, onProgress: (page: number, tota
       const ratioMatch = ratioText.match(/([\d.]+)\s*\/\s*([\d.]+)/);
       const ratio = ratioMatch ? Number(ratioMatch[1]) / Number(ratioMatch[2]) : paper.offsetWidth / Math.max(1, paper.offsetHeight);
       const naturalHeight = Number.parseFloat(computed.getPropertyValue("--note-natural-height")) || naturalWidth / ratio;
-      const png = await elementToPng(paper, Math.round(naturalWidth), Math.round(naturalHeight));
+      const png = await withTimeout(
+        elementToPng(paper, Math.round(naturalWidth), Math.round(naturalHeight)),
+        SHEET_RENDER_TIMEOUT + IMAGE_WAIT_TIMEOUT + 5000,
+        `Sheet ${position + 1} xử lý quá lâu`,
+      );
       const embedded = await pdf.embedPng(png);
       const size = pdfPageSize(naturalWidth, naturalHeight);
       const page = pdf.addPage([size.width, size.height]);
       page.drawImage(embedded, { x: 0, y: 0, width: size.width, height: size.height });
       paper.classList.remove("note-pdf-exporting");
+      await nextFrame();
     }
   } finally {
     document.querySelectorAll<HTMLElement>(".note-pdf-exporting").forEach((paper) => paper.classList.remove("note-pdf-exporting"));
