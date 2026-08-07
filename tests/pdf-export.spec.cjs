@@ -23,47 +23,13 @@ test('PDF export core produces a real one-page PDF in mobile Chromium', async ({
 });
 
 test('clicking Export PDF really creates a downloadable PDF blob', async ({ page }) => {
-  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
-
-  await page.evaluate(() => {
+  await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
-
-    document.querySelectorAll('.note-thumbnails.__pdf-e2e, .note-stage.__pdf-e2e').forEach((node) => node.remove());
-
-    const thumbs = document.createElement('div');
-    thumbs.className = 'note-thumbnails __pdf-e2e';
-    const thumb = document.createElement('button');
-    thumb.type = 'button';
-    thumb.className = 'note-thumb active';
-    thumb.textContent = 'Tờ 1';
-    thumbs.append(thumb);
-
-    const stage = document.createElement('div');
-    stage.className = 'note-stage __pdf-e2e';
-    stage.style.position = 'fixed';
-    stage.style.left = '-10000px';
-    stage.style.top = '0';
-    const paper = document.createElement('div');
-    paper.className = 'note-paper';
-    paper.style.setProperty('--note-natural-width', '420px');
-    paper.style.setProperty('--note-natural-height', '594px');
-    paper.style.width = '420px';
-    paper.style.height = '594px';
-    paper.style.background = '#fff';
-    paper.innerHTML = '<div style="padding:28px;font:16px Arial"><h2>MedNote E2E</h2><p>Real export button test</p><div style="width:100px;height:100px;border-radius:50%;background:#c7d8eb"></div></div>';
-    stage.append(paper);
-
-    document.body.append(thumbs, stage);
-
-    if (!document.querySelector('.note-file-actions')) {
-      const actions = document.createElement('div');
-      actions.className = 'note-file-actions';
-      document.body.append(actions);
-    }
   });
+  await page.goto(`${APP_URL}?pdfExportE2E=1`, { waitUntil: 'domcontentloaded' });
 
+  await expect(page.locator('[data-pdf-export-e2e-harness="1"]')).toBeVisible({ timeout: 5000 });
   const exportButton = page.locator('.note-pdf-export-button');
   await expect(exportButton).toBeVisible({ timeout: 5000 });
   await expect(exportButton).toBeEnabled();
@@ -73,7 +39,17 @@ test('clicking Export PDF really creates a downloadable PDF blob', async ({ page
   await expect(notebookScope).toBeVisible({ timeout: 3000 });
   await notebookScope.click();
 
-  await expect(page.getByText('PDF đã tạo xong')).toBeVisible({ timeout: 25_000 });
+  const ready = page.getByText('PDF đã tạo xong');
+  const failed = page.getByText('Xuất PDF thất bại');
+  await expect.poll(async () => {
+    if (await ready.isVisible().catch(() => false)) return 'ready';
+    if (await failed.isVisible().catch(() => false)) {
+      const detail = await page.locator('.note-pdf-export-status small').textContent().catch(() => 'unknown');
+      return `failed:${detail}`;
+    }
+    return 'waiting';
+  }, { timeout: 25_000, intervals: [100, 250, 500] }).toBe('ready');
+
   const downloadLink = page.locator('[data-pdf-download="1"]');
   await expect(downloadLink).toBeVisible();
 
