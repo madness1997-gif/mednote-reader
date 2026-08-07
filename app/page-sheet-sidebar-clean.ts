@@ -2,9 +2,10 @@ const STYLE_ID = "mednote-page-sheet-sidebar-clean-style";
 const NAV_CLASS = "mednote-page-sheet-nav";
 const MORE_CLASS = "mps-sidebar-more";
 const OPEN_CLASS = "mps-tools-open";
+const CLOSE_CLASS = "onenote-note-navigation-close";
 
 const style = `
-/* The Page→Tờ navigator is the single source of truth. Never stack the legacy navigator under it. */
+/* The Page→Sheet navigator is the single source of truth. Never stack the legacy navigator under it. */
 .note-thumbnails:has(> .${NAV_CLASS}) > .onenote-note-navigation,
 .note-thumbnails:has(> .${NAV_CLASS}) > .notes-heading,
 .note-thumbnails:has(> .${NAV_CLASS}) > .note-thumb-wrap,
@@ -14,10 +15,12 @@ const style = `
 .workspace.onenote-right-navigation-layout{--onenote-nav-width:clamp(205px,22vw,260px)!important}
 .note-thumbnails.onenote-navigation-active:has(> .${NAV_CLASS}){width:100%!important;min-width:0!important;max-width:none!important;resize:none!important;background:#f8f9fa!important;border-left:1px solid #e2e5e7!important}
 .${NAV_CLASS}{background:#f8f9fa!important;color:#263238!important}
-.${NAV_CLASS} .mps-bookbar{height:42px!important;gap:4px!important;padding:5px 7px!important;background:#fff!important;border-bottom:1px solid #e5e8ea!important}
+.${NAV_CLASS} .mps-bookbar{height:42px!important;display:flex!important;align-items:center!important;gap:4px!important;padding:5px 7px!important;background:#fff!important;border-bottom:1px solid #e5e8ea!important;overflow:visible!important}
 .${NAV_CLASS} .mps-book-icon{display:none!important}
 .${NAV_CLASS} .mps-book-select{height:30px!important;padding:0 6px!important;font-size:12px!important;color:#263238!important}
 .${NAV_CLASS} .mps-icon{width:28px!important;height:28px!important;color:#5f6368!important}
+.${NAV_CLASS} .${CLOSE_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important;flex:0 0 30px!important;width:30px!important;height:30px!important;margin-left:1px!important;padding:0!important;place-items:center!important;border:1px solid #dedfe2!important;border-radius:7px!important;background:#fff!important;color:#555!important;font-size:18px!important;line-height:1!important;cursor:pointer!important;box-shadow:none!important}
+.${NAV_CLASS} .${CLOSE_CLASS}:hover{background:#f0f1f2!important;color:#222!important}
 
 /* One vertical hierarchy instead of two cramped side-by-side columns. */
 .${NAV_CLASS} .mps-layout{display:flex!important;flex-direction:column!important;min-height:0!important;background:#f8f9fa!important}
@@ -73,6 +76,7 @@ const style = `
   .${NAV_CLASS} .mps-section-copy strong{max-width:78px!important}
   .${NAV_CLASS} .mps-page-list{padding:5px!important}
   .${NAV_CLASS} .mps-page-open strong{font-size:10.5px!important}
+  .${NAV_CLASS} .${CLOSE_CLASS}{flex-basis:32px!important;width:32px!important;height:32px!important;font-size:20px!important}
 }
 `;
 
@@ -95,10 +99,23 @@ function trimMetadata(nav: HTMLElement) {
   });
 }
 
+function ensureCloseButton(nav: HTMLElement) {
+  const bookbar = nav.querySelector<HTMLElement>(":scope > .mps-bookbar");
+  if (!bookbar || bookbar.querySelector(`.${CLOSE_CLASS}`)) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = CLOSE_CLASS;
+  button.dataset.noteNavigationClose = "1";
+  button.title = "Ẩn sidebar note";
+  button.setAttribute("aria-label", "Ẩn sidebar note");
+  button.textContent = "×";
+  bookbar.append(button);
+}
+
 function addMoreButton(owner: HTMLElement, toolsSelector: string) {
   if (owner.querySelector(`:scope > .${MORE_CLASS}`) || owner.querySelector(`:scope > .mps-page-head > .${MORE_CLASS}`)) return;
   const tools = owner.querySelector<HTMLElement>(toolsSelector);
-  if (!tools) return;
+  if (!tools || !tools.children.length) return;
   const button = document.createElement("button");
   button.type = "button";
   button.className = MORE_CLASS;
@@ -122,6 +139,9 @@ function prepareNavigator(nav: HTMLElement) {
       legacy.setAttribute("aria-hidden", "true");
     }
   }
+  ensureCloseButton(nav);
+  /* Sheet creation has one home: the + button on the note toolbar. */
+  nav.querySelectorAll<HTMLElement>("[data-add-sheet]").forEach((button) => button.remove());
   trimMetadata(nav);
   nav.querySelectorAll<HTMLElement>(".mps-page-card").forEach((owner) => addMoreButton(owner, ":scope > .mps-page-head > .mps-page-tools"));
   nav.querySelectorAll<HTMLElement>(".mps-sheet").forEach((owner) => addMoreButton(owner, ":scope > .mps-sheet-tools"));
@@ -164,5 +184,6 @@ injectStyle();
 window.addEventListener("click", handleWindowClick, true);
 new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
 document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", schedule, { once: true }) : schedule();
+window.setInterval(schedule, 900);
 
 export {};
