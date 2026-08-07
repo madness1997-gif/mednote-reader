@@ -8,6 +8,22 @@ test.use({
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
+async function clickAndDismissDialog(page, locator, expectedType, expectedText) {
+  let seen = null;
+  const handled = new Promise((resolve) => {
+    page.once('dialog', async (dialog) => {
+      seen = { type: dialog.type(), message: dialog.message() };
+      await dialog.dismiss();
+      resolve();
+    });
+  });
+  await locator.click();
+  await handled;
+  expect(seen).not.toBeNull();
+  expect(seen.type).toBe(expectedType);
+  expect(seen.message).toContain(expectedText);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
@@ -41,18 +57,25 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(more).toBeVisible();
   await expect(close).toBeVisible();
 
+  // Let mutation-driven enhancers settle, then make sure the same topbar remains
+  // present long enough for a real touch/click target instead of being replaced.
+  const originalTopbarToken = await page.evaluate(() => {
+    const bar = document.querySelector('.mednote-page-sheet-nav .mps-bookbar');
+    if (!(bar instanceof HTMLElement)) return '';
+    const token = `e2e-${Math.random()}`;
+    bar.dataset.e2eStableToken = token;
+    return token;
+  });
+  await page.waitForTimeout(1400);
+  await expect(bookbar).toHaveAttribute('data-e2e-stable-token', originalTopbarToken);
+
   // N: open/focus notebook picker.
   await pickerButton.click();
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
 
   // +: invoke the real create-notebook prompt.
-  const addDialogPromise = page.waitForEvent('dialog');
-  await addNotebook.click();
-  const addDialog = await addDialogPromise;
-  expect(addDialog.type()).toBe('prompt');
-  expect(addDialog.message()).toContain('Notebook');
-  await addDialog.dismiss();
+  await clickAndDismissDialog(page, addNotebook, 'prompt', 'Notebook');
 
   // Search: open the real panel, type an existing Section name and get a result.
   await search.click();
@@ -67,28 +90,18 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'navigation');
   await expect(nav.locator('.mps-search-input')).toHaveCount(0);
 
-  // ...: menu opens and both real destructive/non-destructive actions invoke dialogs.
+  // ...: menu opens and both real actions invoke their actual dialogs.
   await more.click();
   const menu = bookbar.locator('.mps-notebook-menu');
   await expect(menu).toHaveClass(/open/);
   await expect(menu.locator('[data-page-sheet-notebook-rename]')).toBeVisible();
   await expect(menu.locator('[data-page-sheet-notebook-delete]')).toBeVisible();
 
-  const renameDialogPromise = page.waitForEvent('dialog');
-  await menu.locator('[data-page-sheet-notebook-rename]').click();
-  const renameDialog = await renameDialogPromise;
-  expect(renameDialog.type()).toBe('prompt');
-  expect(renameDialog.message()).toContain('Notebook');
-  await renameDialog.dismiss();
+  await clickAndDismissDialog(page, menu.locator('[data-page-sheet-notebook-rename]'), 'prompt', 'Notebook');
 
   await more.click();
   await expect(menu).toHaveClass(/open/);
-  const deleteDialogPromise = page.waitForEvent('dialog');
-  await menu.locator('[data-page-sheet-notebook-delete]').click();
-  const deleteDialog = await deleteDialogPromise;
-  expect(deleteDialog.type()).toBe('confirm');
-  expect(deleteDialog.message()).toContain('Notebook');
-  await deleteDialog.dismiss();
+  await clickAndDismissDialog(page, menu.locator('[data-page-sheet-notebook-delete]'), 'confirm', 'Notebook');
 
   // X: actually hides the sidebar and writes the persisted hidden state.
   await close.click();
