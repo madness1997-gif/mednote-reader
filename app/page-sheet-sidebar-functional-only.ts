@@ -3,31 +3,6 @@ const NAV_CLASS = "mednote-page-sheet-nav";
 const SEARCH_BUTTON_CLASS = "mps-sidebar-search-button";
 const SEARCH_CLOSE_CLASS = "mps-sidebar-search-close";
 
-const FUNCTIONAL_BUTTON_SELECTORS = [
-  "[data-new-notebook]",
-  "[data-add-section]",
-  "[data-add-page]",
-  "[data-open-page]",
-  "[data-open-sheet]",
-  "[data-sidebar-more]",
-  "[data-rename-section]",
-  "[data-delete-section]",
-  "[data-link-page]",
-  "[data-link-sheet]",
-  "[data-rename-page]",
-  "[data-delete-page]",
-  "[data-delete-sheet]",
-  "[data-sheet-up]",
-  "[data-sheet-down]",
-  "[data-move-page]",
-  "[data-note-navigation-close]",
-  "[data-sidebar-mode-button]",
-  "[data-search-open-kind][data-search-open-value]",
-  "[data-page-sheet-notebook-more]",
-  "[data-page-sheet-notebook-rename]",
-  "[data-page-sheet-notebook-delete]",
-].join(",");
-
 const style = `
 /* Keep the OneNote-like Notebook -> Section -> Page hierarchy. Search is the
    only utility control kept because it has a real, complete interaction. */
@@ -94,6 +69,7 @@ function ensureSearchClose(nav: HTMLElement) {
   if (nav.dataset.sidebarMode !== "search") return;
   const head = nav.querySelector<HTMLElement>(":scope > .mps-sidebar-utility .mps-utility-head");
   if (!head || head.querySelector(`.${SEARCH_CLOSE_CLASS}`)) return;
+  if (head.querySelector("[data-native-note-search-close]")) return;
   const button = document.createElement("button");
   button.type = "button";
   button.className = SEARCH_CLOSE_CLASS;
@@ -119,12 +95,6 @@ function removeUnavailableActions(nav: HTMLElement) {
   });
 }
 
-function removeFakeButtons(nav: HTMLElement) {
-  nav.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-    if (!button.matches(FUNCTIONAL_BUTTON_SELECTORS)) button.remove();
-  });
-}
-
 function cleanNavigator(nav: HTMLElement) {
   if (nav.dataset.sidebarMode !== "search") nav.dataset.sidebarMode = "navigation";
   nav.querySelector<HTMLElement>(":scope > .mps-onenote-rail")?.remove();
@@ -132,7 +102,9 @@ function cleanNavigator(nav: HTMLElement) {
   ensureSearchButton(nav);
   ensureSearchClose(nav);
   removeUnavailableActions(nav);
-  removeFakeButtons(nav);
+  /* Do not run a generic button scrubber here. The previous scrubber raced with
+     the runtime and repeatedly removed/re-created real top-bar controls, which
+     made them appear visible but untappable on mobile browsers. */
 }
 
 let scheduled = false;
