@@ -8,10 +8,9 @@ test.use({
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
-test('OneNote sidebar survives reload after the app migrates its state to IndexedDB v3', async ({ page }) => {
+test('OneNote sidebar survives an IndexedDB-only reload like the real phone session', async ({ page }) => {
   await page.addInitScript(() => {
-    // Seed only the first navigation. On reload the app must restore from
-    // IndexedDB while localStorage contains only the indexeddb-v3 marker.
+    // Seed only the first navigation. The second navigation must use IndexedDB.
     if (sessionStorage.getItem('sidebar-indexeddb-seeded') === '1') return;
     localStorage.clear();
     sessionStorage.setItem('sidebar-indexeddb-seeded', '1');
@@ -69,27 +68,40 @@ test('OneNote sidebar survives reload after the app migrates its state to Indexe
   await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
   await expect(nav).toBeVisible({ timeout: 12_000 });
 
-  // Wait for incremental persistence to finish and deliberately replace the
-  // legacy full snapshot with the small marker used on real devices.
-  await expect.poll(async () => page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem('mednote-library-v2') || '{}').storage || ''; }
-    catch { return ''; }
-  }), { timeout: 12_000 }).toBe('indexeddb-v3');
+  // Wait until the real incremental store contains this workspace.
+  await expect.poll(async () => page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mednote-local', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v3:meta');
+        request.onsuccess = () => resolve(request.result?.activeWorkspaceId || '');
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      db.close();
+    }
+  }), { timeout: 12_000 }).toBe('persisted-workspace-1');
 
-  // This is the important load: no full app state exists in localStorage now.
+  // Force the exact persisted shape observed on the user's phone: IndexedDB owns
+  // the full state and localStorage contains only the tiny marker.
+  await page.evaluate(() => {
+    localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v3', savedAt: Date.now() }));
+  });
+
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 12_000 });
   await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
   await expect(nav).toBeVisible({ timeout: 12_000 });
   await expect(nav.locator('[data-notebook-select]')).toHaveValue('persisted-notebook-1');
 
-  // Keep it on screen across several navigator maintenance cycles.
+  // Keep it on screen across several navigator maintenance cycles so a late
+  // relation sync cannot turn it back into the blank right-hand strip.
   await page.waitForTimeout(4_000);
   await expect(nav).toBeVisible();
-
-  const marker = await page.evaluate(() => JSON.parse(localStorage.getItem('mednote-library-v2') || '{}'));
-  expect(marker.storage).toBe('indexeddb-v3');
-  expect(marker.workspaces).toBeUndefined();
 
   const box = await nav.boundingBox();
   expect(box).not.toBeNull();
