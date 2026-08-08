@@ -67,13 +67,7 @@ test('OneNote sidebar repairs stale activeNotebookId and stays mounted', async (
   await expect(nav).toBeVisible({ timeout: 12_000 });
   await page.waitForTimeout(4_000);
   await expect(nav).toBeVisible();
-
-  const repairedId = await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('mednote-library-v2') || '{}');
-    const workspace = state.workspaces?.find((item) => item.id === 'workspace-1');
-    return workspace?.activeNotebookId || '';
-  });
-  expect(repairedId).toBe('real-notebook-1');
+  await expect(nav.locator('[data-notebook-select]')).toHaveValue('real-notebook-1');
 
   const box = await nav.boundingBox();
   expect(box).not.toBeNull();
