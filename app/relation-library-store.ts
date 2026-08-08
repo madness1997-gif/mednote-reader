@@ -47,7 +47,16 @@ function reconcile(state: AppState, inputLibrary: RelationLibrary) {
         keptNotebooks.push(notebook);
         continue;
       }
-      if (untouchedGeneratedNotebook(workspace, notebook)) continue;
+
+      // Reader-only workspaces may keep the old automatically generated blank note
+      // out of the Library. But once the user is actually viewing the Note side
+      // (Note-only or Both), that active notebook is real UI state and must remain
+      // available so the OneNote-style navigator can normalize and mount it.
+      const isActiveVisibleNote = state.activeWorkspaceId === String(workspace.id)
+        && state.workspaceMode !== "reader"
+        && String(workspace.activeNotebookId || "") === String(notebook.id || "");
+      if (untouchedGeneratedNotebook(workspace, notebook) && !isActiveVisibleNote) continue;
+
       const normalized = normalizeSections(notebooks.get(String(notebook.id)), notebook);
       normalized.workspaceId = String(workspace.id).startsWith(NOTE_WORKSPACE_PREFIX)
         ? String(workspace.id)
