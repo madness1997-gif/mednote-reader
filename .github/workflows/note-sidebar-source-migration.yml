@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Remove native note thumbnails and make OneNote sidebar the only source
+      - name: Remove native note thumbnails and keep the OneNote sidebar only
         shell: bash
         run: |
           python - <<'PY'
@@ -26,113 +26,121 @@ jobs:
 
           root = Path('.')
 
-          # 1) React source: remove the native note-thumbnail UI entirely.
+          def replace_once(text, pattern, replacement, label, flags=0):
+              regex = re.compile(pattern, flags)
+              updated, count = regex.subn(replacement, text, count=1)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {count}')
+              return updated
+
+          # React: remove the old thumbnail sidebar from the actual component tree.
           page_path = root / 'app/page.tsx'
           page = page_path.read_text(encoding='utf-8')
-          pattern = re.compile(
-              r'\n        <aside className="note-thumbnails" aria-label="Trang ghi chú">.*?\n        </aside>',
+          page = replace_once(
+              page,
+              r'\n\s*<aside className="note-thumbnails" aria-label="Trang ghi chú">.*?\n\s*</aside>',
+              '\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />',
+              'remove native note thumbnail aside',
               re.S,
           )
-          replacement = '\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />'
-          page, count = pattern.subn(replacement, page, count=1)
-          if count != 1:
-              raise SystemExit(f'Expected exactly one native note thumbnail aside, found {count}')
 
-          # Expose a tiny page-activation bridge for PDF export so export no longer
-          # depends on clickable thumbnail DOM.
-          active_note_anchor = '''  const setActiveNoteId = (pageId: string) => {
-            updateActiveNotebook((notebook) => ({ ...notebook, activePageId: pageId }));
-          };
-          '''
-          if active_note_anchor not in page:
-              raise SystemExit('Could not find setActiveNoteId anchor')
-          active_note_bridge = active_note_anchor + '''
-          useEffect(() => {
-            const activateNotePage = (event: Event) => {
-              const pageId = (event as CustomEvent<string>).detail;
-              if (!pageId || !activeNotebook.pages.some((item) => item.id === pageId)) return;
-              setActiveNoteId(pageId);
-            };
-            window.addEventListener("mednote:activate-note-page", activateNotePage);
-            return () => window.removeEventListener("mednote:activate-note-page", activateNotePage);
-          }, [activeNotebook.id, activeNotebook.pages]);
-          '''
-          page = page.replace(active_note_anchor, active_note_bridge, 1)
-          paper_anchor = '<article className={`note-paper interactive '
-          if paper_anchor not in page:
-              raise SystemExit('Could not find note-paper anchor')
-          page = page.replace(
-              paper_anchor,
+          # Add a thumbnail-free page activation bridge for PDF export.
+          active_pattern = re.compile(
+              r'(\n\s{2}const setActiveNoteId = \(pageId: string\) => \{\n'
+              r'\s{4}updateActiveNotebook\(\(notebook\) => \(\{ \.\.\.notebook, activePageId: pageId \}\)\);\n'
+              r'\s{2}\};\n)'
+          )
+          def add_activation_bridge(match):
+              return match.group(1) + '''
+  useEffect(() => {
+    const activateNotePage = (event: Event) => {
+      const pageId = (event as CustomEvent<string>).detail;
+      if (!pageId || !activeNotebook.pages.some((item) => item.id === pageId)) return;
+      setActiveNoteId(pageId);
+    };
+    window.addEventListener("mednote:activate-note-page", activateNotePage);
+    return () => window.removeEventListener("mednote:activate-note-page", activateNotePage);
+  }, [activeNotebook.id, activeNotebook.pages]);
+'''
+          page, bridge_count = active_pattern.subn(add_activation_bridge, page, count=1)
+          if bridge_count != 1:
+              raise SystemExit(f'add PDF-export page activation bridge: expected 1 match, got {bridge_count}')
+
+          page = replace_once(
+              page,
+              r'<article className=\{`note-paper interactive ',
               '<article data-note-page-id={activeNote.id} className={`note-paper interactive ',
-              1,
+              'tag active note paper with page id',
           )
           page_path.write_text(page, encoding='utf-8')
 
-          # 2) Rename the old thumbnail host everywhere it was only being used as a mount point.
+          # The old class name described thumbnails. Rename the mount point everywhere first.
           for base in (root / 'app', root / 'tests'):
-              if not base.exists():
-                  continue
-              for path in base.rglob('*'):
-                  if path.suffix not in {'.ts', '.tsx', '.css', '.cjs', '.js'}:
+              for path in base.rglob('*') if base.exists() else []:
+                  if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.css', '.cjs', '.js'}:
                       continue
                   text = path.read_text(encoding='utf-8')
                   updated = text.replace('note-thumbnails', 'note-navigation-host')
                   if updated != text:
                       path.write_text(updated, encoding='utf-8')
 
-          # 3) Remove legacy sidebar layers. The Page→Sheet navigator is already
-          # OneNote-styled and becomes the single live note navigation implementation.
+          # Remove the obsolete hidden-thumbnail shim and duplicate legacy sidebar runtime.
           runtime_path = root / 'app/independent-library-runtime.ts'
           runtime = runtime_path.read_text(encoding='utf-8')
-          runtime = runtime.replace(
-              'void import("./relation-note-sidebar")\n'
-              '  .then(() => import("./relation-note-hide-native-thumbnails"))\n'
-              '  .then(() => import("./relation-note-right-layout"))',
+          runtime = replace_once(
+              runtime,
+              r'void import\("\./relation-note-sidebar"\)\s*'
+              r'\.then\(\(\) => import\("\./relation-note-hide-native-thumbnails"\)\)\s*'
+              r'\.then\(\(\) => import\("\./relation-note-right-layout"\)\)',
               'void import("./relation-note-right-layout")',
+              'remove legacy sidebar import chain',
+              re.S,
           )
-          if 'relation-note-sidebar' in runtime or 'relation-note-hide-native-thumbnails' in runtime:
-              raise SystemExit('Legacy sidebar imports still present in independent-library-runtime.ts')
           runtime_path.write_text(runtime, encoding='utf-8')
-
-          for legacy in (
-              root / 'app/relation-note-hide-native-thumbnails.ts',
-              root / 'app/relation-note-sidebar.ts',
-          ):
+          for legacy in (root / 'app/relation-note-sidebar.ts', root / 'app/relation-note-hide-native-thumbnails.ts'):
               if legacy.exists():
                   legacy.unlink()
 
-          # 4) Point right-layout logic at the real OneNote-style Page→Sheet navigator.
+          # The active sidebar is mednote-page-sheet-nav; wire all layout/close code to it.
           right_path = root / 'app/relation-note-right-layout.ts'
           right = right_path.read_text(encoding='utf-8')
           right = right.replace(
               'const NAV_SELECTOR = ":scope > .note-navigation-host > .onenote-note-navigation";',
               'const NAV_SELECTOR = ":scope > .note-navigation-host > .mednote-page-sheet-nav";',
           )
-          if '.onenote-note-navigation";' in right:
-              raise SystemExit('Right-layout still targets the removed legacy navigator')
+          right = right.replace('>.onenote-note-navigation', '>.mednote-page-sheet-nav')
           right_path.write_text(right, encoding='utf-8')
 
-          # 5) The thumbnail virtualization plugin now virtualizes PDF pages only.
+          collapse_path = root / 'app/relation-navigation-collapse.ts'
+          collapse = collapse_path.read_text(encoding='utf-8')
+          collapse = collapse.replace(
+              ':scope > .mps-bookbar, :scope > .onenote-note-navigation-bookbar',
+              ':scope > .mps-bookbar',
+          )
+          collapse = collapse.replace(
+              ':scope > .mednote-page-sheet-nav, :scope > .onenote-note-navigation',
+              ':scope > .mednote-page-sheet-nav',
+          )
+          collapse_path.write_text(collapse, encoding='utf-8')
+
+          navigation_path = root / 'app/page-sheet-navigation.ts'
+          navigation = navigation_path.read_text(encoding='utf-8')
+          navigation = navigation.replace('.onenote-note-navigation{display:none!important}\n', '')
+          navigation_path.write_text(navigation, encoding='utf-8')
+
+          # Delete all note-thumbnail virtualization source; PDF thumbnail virtualization stays.
           virtual_path = root / 'app/virtualized-thumbnails.tsx'
           virtual = virtual_path.read_text(encoding='utf-8')
           virtual = virtual.replace('import { Trash2 } from "lucide-react";\n', '')
           virtual = virtual.replace('const DEFAULT_NOTE_ITEM_SIZE = 150;\n', '')
-          virtual = re.sub(
-              r'\nconst NOTE_PAPER_SWATCH: Record<string, string> = \{.*?\n\};\n',
-              '\n',
+          virtual = re.sub(r'\nconst NOTE_PAPER_SWATCH: Record<string, string> = \{.*?\n\};\n', '\n', virtual, count=1, flags=re.S)
+          virtual = replace_once(
               virtual,
-              count=1,
-              flags=re.S,
-          )
-          virtual, removed_note_component = re.subn(
               r'\ntype NoteThumbPage = \{.*\Z',
               '\n',
-              virtual,
-              count=1,
-              flags=re.S,
+              'remove VirtualNoteThumbnailList implementation',
+              re.S,
           )
-          if removed_note_component != 1:
-              raise SystemExit('Could not remove VirtualNoteThumbnailList source')
           virtual_path.write_text(virtual, encoding='utf-8')
 
           vite_virtual_path = root / 'vite.thumbnail-virtualization.ts'
@@ -143,141 +151,125 @@ jobs:
           )
           vite_virtual = re.sub(r'^const NOTE_LIST_START = .*?\n', '', vite_virtual, count=1, flags=re.M)
           vite_virtual = re.sub(r'^const NOTE_LIST_END = .*?\n', '', vite_virtual, count=1, flags=re.M)
-          vite_virtual, removed_note_transform = re.subn(
-              r'\n      next = replaceRange\(\s*next,\s*NOTE_LIST_START,.*?"danh sách trang note",\s*\);\n',
-              '\n',
+          vite_virtual = replace_once(
               vite_virtual,
-              count=1,
-              flags=re.S,
-          )
-          if removed_note_transform != 1:
-              raise SystemExit('Could not remove note-list virtualization transform')
-          vite_virtual_path.write_text(vite_virtual, encoding='utf-8')
-
-          # 6) PDF export activates note pages through the app bridge, not through
-          # sidebar thumbnails. This keeps export functional after the thumbnail UI is gone.
-          export_path = root / 'app/note-pdf-export.tsx'
-          export = export_path.read_text(encoding='utf-8')
-          export = export.replace(
-              'function buildExportPlans(): ExportPlan[] {\n  const context = currentContext();\n  const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-navigation-host .note-thumb"));\n  if (!context) {\n    return thumbnails.length ? [{\n      scope: "notebook",\n      title: "Notebook",\n      detail: `${thumbnails.length} Sheet`,\n      fileName: "MedNote.pdf",\n      pageIndices: thumbnails.map((_, index) => index),\n    }] : [];\n  }',
-              '''function notePageIds() {
-            const context = currentContext();
-            if (context) return ((context.notebook.pages || []) as SheetPage[]).map((sheet) => String(sheet.id));
-            const paper = document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
-            return paper?.dataset.notePageId ? [paper.dataset.notePageId] : [];
-          }
-
-          function buildExportPlans(): ExportPlan[] {
-            const context = currentContext();
-            const availablePageIds = notePageIds();
-            if (!context) {
-              return availablePageIds.length ? [{
-                scope: "notebook",
-                title: "Notebook",
-                detail: `${availablePageIds.length} Sheet`,
-                fileName: "MedNote.pdf",
-                pageIndices: availablePageIds.map((_, index) => index),
-              }] : [];
-            }''',
-          )
-          old_activate = re.compile(
-              r'async function activateNotePage\(index: number\) \{.*?\n\}\n\nasync function exportPlanToPdfBytes',
+              r'\n\s*next = replaceRange\(\s*next,\s*NOTE_LIST_START,.*?"danh sách trang note",\s*\);\n',
+              '\n',
+              'remove build-time note thumbnail injection',
               re.S,
           )
-          new_activate = '''async function activateNotePage(index: number) {
-            const pageIds = notePageIds();
-            const pageId = pageIds[index];
-            if (!pageId) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
+          vite_virtual_path.write_text(vite_virtual, encoding='utf-8')
 
-            let paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
-            if (paper?.dataset.notePageId !== pageId) {
-              window.dispatchEvent(new CustomEvent("mednote:activate-note-page", { detail: pageId }));
-            }
+          # Refactor PDF export: switch active sheets by page id, never by thumbnail clicks.
+          export_path = root / 'app/note-pdf-export.tsx'
+          export = export_path.read_text(encoding='utf-8')
+          export = replace_once(
+              export,
+              r'function buildExportPlans\(\): ExportPlan\[\] \{\n\s*const context = currentContext\(\);\n'
+              r'.*?\n\s*const \{ notebook, record, activeSection, activeSheet \} = context;',
+              '''function notePageIds() {
+  const context = currentContext();
+  if (context) return ((context.notebook.pages || []) as SheetPage[]).map((sheet) => String(sheet.id));
+  const paper = document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
+  return paper?.dataset.notePageId ? [paper.dataset.notePageId] : [];
+}
 
-            for (let attempt = 0; attempt < 45; attempt += 1) {
-              paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
-              if (paper?.dataset.notePageId === pageId) break;
-              await nextFrame();
-              if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
-            }
+function buildExportPlans(): ExportPlan[] {
+  const context = currentContext();
+  const availablePageIds = notePageIds();
+  if (!context) {
+    return availablePageIds.length ? [{
+      scope: "notebook",
+      title: "Notebook",
+      detail: `${availablePageIds.length} Sheet`,
+      fileName: "MedNote.pdf",
+      pageIndices: availablePageIds.map((_, index) => index),
+    }] : [];
+  }
 
-            await settleLayout();
-            paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
-            if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
-            return paper;
-          }
+  const { notebook, record, activeSection, activeSheet } = context;''',
+              'replace thumbnail-dependent export plan fallback',
+              re.S,
+          )
+          export = replace_once(
+              export,
+              r'async function activateNotePage\(index: number\) \{.*?\n\}\n\nasync function exportPlanToPdfBytes',
+              '''async function activateNotePage(index: number) {
+  const pageIds = notePageIds();
+  const pageId = pageIds[index];
+  if (!pageId) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
 
-          async function exportPlanToPdfBytes'''
-          export, activate_count = old_activate.subn(new_activate, export, count=1)
-          if activate_count != 1:
-              raise SystemExit('Could not replace thumbnail-based activateNotePage')
+  let paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  if (paper?.dataset.notePageId !== pageId) {
+    window.dispatchEvent(new CustomEvent("mednote:activate-note-page", { detail: pageId }));
+  }
 
-          old_export_head = '''async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
-            const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-navigation-host .note-thumb"));
-            if (!thumbnails.length) throw new Error("Notebook chưa có Sheet nào");
-            if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+    if (paper?.dataset.notePageId === pageId) break;
+    await nextFrame();
+    if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
+  }
 
-            const originalIndex = Math.max(0, thumbnails.findIndex((thumbnail) => thumbnail.classList.contains("active")));
-            const pdf = await createPdfDocument();'''
-          new_export_head = '''async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
-            const pageIds = notePageIds();
-            if (!pageIds.length) throw new Error("Notebook chưa có Sheet nào");
-            if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
+  await settleLayout();
+  paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
+  return paper;
+}
 
-            const currentPaper = document.querySelector<HTMLElement>(".note-stage .note-paper");
-            const originalIndex = Math.max(0, pageIds.indexOf(currentPaper?.dataset.notePageId || pageIds[0]));
-            const pdf = await createPdfDocument();'''
-          if old_export_head not in export:
-              raise SystemExit('Could not replace exportPlan thumbnail prelude')
-          export = export.replace(old_export_head, new_export_head, 1)
+async function exportPlanToPdfBytes''',
+              'replace thumbnail-click page activation',
+              re.S,
+          )
+          export = replace_once(
+              export,
+              r'async function exportPlanToPdfBytes\(plan: ExportPlan, onProgress: \(progress: ExportProgress\) => void\) \{\n'
+              r'.*?\n\s*const pdf = await createPdfDocument\(\);',
+              '''async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
+  const pageIds = notePageIds();
+  if (!pageIds.length) throw new Error("Notebook chưa có Sheet nào");
+  if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
+
+  const currentPaper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  const originalIndex = Math.max(0, pageIds.indexOf(currentPaper?.dataset.notePageId || pageIds[0]));
+  const pdf = await createPdfDocument();''',
+              'replace export thumbnail prelude',
+              re.S,
+          )
           export_path.write_text(export, encoding='utf-8')
 
           export_css_path = root / 'app/note-pdf-export.css'
-          export_css = export_css_path.read_text(encoding='utf-8')
-          export_css = export_css.replace('.note-pdf-export-active .note-thumb,\n', '')
+          export_css = export_css_path.read_text(encoding='utf-8').replace('.note-pdf-export-active .note-thumb,\n', '')
           export_css_path.write_text(export_css, encoding='utf-8')
 
           harness_path = root / 'app/pdf-export-e2e-harness.tsx'
           harness = harness_path.read_text(encoding='utf-8')
           harness = re.sub(
-              r'\n      <div className="note-navigation-host" style=\{\{ marginTop: 12 \}\}>.*?</div>\n',
+              r'\n\s*<div className="note-navigation-host" style=\{\{ marginTop: 12 \}\}>.*?</div>\n',
               '\n',
               harness,
               count=1,
               flags=re.S,
           )
-          harness = harness.replace(
-              'className="note-paper"',
-              'className="note-paper" data-note-page-id="e2e-sheet-1"',
-              1,
-          )
+          harness = harness.replace('className="note-paper"', 'className="note-paper" data-note-page-id="e2e-sheet-1"', 1)
           harness_path.write_text(harness, encoding='utf-8')
 
-          # 7) Remove the now-unused rule that hid the legacy navigator.
-          navigation_path = root / 'app/page-sheet-navigation.ts'
-          navigation = navigation_path.read_text(encoding='utf-8')
-          navigation = navigation.replace('.onenote-note-navigation{display:none!important}\n', '')
-          navigation_path.write_text(navigation, encoding='utf-8')
-
-          # 8) Clean the OneNote sidebar CSS so there is no fallback thumbnail code.
+          # Simplify sidebar CSS: only the OneNote Page→Sheet navigator may occupy the host.
           clean_path = root / 'app/page-sheet-sidebar-clean.ts'
           clean = clean_path.read_text(encoding='utf-8')
-          legacy_block = re.compile(
+          clean = replace_once(
+              clean,
               r'/\* The Page→Sheet navigator is the single source of truth\. Never stack the legacy navigator under it\. \*/\n'
               r'.*?'
               r'\.note-navigation-host:has\(> \.\$\{NAV_CLASS\}\) > \.\$\{NAV_CLASS\}\{display:grid!important;visibility:visible!important;opacity:1!important\}\n',
+              '/* The OneNote-style Page→Sheet navigator is the single note navigation source. */\n'
+              '.note-navigation-host:has(> .${NAV_CLASS}) > .${NAV_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important}\n',
+              'remove legacy sidebar fallback CSS',
               re.S,
           )
-          simple_block = (
-              '/* The OneNote-style Page→Sheet navigator is the single note navigation source. */\n'
-              '.note-navigation-host:has(> .${NAV_CLASS}) > .${NAV_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important}\n'
-          )
-          clean, clean_count = legacy_block.subn(simple_block, clean, count=1)
-          if clean_count != 1:
-              raise SystemExit(f'Could not simplify legacy Page→Sheet fallback CSS (matches={clean_count})')
           clean_path.write_text(clean, encoding='utf-8')
 
-          # 9) Globals: preserve PDF thumbnail styles but delete every note-thumbnail-only rule.
+          # Globals: preserve PDF thumbnail styling, delete every native note thumbnail rule.
           globals_path = root / 'app/globals.css'
           css = globals_path.read_text(encoding='utf-8')
           css = css.replace(
@@ -288,15 +280,13 @@ jobs:
           css = css.replace('.pdf-thumb.active, .note-thumb.active', '.pdf-thumb.active')
           css = css.replace('.mini-paper, .mini-note', '.mini-paper')
           css = css.replace('.mini-paper i, .mini-note i', '.mini-paper i')
-          legacy_css_terms = ('notes-heading', 'note-thumb', 'mini-note', 'new-page')
-          css_lines = []
-          for line in css.splitlines():
-              if any(term in line for term in legacy_css_terms):
-                  continue
-              css_lines.append(line)
-          globals_path.write_text('\n'.join(css_lines) + '\n', encoding='utf-8')
+          css = '\n'.join(
+              line for line in css.splitlines()
+              if not any(term in line for term in ('notes-heading', 'note-thumb', 'mini-note', 'new-page'))
+          ) + '\n'
+          globals_path.write_text(css, encoding='utf-8')
 
-          # 10) Keep the sidebar E2E aligned with the new host and tab-scoped hidden state.
+          # Update E2E: the host must contain exactly one OneNote-style navigator.
           test_path = root / 'tests/sidebar-controls.spec.cjs'
           if test_path.exists():
               test = test_path.read_text(encoding='utf-8')
@@ -311,18 +301,14 @@ jobs:
               )
               test_path.write_text(test, encoding='utf-8')
 
-          # 11) Source-level invariant: no native note-thumbnail implementation remains.
+          # Source invariant: no native note-thumbnail implementation may remain.
           forbidden = (
-              'note-thumbnails',
-              'note-thumb',
-              'mini-note',
-              'notes-heading',
-              'VirtualNoteThumbnailList',
-              'relation-note-hide-native-thumbnails',
+              'note-thumbnails', 'note-thumb', 'mini-note', 'notes-heading',
+              'VirtualNoteThumbnailList', 'relation-note-hide-native-thumbnails',
           )
           offenders = []
-          scan_paths = [root / 'app', root / 'src', root / 'tests', vite_virtual_path]
-          for base in scan_paths:
+          scan_roots = [root / 'app', root / 'src', root / 'tests', vite_virtual_path]
+          for base in scan_roots:
               paths = [base] if base.is_file() else list(base.rglob('*')) if base.exists() else []
               for path in paths:
                   if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.css', '.cjs', '.js'}:
@@ -334,17 +320,16 @@ jobs:
           if offenders:
               raise SystemExit('Native note-thumbnail source still exists:\n' + '\n'.join(offenders))
 
-          # The active host and OneNote-style navigator must both exist in source.
-          page = page_path.read_text(encoding='utf-8')
-          navigation = navigation_path.read_text(encoding='utf-8')
-          if 'className="note-navigation-host"' not in page:
-              raise SystemExit('New note-navigation-host missing from page.tsx')
-          if 'document.querySelector<HTMLElement>(".note-navigation-host")' not in navigation:
-              raise SystemExit('Page→Sheet navigator is not mounted into note-navigation-host')
-          if 'mednote-page-sheet-nav' not in (root / 'app/page-sheet-state.ts').read_text(encoding='utf-8'):
-              raise SystemExit('OneNote-style Page→Sheet nav class missing')
-          if 'mednote:activate-note-page' not in page or 'mednote:activate-note-page' not in export_path.read_text(encoding='utf-8'):
-              raise SystemExit('Thumbnail-free PDF export activation bridge is incomplete')
+          required = {
+              'page host': 'className="note-navigation-host"' in page_path.read_text(encoding='utf-8'),
+              'OneNote nav mount': 'document.querySelector<HTMLElement>(".note-navigation-host")' in navigation_path.read_text(encoding='utf-8'),
+              'OneNote nav class': 'mednote-page-sheet-nav' in (root / 'app/page-sheet-state.ts').read_text(encoding='utf-8'),
+              'export activation bridge in page': 'mednote:activate-note-page' in page_path.read_text(encoding='utf-8'),
+              'export activation bridge in exporter': 'mednote:activate-note-page' in export_path.read_text(encoding='utf-8'),
+          }
+          missing = [name for name, ok in required.items() if not ok]
+          if missing:
+              raise SystemExit('Required OneNote-sidebar invariant missing: ' + ', '.join(missing))
           PY
 
       - name: Install dependencies
@@ -353,10 +338,10 @@ jobs:
       - name: Build web app
         run: npm run build:pages
 
-      - name: Show migration diff
+      - name: Verify source and diff
         run: |
-          git status --short
           git diff --check
+          git status --short
           git diff --stat
 
       - name: Commit migrated source
