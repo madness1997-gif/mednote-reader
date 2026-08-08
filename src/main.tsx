@@ -10,6 +10,7 @@ import "../app/textbox-fixes.css";
 import "../app/note-zoom-fixes.css";
 import "../app/note-pdf-export.css";
 import "../app/note-symbol-library.css";
+import "../app/note-stickers.css";
 import "../app/note-zoom-runtime";
 import "../app/pdf-wheel-zoom-runtime";
 import "../app/note-symbol-library";
