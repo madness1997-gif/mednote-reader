@@ -1,5 +1,6 @@
 import {
   clone, getLibraryView, normalizeSections, now, readAppState, syncFromApp, writeStateAndLibrary,
+  META_WORKSPACE_ID,
   type AnyObject, type LibraryView, type NoteSection, type RelationSource, type RelationTarget,
 } from "./independent-library-core";
 
@@ -72,9 +73,20 @@ export function currentContext() {
   const state = readAppState();
   const baseView = getLibraryView();
   if (!state || !baseView) return null;
-  const workspace = state.workspaces.find((item) => item.id === state.activeWorkspaceId);
+
+  // IMPORTANT: use exactly the same fallback semantics as the React Note canvas.
+  // Old/local data can contain a stale activeWorkspaceId or activeNotebookId after
+  // deleting/renaming/migrating notebooks. React still renders workspaces[0] and
+  // notebooks[0], while the old sidebar returned null and left a blank rail. That
+  // is the real reason the user could see the Note page but no OneNote navigator.
+  const visibleWorkspaces = state.workspaces.filter((item) => String(item.id) !== META_WORKSPACE_ID);
+  const workspace = visibleWorkspaces.find((item) => String(item.id) === String(state.activeWorkspaceId))
+    || visibleWorkspaces[0];
   if (!workspace) return null;
-  const notebook = (workspace.notebooks || []).find((item: AnyObject) => String(item.id) === String(workspace.activeNotebookId));
+
+  const notebooks = Array.isArray(workspace.notebooks) ? workspace.notebooks : [];
+  const notebook = notebooks.find((item: AnyObject) => String(item.id) === String(workspace.activeNotebookId))
+    || notebooks[0];
   if (!notebook) return null;
 
   // The Note canvas is React-owned and can legitimately exist before the relation
