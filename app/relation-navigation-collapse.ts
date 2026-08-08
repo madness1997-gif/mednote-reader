@@ -5,10 +5,11 @@ const NOTE_RESTORE_CLASS = "onenote-note-navigation-restore";
 const NOTE_CLOSE_CLASS = "onenote-note-navigation-close";
 const READER_CLOSE_CLASS = "reader-navigation-close";
 
-// Sidebar visibility must never get stuck across reloads/deploys. Older builds
-// persisted this flag in localStorage, while newer builds used sessionStorage.
-// Clear both forms on startup so a stale hidden flag cannot make the OneNote
-// navigator disappear permanently in an existing Android Chrome tab.
+// Sidebar visibility is intentionally kept in memory only. Older builds wrote
+// the hidden flag to localStorage/sessionStorage and a stale value could be
+// re-applied a moment after the user opened Note, producing a visible flash and
+// then hiding the sidebar again. Clear both legacy values at startup and never
+// read them back as UI state.
 try {
   localStorage.removeItem(NOTE_HIDDEN_KEY);
   sessionStorage.removeItem(NOTE_HIDDEN_KEY);
@@ -16,21 +17,29 @@ try {
   // Storage can be unavailable in hardened/private browsing contexts.
 }
 
+let noteHidden = false;
+let suppressCloseUntil = 0;
+
 function noteNavigationHidden() {
-  try {
-    return sessionStorage.getItem(NOTE_HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return noteHidden;
 }
 
 function setNoteNavigationHidden(hidden: boolean) {
+  noteHidden = hidden;
   try {
-    sessionStorage.setItem(NOTE_HIDDEN_KEY, hidden ? "1" : "0");
+    if (hidden) sessionStorage.setItem(NOTE_HIDDEN_KEY, "1");
+    else sessionStorage.removeItem(NOTE_HIDDEN_KEY);
   } catch {
-    // Keep the UI functional even when storage is unavailable.
+    // Storage is diagnostic only; the live state stays in memory.
   }
   applyNavigationState();
+}
+
+function showNoteNavigation() {
+  // Prevent a touch/click sequence from immediately hitting the newly revealed
+  // close button after the restore control disappears underneath the finger.
+  suppressCloseUntil = performance.now() + 900;
+  setNoteNavigationHidden(false);
 }
 
 function injectStyle() {
@@ -153,6 +162,7 @@ function handleClick(event: Event) {
   if (noteClose) {
     event.preventDefault();
     event.stopPropagation();
+    if (performance.now() < suppressCloseUntil) return;
     setNoteNavigationHidden(true);
     return;
   }
@@ -161,8 +171,16 @@ function handleClick(event: Event) {
   if (noteRestore) {
     event.preventDefault();
     event.stopPropagation();
-    setNoteNavigationHidden(false);
+    showNoteNavigation();
     return;
+  }
+
+  // Entering Note or split mode is itself an explicit request to see the Note
+  // area. Always clear a previous sidebar-hide state before React changes mode.
+  const modeButton = target.closest<HTMLButtonElement>(".workspace-mode-switcher button");
+  if (modeButton) {
+    const label = (modeButton.textContent || "").trim().toLocaleLowerCase("vi");
+    if (label === "note" || label.includes("cả hai")) showNoteNavigation();
   }
 
   const readerClose = target.closest<HTMLElement>("[data-reader-navigation-close]");
