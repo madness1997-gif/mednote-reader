@@ -1,0 +1,16 @@
+/* Keep the document library as a drawer without dimming or blurring the reader/note workspace. */
+.library-backdrop {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Pin the drawer above its click-away layer so it is always visible on narrow/mobile viewports. */
+.library-panel {
+  position: absolute !important;
+  inset: 0 auto 0 0 !important;
+  z-index: 1 !important;
+  max-width: 92vw !important;
+  border-right: 1px solid var(--line);
+  overscroll-behavior: contain;
+}
