@@ -18,7 +18,9 @@ jobs:
           fetch-depth: 0
 
       - name: Migrate note sidebar source
-        run: python .github/scripts/migrate-note-sidebar.py
+        run: |
+          sed -i 's/    "note-thumb",/    ".note-thumb",/' .github/scripts/migrate-note-sidebar.py
+          python .github/scripts/migrate-note-sidebar.py
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
