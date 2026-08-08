@@ -26,6 +26,15 @@ const PLACEHOLDER_REPLACEMENT = 'placeholder={excerpt.stickerStyle ? "Nhập ghi
 const INDICATOR_ANCHOR = '{editable ? "Đang sửa" : isCallout ? "Callout" : "Chữ"}';
 const INDICATOR_REPLACEMENT = '{editable ? "Đang sửa" : isCallout ? "Callout" : excerpt.stickerStyle ? "Sticker" : "Chữ"}';
 
+const PRIMARY_TOOL_ANCHOR = [
+  '                {tools.map(({ id, label, icon: Icon }) => {',
+  '                  const hasPanel = ["pen", "highlight", "shape", "text", "textbox", "callout"].includes(id);',
+  '                  const shortLabel = id === "text" ? "Type" : id === "textbox" ? "Text box" : id === "callout" ? "Callout" : label;',
+  '                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox" || id === "callout") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;',
+  '                })}',
+].join('\n');
+const PRIMARY_TOOL_REPLACEMENT = `${PRIMARY_TOOL_ANCHOR}\n                <button className={\`tool-button expandable sticker-primary-button \${textInsertPopover === "stickers" ? "active show-label" : ""}\`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} />{textInsertPopover === "stickers" && <span className="tool-label">Sticker</span>}<ChevronDown className="tool-chevron" size={11} /></button>`;
+
 const SYMBOL_BUTTON_ANCHOR = '<button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("symbols", event.currentTarget)} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>';
 const SYMBOL_BUTTON_REPLACEMENT = `${SYMBOL_BUTTON_ANCHOR}\n                  <button className={\`word-command-button labeled sticker-menu-trigger \${textInsertPopover === "stickers" ? "selected" : ""}\`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("stickers", event.currentTarget)} title="Chèn sticker note" aria-label="Mở thư viện sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={16} /><span>Sticker</span></button>`;
 
@@ -48,6 +57,7 @@ export function noteStickersPlugin(): Plugin {
       next = replaceRequired(next, EXCERPT_CLASS_ANCHOR, EXCERPT_CLASS_REPLACEMENT, "class đối tượng note");
       next = replaceRequired(next, PLACEHOLDER_ANCHOR, PLACEHOLDER_REPLACEMENT, "placeholder textbox");
       next = replaceRequired(next, INDICATOR_ANCHOR, INDICATOR_REPLACEMENT, "nhãn điều khiển textbox");
+      next = replaceRequired(next, PRIMARY_TOOL_ANCHOR, PRIMARY_TOOL_REPLACEMENT, "thanh công cụ note chính");
       next = replaceRequired(next, SYMBOL_BUTTON_ANCHOR, SYMBOL_BUTTON_REPLACEMENT, "nút Ký hiệu");
       next = replaceRequired(next, SYMBOL_POPOVER_ANCHOR, STICKER_POPOVER, "popover Ký hiệu");
       return { code: next, map: null };
