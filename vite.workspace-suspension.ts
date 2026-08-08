@@ -3,7 +3,7 @@ import type { Plugin } from "vite";
 const PDF_RAIL_START = '        <aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">';
 const PDF_RAIL_TO_READER = '        </aside>\n\n        <section className="reader-pane">';
 const READER_TO_NOTES = '        </section>\n\n        <div className="split-divider" aria-label="Điều chỉnh độ rộng" onPointerDown={startResize}><span>•••</span></div>\n\n        <section className="notes-pane">';
-const NOTES_TO_NAV = '        </section>\n\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />';
+const NOTES_TO_NAV = '        </section>\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />';
 
 function replaceRequired(code: string, anchor: string, replacement: string, label: string) {
   const first = code.indexOf(anchor);
