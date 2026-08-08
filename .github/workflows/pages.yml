@@ -38,76 +38,71 @@ jobs:
         with:
           name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: pages-dist
-      - name: Create Pages deployment without deploy-pages timeout
+      - name: Create and wait for Pages deployment
+        id: pages
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
           ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const artifactName = process.env.ARTIFACT_NAME;
+            const { owner, repo } = context.repo;
+            const runId = context.runId;
 
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-          headers=(-H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GH_TOKEN}" -H "X-GitHub-Api-Version: 2026-03-10")
+            let artifact;
+            for (let i = 0; i < 30; i++) {
+              const result = await github.rest.actions.listWorkflowRunArtifacts({
+                owner,
+                repo,
+                run_id: runId,
+                per_page: 100,
+              });
+              artifact = result.data.artifacts.find(item => item.name === artifactName);
+              if (artifact) break;
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            if (!artifact) throw new Error(`Pages artifact ${artifactName} not found`);
+            core.info(`Artifact id: ${artifact.id}`);
 
-          artifact_id=""
-          for i in $(seq 1 30); do
-            artifacts=$(curl -fsSL "${headers[@]}" "${api}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")
-            artifact_id=$(echo "$artifacts" | jq -r --arg name "${ARTIFACT_NAME}" '.artifacts[] | select(.name == $name) | .id' | head -1)
-            [ -n "${artifact_id}" ] && [ "${artifact_id}" != "null" ] && break
-            sleep 2
-          done
-          if [ -z "${artifact_id}" ] || [ "${artifact_id}" = "null" ]; then
-            echo "Could not resolve Pages artifact id"
-            exit 1
-          fi
-          echo "Artifact: ${artifact_id}"
+            const idToken = await core.getIDToken();
+            const buildVersion = `${context.sha}-${runId}-${process.env.GITHUB_RUN_ATTEMPT || '1'}`;
+            const created = await github.request('POST /repos/{owner}/{repo}/pages/deployments', {
+              owner,
+              repo,
+              artifact_id: artifact.id,
+              pages_build_version: buildVersion,
+              oidc_token: idToken,
+            });
 
-          oidc=$(curl -fsSL \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}" | jq -r '.value')
-          if [ -z "${oidc}" ] || [ "${oidc}" = "null" ]; then
-            echo "Could not obtain GitHub Actions OIDC token"
-            exit 1
-          fi
+            const deploymentId = created.data.id;
+            core.info(`Pages deployment id: ${deploymentId}`);
+            core.info(`Pages URL: ${created.data.page_url || ''}`);
+            core.setOutput('deployment_id', deploymentId);
 
-          build_version="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          payload=$(jq -n \
-            --argjson artifact_id "${artifact_id}" \
-            --arg version "${build_version}" \
-            --arg oidc "${oidc}" \
-            '{artifact_id:$artifact_id, environment:"github-pages", pages_build_version:$version, oidc_token:$oidc}')
+            for (let i = 1; i <= 240; i++) {
+              const response = await github.request('GET /repos/{owner}/{repo}/pages/deployments/{deploymentId}', {
+                owner,
+                repo,
+                deploymentId,
+              });
+              const status = response.data.status;
+              core.info(`Pages status ${i}: ${status}`);
+              if (status === 'succeed') {
+                core.info('Pages deployment succeeded');
+                return;
+              }
+              if (['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status)) {
+                throw new Error(`Pages deployment ended with ${status}`);
+              }
+              await new Promise(resolve => setTimeout(resolve, 5000));
+            }
 
-          response=$(curl -fsSL -X POST "${headers[@]}" \
-            "${api}/pages/deployments" \
-            -d "${payload}")
-          echo "$response" | jq '{id,status_url,page_url}'
-          deployment_id=$(echo "$response" | jq -r '.id')
-          if [ -z "${deployment_id}" ] || [ "${deployment_id}" = "null" ]; then
-            echo "Pages deployment API did not return an id"
-            exit 1
-          fi
-
-          echo "Deployment id: ${deployment_id}"
-          for i in $(seq 1 240); do
-            status_json=$(curl -fsSL "${headers[@]}" "${api}/pages/deployments/${deployment_id}")
-            status=$(echo "$status_json" | jq -r '.status')
-            echo "Pages status ${i}: ${status}"
-            case "${status}" in
-              succeed)
-                echo "Pages deployment succeeded"
-                exit 0
-                ;;
-              failed|failure|error|cancelled|canceled)
-                echo "$status_json" | jq .
-                exit 1
-                ;;
-            esac
-            sleep 5
-          done
-
-          echo "Pages deployment is still processing after 20 minutes; leaving it active instead of cancelling it."
-          exit 1
+            // Deliberately do not cancel the Pages deployment here. The official
+            // deploy-pages action cancels after 10 minutes; this repository has
+            // repeatedly needed longer in GitHub's Pages queue.
+            throw new Error('Pages deployment is still processing after 20 minutes and was left active.');
       - name: Verify live version
-        if: success()
         run: |
           set -euo pipefail
           url="https://madness1997-gif.github.io/mednote-reader/deploy-version.txt"
