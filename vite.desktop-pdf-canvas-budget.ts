@@ -175,7 +175,7 @@ export function desktopPdfCanvasBudgetPlugin(): Plugin {
     name: "mednote-desktop-pdf-canvas-budget",
     enforce: "pre",
     transform(code, id) {
-      const normalizedId = id.replaceAll("\\\\", "/").split("?")[0];
+      const normalizedId = id.replaceAll("\\", "/").split("?")[0];
       if (!normalizedId.endsWith("/app/pdf-reader.tsx")) return null;
       const normalizedCode = code.replace(/\r\n/g, "\n");
       if (!normalizedCode.includes(managerImportNeedle)) {
