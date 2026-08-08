@@ -9,6 +9,9 @@ test.use({
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
 test('OneNote sidebar follows React fallbacks when active workspace and notebook ids are stale', async ({ page }) => {
+  page.on('console', (message) => console.log(`BROWSER ${message.type()}: ${message.text()}`));
+  page.on('pageerror', (error) => console.log(`BROWSER pageerror: ${error.message}`));
+
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -47,8 +50,6 @@ test('OneNote sidebar follows React fallbacks when active workspace and notebook
         documents: [document],
         activeDocumentId: document.id,
         notebooks: [notebook],
-        // Both IDs are deliberately stale. React renders workspaces[0] and
-        // notebooks[0]; the OneNote navigator must use the same fallbacks.
         activeNotebookId: 'stale-missing-notebook-id',
         sourcePage: 1,
       }],
@@ -65,6 +66,23 @@ test('OneNote sidebar follows React fallbacks when active workspace and notebook
   const nav = host.locator(':scope > .mednote-page-sheet-nav');
 
   await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
+  await page.waitForTimeout(2500);
+  const debug = await page.evaluate(() => {
+    let state = null;
+    try { state = JSON.parse(localStorage.getItem('mednote-library-v2') || 'null'); } catch {}
+    const h = document.querySelector('.note-navigation-host');
+    const w = document.querySelector('.workspace');
+    return {
+      state,
+      hostClass: h?.className || '',
+      hostHtml: h?.innerHTML || '',
+      workspaceClass: w?.className || '',
+      hiddenFlagLocal: localStorage.getItem('mednote-note-navigation-hidden'),
+      hiddenFlagSession: sessionStorage.getItem('mednote-note-navigation-hidden'),
+    };
+  });
+  console.log('STALE_CONTEXT_DEBUG', JSON.stringify(debug));
+
   await expect(nav).toBeVisible({ timeout: 12_000 });
   await page.waitForTimeout(4_000);
   await expect(nav).toBeVisible();
