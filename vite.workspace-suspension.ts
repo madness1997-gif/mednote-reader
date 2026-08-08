@@ -3,8 +3,7 @@ import type { Plugin } from "vite";
 const PDF_RAIL_START = '        <aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">';
 const PDF_RAIL_TO_READER = '        </aside>\n\n        <section className="reader-pane">';
 const READER_TO_NOTES = '        </section>\n\n        <div className="split-divider" aria-label="Điều chỉnh độ rộng" onPointerDown={startResize}><span>•••</span></div>\n\n        <section className="notes-pane">';
-const NOTES_TO_RAIL = '        </section>\n\n        <aside className="note-thumbnails" aria-label="Trang ghi chú">';
-const NOTE_RAIL_TO_WORKSPACE_END = '          <button className="new-page" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={19} /></button>\n        </aside>\n      </section>';
+const NOTES_TO_NAV = '        </section>\n\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />';
 
 function replaceRequired(code: string, anchor: string, replacement: string, label: string) {
   const first = code.indexOf(anchor);
@@ -40,7 +39,7 @@ export function workspaceSuspensionPlugin(): Plugin {
       );
 
       // The divider only exists when both panes are mounted. Reader-only mode
-      // removes the full note subtree, including rich editors, images and InkCanvas.
+      // removes the full Note editor subtree and the OneNote navigation host.
       next = replaceRequired(
         next,
         READER_TO_NOTES,
@@ -49,15 +48,9 @@ export function workspaceSuspensionPlugin(): Plugin {
       );
       next = replaceRequired(
         next,
-        NOTES_TO_RAIL,
-        '        </section>\n        )}\n\n        {workspaceMode !== "reader" && (\n        <aside className="note-thumbnails" aria-label="Trang ghi chú">',
-        "ranh giới Note/note rail",
-      );
-      next = replaceRequired(
-        next,
-        NOTE_RAIL_TO_WORKSPACE_END,
-        '          <button className="new-page" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={19} /></button>\n        </aside>\n        )}\n      </section>',
-        "kết thúc note rail",
+        NOTES_TO_NAV,
+        '        </section>\n        )}\n\n        {workspaceMode !== "reader" && <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />}',
+        "ranh giới Note/OneNote navigation",
       );
 
       return { code: next, map: null };
