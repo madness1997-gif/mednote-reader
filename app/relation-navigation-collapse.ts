@@ -5,8 +5,9 @@ const NOTE_RESTORE_CLASS = "onenote-note-navigation-restore";
 const NOTE_CLOSE_CLASS = "onenote-note-navigation-close";
 const READER_CLOSE_CLASS = "reader-navigation-close";
 
-// A stale persisted hidden flag made the note sidebar look permanently removed.
-// Clear it once whenever a fresh app bundle loads so the sidebar starts visible.
+// Old builds persisted this preference indefinitely. Clear that stale value and
+// keep hide/show scoped to the current tab so the sidebar starts visible again
+// when the app is reopened.
 try {
   localStorage.removeItem(NOTE_HIDDEN_KEY);
 } catch {
@@ -15,7 +16,7 @@ try {
 
 function noteNavigationHidden() {
   try {
-    return localStorage.getItem(NOTE_HIDDEN_KEY) === "1";
+    return sessionStorage.getItem(NOTE_HIDDEN_KEY) === "1";
   } catch {
     return false;
   }
@@ -23,7 +24,7 @@ function noteNavigationHidden() {
 
 function setNoteNavigationHidden(hidden: boolean) {
   try {
-    localStorage.setItem(NOTE_HIDDEN_KEY, hidden ? "1" : "0");
+    sessionStorage.setItem(NOTE_HIDDEN_KEY, hidden ? "1" : "0");
   } catch {
     // Keep the UI functional even when storage is unavailable.
   }
@@ -36,9 +37,9 @@ function injectStyle() {
   style.id = STYLE_ID;
   style.textContent = `
 .workspace.${NOTE_HIDDEN_CLASS}{position:relative!important}
-.workspace.${NOTE_HIDDEN_CLASS}>.note-thumbnails.onenote-navigation-active{display:none!important}
+.workspace.${NOTE_HIDDEN_CLASS}>.note-navigation-host.onenote-navigation-active{display:none!important}
 .workspace.pdf-rail-collapsed>.pdf-thumbnails{display:none!important;width:0!important;min-width:0!important;max-width:0!important;border:0!important}
-.note-thumbnails.onenote-navigation-active,.pdf-thumbnails{position:relative!important}
+.note-navigation-host.onenote-navigation-active,.pdf-thumbnails{position:relative!important}
 .${NOTE_CLOSE_CLASS},.${READER_CLOSE_CLASS}{z-index:80;width:32px;height:32px;display:grid;place-items:center;padding:0;border:1px solid #d2d2d2;border-radius:7px;background:#fff;color:#4b4b4b;box-shadow:0 2px 7px #0000001f;cursor:pointer;font:700 19px/1 Arial,sans-serif;touch-action:manipulation}
 .${NOTE_CLOSE_CLASS}:hover,.${READER_CLOSE_CLASS}:hover{background:#f1f1f1;color:#111;border-color:#b8b8b8}
 .${NOTE_CLOSE_CLASS}{flex:0 0 32px;margin-left:2px}
@@ -75,10 +76,8 @@ function ensureNoteRestoreButton(workspace: HTMLElement) {
 }
 
 function ensureNoteCloseButton(navigation: HTMLElement) {
-  const bookbar = navigation.querySelector<HTMLElement>(":scope > .mps-bookbar, :scope > .onenote-note-navigation-bookbar");
+  const bookbar = navigation.querySelector<HTMLElement>(":scope > .mps-bookbar");
   if (!bookbar) return;
-
-  for (const old of Array.from(bookbar.querySelectorAll<HTMLElement>(".onenote-note-navigation-hide-all"))) old.remove();
   if (bookbar.querySelector(`.${NOTE_CLOSE_CLASS}`)) return;
 
   const button = document.createElement("button");
@@ -114,8 +113,8 @@ function applyNavigationState() {
   const hidden = noteNavigationHidden();
 
   for (const workspace of Array.from(document.querySelectorAll<HTMLElement>(".workspace"))) {
-    const noteAside = workspace.querySelector<HTMLElement>(":scope > .note-thumbnails.onenote-navigation-active");
-    const navigation = noteAside?.querySelector<HTMLElement>(":scope > .mednote-page-sheet-nav, :scope > .onenote-note-navigation");
+    const noteAside = workspace.querySelector<HTMLElement>(":scope > .note-navigation-host.onenote-navigation-active");
+    const navigation = noteAside?.querySelector<HTMLElement>(":scope > .mednote-page-sheet-nav");
     const readerAside = workspace.querySelector<HTMLElement>(":scope > .pdf-thumbnails");
 
     if (readerAside && !workspace.classList.contains("pdf-rail-collapsed")) ensureReaderCloseButton(readerAside);
