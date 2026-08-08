@@ -1,5 +1,5 @@
 import {
-  clone, getLibraryView, now, readAppState, syncFromApp, writeStateAndLibrary,
+  clone, getLibraryView, normalizeSections, now, readAppState, syncFromApp, writeStateAndLibrary,
   type AnyObject, type LibraryView, type NoteSection, type RelationSource, type RelationTarget,
 } from "./independent-library-core";
 
@@ -70,14 +70,40 @@ export function pageGroups(notebook: AnyObject, section: NoteSection): PageGroup
 
 export function currentContext() {
   const state = readAppState();
-  const view = getLibraryView();
-  if (!state || !view) return null;
+  const baseView = getLibraryView();
+  if (!state || !baseView) return null;
   const workspace = state.workspaces.find((item) => item.id === state.activeWorkspaceId);
   if (!workspace) return null;
   const notebook = (workspace.notebooks || []).find((item: AnyObject) => String(item.id) === String(workspace.activeNotebookId));
   if (!notebook) return null;
-  const record = view.notebooks.find((item) => item.id === String(notebook.id) && item.available);
-  if (!record?.sections.length) return null;
+
+  // The Note canvas is React-owned and can legitimately exist before the relation
+  // library has registered it (especially an untouched generated note that was
+  // opened from Reader -> Note). The navigator must follow the active notebook,
+  // not disappear just because relation synchronization is one tick behind.
+  const existingRecord = baseView.notebooks.find((item) => item.id === String(notebook.id) && item.available);
+  const record = existingRecord || normalizeSections(undefined, notebook);
+  if (!record.sections.length) return null;
+
+  const view: LibraryView = existingRecord
+    ? baseView
+    : {
+        ...baseView,
+        notebooks: [...baseView.notebooks.filter((item) => item.id !== record.id), record],
+        pages: {
+          ...baseView.pages,
+          ...Object.fromEntries(record.sections.flatMap((section) => section.pageIds.map((pageId) => {
+            const page = (notebook.pages || []).find((item: AnyObject) => String(item.id) === pageId);
+            return [pageId, {
+              id: pageId,
+              title: String(page?.title || "Trang ghi chú"),
+              notebookId: record.id,
+              sectionId: section.id,
+            }];
+          }))),
+        },
+      };
+
   const activeSheet = (notebook.pages || []).find((item: AnyObject) => String(item.id) === String(notebook.activePageId)) as SheetPage | undefined;
   const activeSheetSection = record.sections.find((section) => section.pageIds.includes(String(activeSheet?.id || "")));
   const storedSectionId = sessionStorage.getItem(`${ACTIVE_SECTION_KEY}${record.id}`);
