@@ -20,7 +20,7 @@
   content: none !important;
 }
 
-/* A compact, readable drawer: one vertical list instead of three squeezed columns. */
+/* Wide drawer so the three library groups remain three readable horizontal columns. */
 .library-backdrop > .library-panel {
   position: fixed !important;
   top: 0 !important;
@@ -32,14 +32,14 @@
   visibility: visible !important;
   opacity: 1 !important;
   transform: none !important;
-  width: clamp(340px, 34vw, 430px) !important;
-  min-width: 280px !important;
-  max-width: min(500px, 96vw) !important;
+  width: min(1080px, 96vw) !important;
+  min-width: 0 !important;
+  max-width: 96vw !important;
   height: 100vh !important;
   height: 100dvh !important;
   overflow-y: auto !important;
-  overflow-x: hidden !important;
-  resize: horizontal;
+  overflow-x: auto !important;
+  resize: none;
   background: #f7f9fa !important;
   border-right: 1px solid var(--line);
   box-shadow: 12px 0 30px rgba(18,35,49,.12) !important;
@@ -49,10 +49,10 @@
 
 @media (max-width: 640px) {
   .library-backdrop > .library-panel {
-    width: 90vw !important;
+    width: 96vw !important;
     min-width: 0 !important;
-    max-width: 90vw !important;
-    resize: none;
+    max-width: 96vw !important;
+    overflow-x: auto !important;
   }
 }
 
