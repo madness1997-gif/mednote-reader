@@ -20,8 +20,10 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.note-navigation-host')).toHaveCount(1);
   await expect(page.locator('.note-navigation-host > .mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('.note-navigation-host > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
+  await expect(page.locator('aside[aria-label="Trang ghi chú"]')).toHaveCount(0);
 });
 
 test('all note sidebar topbar controls are live on mobile', async ({ page }) => {
@@ -91,7 +93,7 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   });
   await menu.locator('[data-page-sheet-notebook-delete]').click();
 
-  // X: actually hides the sidebar and writes the persisted hidden state.
+  // X: actually hides the sidebar and writes the tab-scoped hidden state.
   await close.click();
   await expect(page.locator('.workspace')).toHaveClass(/onenote-note-navigation-hidden/);
   await expect(page.locator('.note-navigation-host')).toBeHidden();
