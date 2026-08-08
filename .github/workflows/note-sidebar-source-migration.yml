@@ -1,0 +1,201 @@
+name: One-shot Note Sidebar Source Migration
+
+on:
+  push:
+    paths:
+      - ".github/workflows/note-sidebar-source-migration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove native note thumbnails and make OneNote sidebar the only source
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # 1) React source: remove the native note-thumbnail UI entirely.
+          page_path = root / 'app/page.tsx'
+          page = page_path.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r'\n        <aside className="note-thumbnails" aria-label="Trang ghi chú">.*?\n        </aside>',
+              re.S,
+          )
+          replacement = '\n        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />'
+          page, count = pattern.subn(replacement, page, count=1)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one native note thumbnail aside, found {count}')
+          page_path.write_text(page, encoding='utf-8')
+
+          # 2) Rename the old thumbnail host everywhere it was only being used as a mount point.
+          for base in (root / 'app', root / 'tests'):
+              if not base.exists():
+                  continue
+              for path in base.rglob('*'):
+                  if path.suffix not in {'.ts', '.tsx', '.css', '.cjs', '.js'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  updated = text.replace('note-thumbnails', 'note-navigation-host')
+                  if updated != text:
+                      path.write_text(updated, encoding='utf-8')
+
+          # 3) Remove the two legacy runtime layers. The Page→Sheet navigator is already
+          # OneNote-styled and becomes the single live note navigation implementation.
+          runtime_path = root / 'app/independent-library-runtime.ts'
+          runtime = runtime_path.read_text(encoding='utf-8')
+          runtime = runtime.replace(
+              'void import("./relation-note-sidebar")\n'
+              '  .then(() => import("./relation-note-hide-native-thumbnails"))\n'
+              '  .then(() => import("./relation-note-right-layout"))',
+              'void import("./relation-note-right-layout")',
+          )
+          if 'relation-note-sidebar' in runtime or 'relation-note-hide-native-thumbnails' in runtime:
+              raise SystemExit('Legacy sidebar imports still present in independent-library-runtime.ts')
+          runtime_path.write_text(runtime, encoding='utf-8')
+
+          for legacy in (
+              root / 'app/relation-note-hide-native-thumbnails.ts',
+              root / 'app/relation-note-sidebar.ts',
+          ):
+              if legacy.exists():
+                  legacy.unlink()
+
+          # 4) Point right-layout logic at the real OneNote-style Page→Sheet navigator.
+          right_path = root / 'app/relation-note-right-layout.ts'
+          right = right_path.read_text(encoding='utf-8')
+          right = right.replace(
+              'const NAV_SELECTOR = ":scope > .note-navigation-host > .onenote-note-navigation";',
+              'const NAV_SELECTOR = ":scope > .note-navigation-host > .mednote-page-sheet-nav";',
+          )
+          if '.onenote-note-navigation";' in right:
+              raise SystemExit('Right-layout still targets the removed legacy navigator')
+          right_path.write_text(right, encoding='utf-8')
+
+          # 5) Remove the now-unused rule that hid the legacy OneNote navigator.
+          navigation_path = root / 'app/page-sheet-navigation.ts'
+          navigation = navigation_path.read_text(encoding='utf-8')
+          navigation = navigation.replace('.onenote-note-navigation{display:none!important}\n', '')
+          navigation_path.write_text(navigation, encoding='utf-8')
+
+          # 6) Clean the sidebar CSS so it no longer contains any fallback thumbnail code.
+          clean_path = root / 'app/page-sheet-sidebar-clean.ts'
+          clean = clean_path.read_text(encoding='utf-8')
+          legacy_block = re.compile(
+              r'/\* The Page→Sheet navigator is the single source of truth\. Never stack the legacy navigator under it\. \*/\n'
+              r'.*?'
+              r'\.note-navigation-host:has\(> \.\$\{NAV_CLASS\}\) > \.\$\{NAV_CLASS\}\{display:grid!important;visibility:visible!important;opacity:1!important\}\n',
+              re.S,
+          )
+          simple_block = (
+              '/* The OneNote-style Page→Sheet navigator is the single note navigation source. */\n'
+              '.note-navigation-host:has(> .${NAV_CLASS}) > .${NAV_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important}\n'
+          )
+          clean, clean_count = legacy_block.subn(simple_block, clean, count=1)
+          if clean_count != 1:
+              raise SystemExit(f'Could not simplify legacy Page→Sheet fallback CSS (matches={clean_count})')
+          clean_path.write_text(clean, encoding='utf-8')
+
+          # 7) Globals: preserve PDF thumbnail styles but delete every note-thumbnail-only rule.
+          globals_path = root / 'app/globals.css'
+          css = globals_path.read_text(encoding='utf-8')
+          css = css.replace(
+              '.brand-group, .top-actions, .document-title, .pane-toolbar, .note-toolbar, .notes-heading, .rail-heading',
+              '.brand-group, .top-actions, .document-title, .pane-toolbar, .note-toolbar, .rail-heading',
+          )
+          css = css.replace('.pdf-thumb, .note-thumb', '.pdf-thumb')
+          css = css.replace('.pdf-thumb.active, .note-thumb.active', '.pdf-thumb.active')
+          css = css.replace('.mini-paper, .mini-note', '.mini-paper')
+          css = css.replace('.mini-paper i, .mini-note i', '.mini-paper i')
+          legacy_css_terms = ('notes-heading', 'note-thumb', 'mini-note', 'new-page')
+          css_lines = []
+          for line in css.splitlines():
+              if any(term in line for term in legacy_css_terms):
+                  continue
+              css_lines.append(line)
+          globals_path.write_text('\n'.join(css_lines) + '\n', encoding='utf-8')
+
+          # 8) Keep the sidebar E2E aligned with the new host and tab-scoped hidden state,
+          # and explicitly assert that no native note-thumbnail DOM survives.
+          test_path = root / 'tests/sidebar-controls.spec.cjs'
+          if test_path.exists():
+              test = test_path.read_text(encoding='utf-8')
+              test = test.replace(
+                  "  await expect(page.locator('.mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });",
+                  "  await expect(page.locator('.note-navigation-host > .mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });\n"
+                  "  await expect(page.locator('.note-thumb, .note-thumb-wrap, .mini-note, .notes-heading')).toHaveCount(0);",
+              )
+              test = test.replace(
+                  "const hiddenState = await page.evaluate(() => localStorage.getItem('mednote-note-navigation-hidden'));",
+                  "const hiddenState = await page.evaluate(() => sessionStorage.getItem('mednote-note-navigation-hidden'));",
+              )
+              test_path.write_text(test, encoding='utf-8')
+
+          # 9) Source-level invariant: no native note-thumbnail implementation remains.
+          forbidden = (
+              'note-thumbnails',
+              'note-thumb',
+              'mini-note',
+              'notes-heading',
+              'relation-note-hide-native-thumbnails',
+          )
+          offenders = []
+          for base in (root / 'app', root / 'src', root / 'tests'):
+              if not base.exists():
+                  continue
+              for path in base.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.css', '.cjs', '.js'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  for term in forbidden:
+                      if term in text:
+                          offenders.append(f'{path}: {term}')
+          if offenders:
+              raise SystemExit('Native note-thumbnail source still exists:\n' + '\n'.join(offenders))
+
+          # The active host and OneNote-style navigator must both exist in source.
+          page = page_path.read_text(encoding='utf-8')
+          navigation = navigation_path.read_text(encoding='utf-8')
+          if 'className="note-navigation-host"' not in page:
+              raise SystemExit('New note-navigation-host missing from page.tsx')
+          if 'document.querySelector<HTMLElement>(".note-navigation-host")' not in navigation:
+              raise SystemExit('Page→Sheet navigator is not mounted into note-navigation-host')
+          if 'mednote-page-sheet-nav' not in (root / 'app/page-sheet-state.ts').read_text(encoding='utf-8'):
+              raise SystemExit('OneNote-style Page→Sheet nav class missing')
+          PY
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build web app
+        run: npm run build:pages
+
+      - name: Show migration diff
+        run: |
+          git status --short
+          git diff --check
+          git diff --stat
+
+      - name: Commit migrated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Replace note thumbnails with OneNote sidebar source"
+          git push origin HEAD:main
