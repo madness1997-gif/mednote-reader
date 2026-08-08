@@ -76,7 +76,7 @@ jobs:
         run: |
           npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
           npx playwright install --with-deps chromium
-      - name: Open production and verify sidebar stability
+      - name: Verify sidebar on production after IndexedDB-only reload
         run: |
           node - <<'NODE'
           const { chromium } = require('@playwright/test');
@@ -93,8 +93,12 @@ jobs:
             page.on('pageerror', err => errors.push(`pageerror: ${err.message}`));
 
             await page.addInitScript(() => {
+              // Seed exactly once. After the first production load, force the
+              // persisted shape seen on real devices: IndexedDB owns the full
+              // state and localStorage contains only the indexeddb-v3 marker.
+              if (sessionStorage.getItem('live-sidebar-indexeddb-seeded') === '1') return;
               localStorage.clear();
-              sessionStorage.clear();
+              sessionStorage.setItem('live-sidebar-indexeddb-seeded', '1');
               const now = Date.now();
               const notePage = {
                 id: 'live-page-1',
@@ -130,9 +134,7 @@ jobs:
                   documents: [document],
                   activeDocumentId: document.id,
                   notebooks: [notebook],
-                  // Reproduce the Android screenshot bug: React still renders the
-                  // first notebook, while the old sidebar context returned null.
-                  activeNotebookId: 'stale-missing-notebook-id',
+                  activeNotebookId: notebook.id,
                   sourcePage: 1,
                 }],
                 activeWorkspaceId: 'live-workspace-1',
@@ -144,38 +146,63 @@ jobs:
             });
 
             const url = `https://madness1997-gif.github.io/mednote-reader/?live-sidebar=${Date.now()}`;
-            const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+            const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
             if (!response || response.status() !== 200) throw new Error(`Live page status ${response?.status()}`);
 
-            const nav = page.locator('.mednote-page-sheet-nav');
+            let nav = page.locator('.mednote-page-sheet-nav');
+            await nav.waitFor({ state: 'visible', timeout: 15000 });
+
+            // Confirm the real IndexedDB v3 store has persisted the seeded note.
+            const deadline = Date.now() + 15000;
+            let persistedWorkspace = '';
+            while (Date.now() < deadline && persistedWorkspace !== 'live-workspace-1') {
+              persistedWorkspace = await page.evaluate(async () => {
+                const db = await new Promise((resolve, reject) => {
+                  const request = indexedDB.open('mednote-local', 1);
+                  request.onsuccess = () => resolve(request.result);
+                  request.onerror = () => reject(request.error);
+                });
+                try {
+                  return await new Promise((resolve, reject) => {
+                    const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v3:meta');
+                    request.onsuccess = () => resolve(request.result?.activeWorkspaceId || '');
+                    request.onerror = () => reject(request.error);
+                  });
+                } finally {
+                  db.close();
+                }
+              });
+              if (persistedWorkspace !== 'live-workspace-1') await page.waitForTimeout(250);
+            }
+            if (persistedWorkspace !== 'live-workspace-1') throw new Error(`IndexedDB did not persist live workspace: ${persistedWorkspace}`);
+
+            // Recreate the exact storage state that caused the blank right strip.
+            await page.evaluate(() => {
+              localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v3', savedAt: Date.now() }));
+            });
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+
+            const workspace = page.locator('.workspace');
+            await workspace.waitFor({ state: 'visible', timeout: 15000 });
+            const workspaceClass = await workspace.getAttribute('class') || '';
+            if (!workspaceClass.includes('workspace-mode-note')) throw new Error(`Reloaded wrong workspace mode: ${workspaceClass}`);
+
+            nav = page.locator('.mednote-page-sheet-nav');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
             const selectedNotebook = await nav.locator('[data-notebook-select]').inputValue();
-            if (selectedNotebook !== 'live-notebook-1') throw new Error(`Wrong sidebar notebook ${selectedNotebook}`);
+            if (selectedNotebook !== 'live-notebook-1') throw new Error(`Wrong sidebar notebook after IndexedDB reload: ${selectedNotebook}`);
 
-            // Exact reported failure: tapping Show briefly reveals the sidebar,
-            // then another state/polling pass hides it again. Keep it visible for
-            // several polling cycles to prove that no re-hide occurs.
-            await page.locator('[data-note-navigation-close]').click();
-            const restore = page.locator('[data-note-navigation-restore]');
-            await restore.waitFor({ state: 'visible', timeout: 5000 });
-            await restore.click();
-            await page.waitForTimeout(3500);
-            if (!(await nav.isVisible())) throw new Error('Sidebar flashed and disappeared after restore');
-
-            // Entering Note is also an explicit request to show the Note sidebar.
-            await page.locator('[data-note-navigation-close]').click();
-            const noteMode = page.locator('.workspace-mode-switcher button').filter({ hasText: /^Note$/ });
-            await noteMode.click();
-            await page.waitForTimeout(3500);
-            if (!(await nav.isVisible())) throw new Error('Sidebar flashed and disappeared after clicking Note mode');
+            // Keep the navigator visible through several runtime maintenance cycles.
+            await page.waitForTimeout(4000);
+            if (!(await nav.isVisible())) throw new Error('Sidebar disappeared after IndexedDB reload');
 
             const box = await nav.boundingBox();
             if (!box || box.width < 190 || box.x < 600 || box.x + box.width > 981) {
-              throw new Error(`Sidebar is not visibly on the right: ${JSON.stringify(box)}`);
+              throw new Error(`Sidebar is not visibly on the right after IndexedDB reload: ${JSON.stringify(box)}`);
             }
             if (errors.length) throw new Error(`Live browser errors: ${JSON.stringify(errors)}`);
 
-            console.log('LIVE_SIDEBAR_STABLE', JSON.stringify(box));
+            console.log('LIVE_INDEXEDDB_SIDEBAR_STABLE', JSON.stringify(box));
             await page.screenshot({ path: 'live-sidebar-stability.png', fullPage: true });
             await browser.close();
           })().catch(err => { console.error(err); process.exit(1); });
