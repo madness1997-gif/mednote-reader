@@ -6,6 +6,7 @@ on:
     paths:
       - "app/page-sheet-navigation.ts"
       - "app/page-sheet-runtime.ts"
+      - "app/page-sheet-state.ts"
       - "app/page-sheet-active-context-repair.ts"
       - "app/page-sheet-sidebar-functional-only.ts"
       - "app/page-sheet-sidebar-clean.ts"
