@@ -12,6 +12,46 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
+
+    // Seed an actual independent note notebook. A completely empty install may
+    // intentionally start in Reader-only mode, which has no note navigation to test.
+    const notePage = {
+      id: 'e2e-page-1',
+      title: 'E2E Page',
+      titleHtml: 'E2E Page',
+      body: '',
+      bodyHtml: '',
+      citationPage: null,
+      strokes: [],
+      excerpts: [],
+      paper: { size: 'a4', orientation: 'portrait', template: 'first-aid', color: 'white' },
+      text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
+    };
+    const notebook = {
+      id: 'e2e-notebook-1',
+      title: 'E2E Notebook',
+      pages: [notePage],
+      activePageId: notePage.id,
+      createdAt: Date.now(),
+    };
+    localStorage.setItem('mednote-library-v2', JSON.stringify({
+      workspaces: [{
+        id: 'e2e-workspace-1',
+        kind: 'empty',
+        name: 'E2E Notebook',
+        documents: [],
+        activeDocumentId: null,
+        notebooks: [notebook],
+        activeNotebookId: notebook.id,
+        sourcePage: 1,
+      }],
+      activeWorkspaceId: 'e2e-workspace-1',
+      readerShare: 50,
+      workspaceMode: 'note',
+      noteZoom: 100,
+      savedAt: Date.now(),
+    }));
+
     // Headless Chromium does not expose a native select popup. Replace showPicker
     // with an observable user-gesture-safe stub so the N button can be verified.
     HTMLSelectElement.prototype.showPicker = function showPicker() {
