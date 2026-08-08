@@ -111,7 +111,7 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(nav.locator('.mps-search-input')).toHaveCount(0);
 
   // ...: the real menu opens and exposes the notebook actions. Validate rename
-  // invokes its real prompt; menu reopen/close stability is covered separately.
+  // invokes its real prompt. Menu persistence itself is covered separately below.
   await more.click();
   const menu = bookbar.locator('.mps-notebook-menu');
   await expect(menu).toHaveClass(/open/);
@@ -124,7 +124,6 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
     await dialog.dismiss();
   });
   await menu.locator('[data-page-sheet-notebook-rename]').click();
-  await expect(menu).not.toHaveClass(/open/);
 
   // X: actually hides the sidebar and writes the tab-scoped hidden state.
   await close.click();
