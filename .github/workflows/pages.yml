@@ -76,7 +76,7 @@ jobs:
         run: |
           npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
           npx playwright install --with-deps chromium
-      - name: Verify sidebar on production after IndexedDB-only reload
+      - name: Verify sidebar and lazy notes on production after IndexedDB-only reload
         run: |
           node - <<'NODE'
           const { chromium } = require('@playwright/test');
@@ -94,28 +94,42 @@ jobs:
 
             await page.addInitScript(() => {
               // Seed exactly once. After the first production load, force the
-              // persisted shape seen on real devices: IndexedDB owns the full
-              // state and localStorage contains only the indexeddb-v3 marker.
+              // current persisted shape: IndexedDB owns note content while
+              // localStorage contains only a tiny storage marker.
               if (sessionStorage.getItem('live-sidebar-indexeddb-seeded') === '1') return;
               localStorage.clear();
               sessionStorage.setItem('live-sidebar-indexeddb-seeded', '1');
               const now = Date.now();
+              const paper = { size: 'a4', orientation: 'portrait', template: 'blank', color: 'white' };
+              const text = { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' };
               const notePage = {
                 id: 'live-page-1',
-                title: 'TÊN CHỦ ĐỀ',
-                titleHtml: 'TÊN CHỦ ĐỀ',
-                body: 'TỔNG QUAN YẾU TỐ NGUY CƠ CƠ CHẾ LÂM SÀNG CHẨN ĐOÁN ĐIỀU TRỊ',
-                bodyHtml: '<p>TỔNG QUAN</p><p>YẾU TỐ NGUY CƠ</p><p>CƠ CHẾ</p><p>LÂM SÀNG</p><p>CHẨN ĐOÁN</p><p>ĐIỀU TRỊ</p>',
+                title: 'Trang đang mở',
+                titleHtml: 'Trang đang mở',
+                body: 'ACTIVE_LIVE_CONTENT_1',
+                bodyHtml: '<p>ACTIVE_LIVE_CONTENT_1</p>',
                 citationPage: null,
                 strokes: [],
                 excerpts: [],
-                paper: { size: 'a4', orientation: 'portrait', template: 'first-aid', color: 'white' },
-                text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
+                paper,
+                text,
+              };
+              const lazyPage = {
+                id: 'live-page-2',
+                title: 'Trang lazy',
+                titleHtml: 'Trang lazy',
+                body: 'LAZY_LIVE_CONTENT_2',
+                bodyHtml: '<p>LAZY_LIVE_CONTENT_2</p>',
+                citationPage: null,
+                strokes: [],
+                excerpts: [],
+                paper,
+                text,
               };
               const notebook = {
                 id: 'live-notebook-1',
                 title: 'Sổ 2 — Ghi chú — live',
-                pages: [notePage],
+                pages: [notePage, lazyPage],
                 activePageId: notePage.id,
                 createdAt: now,
               };
@@ -152,7 +166,7 @@ jobs:
             let nav = page.locator('.mednote-page-sheet-nav');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
 
-            // Confirm the real IndexedDB v3 store has persisted the seeded note.
+            // Confirm the real IndexedDB store has persisted the seeded note.
             const deadline = Date.now() + 15000;
             let persistedWorkspace = '';
             while (Date.now() < deadline && persistedWorkspace !== 'live-workspace-1') {
@@ -176,11 +190,19 @@ jobs:
             }
             if (persistedWorkspace !== 'live-workspace-1') throw new Error(`IndexedDB did not persist live workspace: ${persistedWorkspace}`);
 
-            // Recreate the exact storage state that caused the blank right strip.
+            // Recreate the IndexedDB-only startup used by real sessions.
             await page.evaluate(() => {
-              localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v3', savedAt: Date.now() }));
+              localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v4', savedAt: Date.now() }));
             });
             await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+
+            // IndexedDB restore is asynchronous. Wait for React to publish the
+            // restored live snapshot instead of asserting against its initial
+            // default split-mode frame.
+            await page.waitForFunction(() => {
+              const state = window.__MEDNOTE_LIVE_STATE__;
+              return state?.activeWorkspaceId === 'live-workspace-1' && state?.workspaceMode === 'note';
+            }, null, { timeout: 15000 });
 
             const workspace = page.locator('.workspace');
             await workspace.waitFor({ state: 'visible', timeout: 15000 });
@@ -192,6 +214,43 @@ jobs:
             const selectedNotebook = await nav.locator('[data-notebook-select]').inputValue();
             if (selectedNotebook !== 'live-notebook-1') throw new Error(`Wrong sidebar notebook after IndexedDB reload: ${selectedNotebook}`);
 
+            // Only the active page should be hydrated after startup. Page 2 must
+            // remain a metadata shell until the user actually opens it.
+            const lazyState = await page.evaluate(() => {
+              const state = window.__MEDNOTE_LIVE_STATE__;
+              const workspace = state?.workspaces?.find(item => item.id === 'live-workspace-1');
+              const notebook = workspace?.notebooks?.find(item => item.id === 'live-notebook-1');
+              const active = notebook?.pages?.find(item => item.id === 'live-page-1');
+              const lazy = notebook?.pages?.find(item => item.id === 'live-page-2');
+              return {
+                activePageId: notebook?.activePageId,
+                activeBody: active?.body,
+                activeLazy: active?.__mednoteLazyPage === true,
+                lazyBody: lazy?.body,
+                lazyFlag: lazy?.__mednoteLazyPage === true,
+              };
+            });
+            if (lazyState.activePageId !== 'live-page-1' || lazyState.activeBody !== 'ACTIVE_LIVE_CONTENT_1' || lazyState.activeLazy) {
+              throw new Error(`Active page was not hydrated correctly: ${JSON.stringify(lazyState)}`);
+            }
+            if (lazyState.lazyBody !== '' || !lazyState.lazyFlag) {
+              throw new Error(`Second page was eagerly hydrated: ${JSON.stringify(lazyState)}`);
+            }
+
+            // Opening page 2 must hydrate its full body from IndexedDB and render it.
+            await page.evaluate(() => window.dispatchEvent(new CustomEvent('mednote:activate-note-page', { detail: 'live-page-2' })));
+            await page.waitForFunction(() => {
+              const state = window.__MEDNOTE_LIVE_STATE__;
+              const workspace = state?.workspaces?.find(item => item.id === 'live-workspace-1');
+              const notebook = workspace?.notebooks?.find(item => item.id === 'live-notebook-1');
+              const active = notebook?.pages?.find(item => item.id === 'live-page-2');
+              return notebook?.activePageId === 'live-page-2'
+                && active?.__mednoteLazyPage !== true
+                && active?.body === 'LAZY_LIVE_CONTENT_2';
+            }, null, { timeout: 10000 });
+            const hydratedText = await page.locator('[data-note-page-id="live-page-2"]').innerText();
+            if (!hydratedText.includes('LAZY_LIVE_CONTENT_2')) throw new Error(`Hydrated page did not render: ${hydratedText}`);
+
             // Keep the navigator visible through several runtime maintenance cycles.
             await page.waitForTimeout(4000);
             if (!(await nav.isVisible())) throw new Error('Sidebar disappeared after IndexedDB reload');
@@ -202,7 +261,7 @@ jobs:
             }
             if (errors.length) throw new Error(`Live browser errors: ${JSON.stringify(errors)}`);
 
-            console.log('LIVE_INDEXEDDB_SIDEBAR_STABLE', JSON.stringify(box));
+            console.log('LIVE_LAZY_NOTE_AND_SIDEBAR_STABLE', JSON.stringify(box));
             await page.screenshot({ path: 'live-sidebar-stability.png', fullPage: true });
             await browser.close();
           })().catch(err => { console.error(err); process.exit(1); });
