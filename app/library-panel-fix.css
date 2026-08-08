@@ -1,4 +1,4 @@
-/* Document library drawer: keep the reader/note visible, but make the drawer itself unconditionally visible when mounted. */
+/* Keep the library layer stable on mobile without dimming or blurring the workspace. */
 .library-backdrop {
   position: fixed !important;
   inset: 0 !important;
@@ -10,8 +10,8 @@
   isolation: isolate;
 }
 
-/* Mobile Chrome/Samsung Internet can be finicky with an absolutely-positioned child of a transparent fixed layer.
-   Use a fixed drawer with explicit visibility/size so tapping the hamburger always reveals it. */
+/* Native drawer remains a safe fallback. Do not force display:block: the relation-library runtime
+   deliberately hides this panel and replaces it with the relation-aware three-group drawer. */
 .library-backdrop > .library-panel {
   position: fixed !important;
   top: 0 !important;
@@ -19,10 +19,6 @@
   left: 0 !important;
   right: auto !important;
   z-index: 1001 !important;
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  transform: none !important;
   width: min(430px, 92vw) !important;
   max-width: 92vw !important;
   height: 100vh !important;
