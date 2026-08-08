@@ -8,16 +8,17 @@ test.use({
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
-test('OneNote sidebar follows React fallbacks when active workspace and notebook ids are stale', async ({ page }) => {
-  page.on('console', (message) => console.log(`BROWSER ${message.type()}: ${message.text()}`));
-  page.on('pageerror', (error) => console.log(`BROWSER pageerror: ${error.message}`));
-
+test('OneNote sidebar survives reload after the app migrates its state to IndexedDB v3', async ({ page }) => {
   await page.addInitScript(() => {
+    // Seed only the first navigation. On reload the app must restore from
+    // IndexedDB while localStorage contains only the indexeddb-v3 marker.
+    if (sessionStorage.getItem('sidebar-indexeddb-seeded') === '1') return;
     localStorage.clear();
-    sessionStorage.clear();
+    sessionStorage.setItem('sidebar-indexeddb-seeded', '1');
+
     const now = Date.now();
     const notePage = {
-      id: 'stale-page-1',
+      id: 'persisted-page-1',
       title: 'TÊN CHỦ ĐỀ',
       titleHtml: 'TÊN CHỦ ĐỀ',
       body: 'TỔNG QUAN YẾU TỐ NGUY CƠ CƠ CHẾ LÂM SÀNG CHẨN ĐOÁN ĐIỀU TRỊ',
@@ -29,14 +30,14 @@ test('OneNote sidebar follows React fallbacks when active workspace and notebook
       text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
     };
     const notebook = {
-      id: 'real-notebook-1',
+      id: 'persisted-notebook-1',
       title: 'Sổ 2 — Ghi chú — dc260043',
       pages: [notePage],
       activePageId: notePage.id,
       createdAt: now,
     };
     const document = {
-      id: 'document-1',
+      id: 'persisted-document-1',
       name: 'dc260043.pdf',
       size: 123456,
       lastModified: now,
@@ -44,16 +45,16 @@ test('OneNote sidebar follows React fallbacks when active workspace and notebook
     };
     localStorage.setItem('mednote-library-v2', JSON.stringify({
       workspaces: [{
-        id: 'workspace-1',
+        id: 'persisted-workspace-1',
         kind: 'document',
         name: 'Sổ 2 — Ghi chú — dc260043',
         documents: [document],
         activeDocumentId: document.id,
         notebooks: [notebook],
-        activeNotebookId: 'stale-missing-notebook-id',
+        activeNotebookId: notebook.id,
         sourcePage: 1,
       }],
-      activeWorkspaceId: 'stale-missing-workspace-id',
+      activeWorkspaceId: 'persisted-workspace-1',
       readerShare: 50,
       workspaceMode: 'note',
       noteZoom: 1,
@@ -66,27 +67,29 @@ test('OneNote sidebar follows React fallbacks when active workspace and notebook
   const nav = host.locator(':scope > .mednote-page-sheet-nav');
 
   await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
-  await page.waitForTimeout(2500);
-  const debug = await page.evaluate(() => {
-    let state = null;
-    try { state = JSON.parse(localStorage.getItem('mednote-library-v2') || 'null'); } catch {}
-    const h = document.querySelector('.note-navigation-host');
-    const w = document.querySelector('.workspace');
-    return {
-      state,
-      hostClass: h?.className || '',
-      hostHtml: h?.innerHTML || '',
-      workspaceClass: w?.className || '',
-      hiddenFlagLocal: localStorage.getItem('mednote-note-navigation-hidden'),
-      hiddenFlagSession: sessionStorage.getItem('mednote-note-navigation-hidden'),
-    };
-  });
-  console.log('STALE_CONTEXT_DEBUG', JSON.stringify(debug));
-
   await expect(nav).toBeVisible({ timeout: 12_000 });
+
+  // Wait for incremental persistence to finish and deliberately replace the
+  // legacy full snapshot with the small marker used on real devices.
+  await expect.poll(async () => page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('mednote-library-v2') || '{}').storage || ''; }
+    catch { return ''; }
+  }), { timeout: 12_000 }).toBe('indexeddb-v3');
+
+  // This is the important load: no full app state exists in localStorage now.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 12_000 });
+  await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
+  await expect(nav).toBeVisible({ timeout: 12_000 });
+  await expect(nav.locator('[data-notebook-select]')).toHaveValue('persisted-notebook-1');
+
+  // Keep it on screen across several navigator maintenance cycles.
   await page.waitForTimeout(4_000);
   await expect(nav).toBeVisible();
-  await expect(nav.locator('[data-notebook-select]')).toHaveValue('real-notebook-1');
+
+  const marker = await page.evaluate(() => JSON.parse(localStorage.getItem('mednote-library-v2') || '{}'));
+  expect(marker.storage).toBe('indexeddb-v3');
+  expect(marker.workspaces).toBeUndefined();
 
   const box = await nav.boundingBox();
   expect(box).not.toBeNull();
