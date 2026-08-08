@@ -1,0 +1,68 @@
+name: Debug lazy note mode
+
+on:
+  push:
+    branches: [agent/debug-lazy-mode]
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:pages
+        env:
+          VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com
+      - name: Inspect mode persistence
+        run: |
+          set -euo pipefail
+          npx vite preview --config vite.github.config.ts --host 127.0.0.1 --port 4173 > /tmp/mednote-vite.log 2>&1 &
+          server_pid=$!
+          trap 'kill ${server_pid} 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/mednote-reader/ >/dev/null && break || sleep 1; done
+          node - <<'NODE'
+          const { chromium } = require('@playwright/test');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage({ viewport: { width: 980, height: 1500 } });
+            const url = 'http://127.0.0.1:4173/mednote-reader/';
+            await page.addInitScript(() => {
+              if (sessionStorage.getItem('seeded') === '1') return;
+              sessionStorage.setItem('seeded','1');
+              localStorage.clear();
+              const now = Date.now();
+              const notePage = { id:'p1', title:'Test', titleHtml:'Test', body:'Body', bodyHtml:'<p>Body</p>', citationPage:null, strokes:[], excerpts:[], paper:{size:'a4',orientation:'portrait',template:'blank',color:'white'}, text:{font:'times',size:12,color:'auto',bold:false,italic:false,underline:false,align:'left'} };
+              const notebook = { id:'n1', title:'Book', pages:[notePage], activePageId:'p1', createdAt:now };
+              const document = { id:'d1', name:'live.pdf', size:1, lastModified:now, reader:{page:1,zoom:1,fitMode:'page',rotation:0,viewMode:'single',bookmarks:[],annotations:[]} };
+              localStorage.setItem('mednote-library-v2', JSON.stringify({ workspaces:[{id:'w1',kind:'document',name:'Book',documents:[document],activeDocumentId:'d1',notebooks:[notebook],activeNotebookId:'n1',sourcePage:1}], activeWorkspaceId:'w1', readerShare:50, workspaceMode:'note', noteZoom:1, savedAt:now }));
+            });
+            await page.goto(url, {waitUntil:'domcontentloaded'});
+            await page.waitForFunction(() => window.__MEDNOTE_LIVE_STATE__?.activeWorkspaceId === 'w1');
+            await page.waitForTimeout(1200);
+            const read = async label => {
+              const x = await page.evaluate(async () => {
+                const live = window.__MEDNOTE_LIVE_STATE__;
+                const db = await new Promise((resolve,reject)=>{ const r=indexedDB.open('mednote-local',1); r.onsuccess=()=>resolve(r.result); r.onerror=()=>reject(r.error); });
+                const meta = await new Promise((resolve,reject)=>{ const r=db.transaction('documents','readonly').objectStore('documents').get('library:v3:meta'); r.onsuccess=()=>resolve(r.result); r.onerror=()=>reject(r.error); });
+                db.close();
+                return { liveMode: live?.workspaceMode, metaMode: meta?.workspaceMode, local: localStorage.getItem('mednote-library-v2'), cls: document.querySelector('.workspace')?.className };
+              });
+              console.log(label, JSON.stringify(x));
+            };
+            await read('BEFORE_RELOAD');
+            await page.evaluate(() => localStorage.setItem('mednote-library-v2', JSON.stringify({storage:'indexeddb-v3', savedAt:Date.now()})));
+            await page.reload({waitUntil:'domcontentloaded'});
+            await page.waitForFunction(() => window.__MEDNOTE_LIVE_STATE__);
+            await page.waitForTimeout(800);
+            await read('AFTER_RELOAD');
+            await browser.close();
+          })().catch(e=>{ console.error(e); process.exit(1); });
+          NODE
