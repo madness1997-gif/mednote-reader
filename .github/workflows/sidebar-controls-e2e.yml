@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "app/independent-library-runtime.ts"
       - "app/page-sheet-navigation.ts"
       - "app/page-sheet-runtime.ts"
       - "app/page-sheet-state.ts"
