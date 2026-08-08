@@ -20,7 +20,7 @@
   content: none !important;
 }
 
-/* Use the React-owned native panel. It is the reliable source of truth for open/close and row actions. */
+/* Use the React-owned native panel. Widen it so the three library groups can sit side by side. */
 .library-backdrop > .library-panel {
   position: fixed !important;
   top: 0 !important;
@@ -32,17 +32,24 @@
   visibility: visible !important;
   opacity: 1 !important;
   transform: none !important;
-  width: min(430px, 92vw) !important;
-  max-width: 92vw !important;
+  width: min(1080px, 96vw) !important;
+  max-width: 96vw !important;
   height: 100vh !important;
   height: 100dvh !important;
   overflow-y: auto !important;
-  overflow-x: hidden !important;
+  overflow-x: auto !important;
   background: #f7f9fa !important;
   border-right: 1px solid var(--line);
   box-shadow: 12px 0 30px rgba(18,35,49,.12) !important;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .library-backdrop > .library-panel {
+    width: 96vw !important;
+    max-width: 96vw !important;
+  }
 }
 
 /* Disable the experimental replacement panel if an older cached chunk tries to mount it. */
