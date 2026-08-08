@@ -15,8 +15,8 @@ test.beforeEach(async ({ page }) => {
 
     // Reproduce the real failure path, not the easy already-in-Note case:
     // start in Reader with an untouched generated First Aid note, then switch
-    // to Note. The relation sync must preserve that notebook and the OneNote
-    // navigator must become visible immediately when Note is selected.
+    // to Note. Reader-mode synchronization must preserve that notebook and the
+    // OneNote navigator must become visible after the actual Note click.
     const notePage = {
       id: 'e2e-page-1',
       title: 'TÊN CHỦ ĐỀ',
@@ -73,20 +73,10 @@ test.beforeEach(async ({ page }) => {
   const workspace = page.locator('.workspace');
 
   await expect(host).toHaveCount(1);
-  await expect(nav).toHaveCount(1, { timeout: 10_000 });
   await expect(workspace).toHaveClass(/workspace-mode-reader/);
+  await page.waitForTimeout(1600); // let Reader-mode relation maintenance run once
 
-  // This is the transition that failed on the phone screenshot.
-  await page.locator('.workspace-mode-switcher button[title="Chỉ hiện Note"]').click();
-  await expect(workspace).toHaveClass(/workspace-mode-note/);
-  await expect(nav).toBeVisible({ timeout: 10_000 });
-  await expect(host.locator(':scope > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
-  await expect(page.locator('aside[aria-label="Trang ghi chú"]')).toHaveCount(0);
-  await expect(workspace).toHaveClass(/onenote-right-navigation-layout/);
-
-  // Verify that Reader-mode synchronization did not replace the active notebook
-  // with a placeholder before the Note tab was opened.
-  const activeNotebook = await page.evaluate(() => {
+  const beforeSwitch = await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('mednote-library-v2') || 'null');
     const workspace = state?.workspaces?.find((item) => item.id === state.activeWorkspaceId);
     return {
@@ -94,8 +84,17 @@ test.beforeEach(async ({ page }) => {
       notebookIds: (workspace?.notebooks || []).map((item) => item.id),
     };
   });
-  expect(activeNotebook.id).toBe('e2e-notebook-1');
-  expect(activeNotebook.notebookIds).toContain('e2e-notebook-1');
+  expect(beforeSwitch.id).toBe('e2e-notebook-1');
+  expect(beforeSwitch.notebookIds).toContain('e2e-notebook-1');
+
+  // This is the transition that failed on the phone screenshot.
+  await page.locator('.workspace-mode-switcher button[title="Chỉ hiện Note"]').click();
+  await expect(workspace).toHaveClass(/workspace-mode-note/);
+  await expect(nav).toHaveCount(1, { timeout: 10_000 });
+  await expect(nav).toBeVisible({ timeout: 10_000 });
+  await expect(host.locator(':scope > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
+  await expect(page.locator('aside[aria-label="Trang ghi chú"]')).toHaveCount(0);
+  await expect(workspace).toHaveClass(/onenote-right-navigation-layout/);
 });
 
 test('all note sidebar topbar controls are live on mobile', async ({ page }) => {
