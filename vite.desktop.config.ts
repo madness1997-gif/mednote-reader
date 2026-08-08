@@ -6,6 +6,7 @@ import { sidebarCollapseFixPlugin } from "./vite.sidebar-collapse-fix";
 import { incrementalLibraryPersistencePlugin } from "./vite.incremental-library-persistence";
 import { thumbnailVirtualizationPlugin } from "./vite.thumbnail-virtualization";
 import { workspaceSuspensionPlugin } from "./vite.workspace-suspension";
+import { desktopPdfCanvasBudgetPlugin } from "./vite.desktop-pdf-canvas-budget";
 import { bundlePdfAssets } from "./vite.pdf-assets";
 
 const normalizeSourceLineEndingsPlugin = () => ({
@@ -21,7 +22,7 @@ const normalizeSourceLineEndingsPlugin = () => ({
 
 export default defineConfig({
   base: "./",
-  plugins: [normalizeSourceLineEndingsPlugin(), firstAidBlocksPlugin(), noteStickersPlugin(), sidebarCollapseFixPlugin(), thumbnailVirtualizationPlugin(), workspaceSuspensionPlugin(), incrementalLibraryPersistencePlugin(), react(), bundlePdfAssets("dist-electron")],
+  plugins: [normalizeSourceLineEndingsPlugin(), firstAidBlocksPlugin(), noteStickersPlugin(), sidebarCollapseFixPlugin(), thumbnailVirtualizationPlugin(), desktopPdfCanvasBudgetPlugin(), workspaceSuspensionPlugin(), incrementalLibraryPersistencePlugin(), react(), bundlePdfAssets("dist-electron")],
   build: {
     outDir: "dist-electron",
     emptyOutDir: true,
