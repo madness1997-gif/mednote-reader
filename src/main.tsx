@@ -5,6 +5,7 @@ import EquationComposer from "../app/equation-composer";
 import NotePdfExporter from "../app/note-pdf-export";
 import PdfExportE2EHarness from "../app/pdf-export-e2e-harness";
 import "../app/globals.css";
+import "../app/library-panel-fix.css";
 import "../app/textbox-fixes.css";
 import "../app/note-zoom-fixes.css";
 import "../app/note-pdf-export.css";
