@@ -5,9 +5,8 @@ const NOTE_RESTORE_CLASS = "onenote-note-navigation-restore";
 const NOTE_CLOSE_CLASS = "onenote-note-navigation-close";
 const READER_CLOSE_CLASS = "reader-navigation-close";
 
-// Older builds persisted the hidden state in localStorage. That made the note
-// sidebar appear to be permanently gone after reloads/deploys. Migrate that
-// stale preference away and keep hiding scoped to the current browser tab.
+// A stale persisted hidden flag made the note sidebar look permanently removed.
+// Clear it once whenever a fresh app bundle loads so the sidebar starts visible.
 try {
   localStorage.removeItem(NOTE_HIDDEN_KEY);
 } catch {
@@ -16,7 +15,7 @@ try {
 
 function noteNavigationHidden() {
   try {
-    return sessionStorage.getItem(NOTE_HIDDEN_KEY) === "1";
+    return localStorage.getItem(NOTE_HIDDEN_KEY) === "1";
   } catch {
     return false;
   }
@@ -24,7 +23,7 @@ function noteNavigationHidden() {
 
 function setNoteNavigationHidden(hidden: boolean) {
   try {
-    sessionStorage.setItem(NOTE_HIDDEN_KEY, hidden ? "1" : "0");
+    localStorage.setItem(NOTE_HIDDEN_KEY, hidden ? "1" : "0");
   } catch {
     // Keep the UI functional even when storage is unavailable.
   }
