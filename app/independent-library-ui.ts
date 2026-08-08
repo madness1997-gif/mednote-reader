@@ -95,10 +95,21 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
 }
 
+function neutralizeBackdrop(backdrop: HTMLElement) {
+  backdrop.style.setProperty("background", "transparent", "important");
+  backdrop.style.setProperty("background-color", "transparent", "important");
+  backdrop.style.setProperty("backdrop-filter", "none", "important");
+  backdrop.style.setProperty("-webkit-backdrop-filter", "none", "important");
+  backdrop.style.setProperty("filter", "none", "important");
+  backdrop.style.setProperty("opacity", "1", "important");
+  backdrop.style.setProperty("mix-blend-mode", "normal", "important");
+}
+
 function mount() {
   injectStyle();
   syncFromApp();
   for (const backdrop of Array.from(document.querySelectorAll<HTMLElement>(".library-backdrop"))) {
+    neutralizeBackdrop(backdrop);
     if (backdrop.querySelector(".relation-library")) continue;
     const nativePanel = backdrop.querySelector<HTMLElement>(".library-panel");
     if (!nativePanel) continue;
