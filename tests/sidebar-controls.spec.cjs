@@ -13,10 +13,10 @@ test.beforeEach(async ({ page }) => {
     localStorage.clear();
     sessionStorage.clear();
 
-    // Reproduce the real mobile failure: a PDF workspace whose automatically
-    // generated First Aid note is still untouched, while the user has selected
-    // the Note tab. This notebook used to be filtered out of the relation model,
-    // leaving the note canvas visible but no OneNote-style sidebar mounted.
+    // Reproduce the real failure path, not the easy already-in-Note case:
+    // start in Reader with an untouched generated First Aid note, then switch
+    // to Note. The relation sync must preserve that notebook and the OneNote
+    // navigator must become visible immediately when Note is selected.
     const notePage = {
       id: 'e2e-page-1',
       title: 'TÊN CHỦ ĐỀ',
@@ -56,24 +56,46 @@ test.beforeEach(async ({ page }) => {
       }],
       activeWorkspaceId: 'e2e-workspace-1',
       readerShare: 50,
-      workspaceMode: 'note',
+      workspaceMode: 'reader',
       noteZoom: 100,
       savedAt: Date.now(),
     }));
 
-    // Headless Chromium does not expose a native select popup. Replace showPicker
-    // with an observable user-gesture-safe stub so the N button can be verified.
     HTMLSelectElement.prototype.showPicker = function showPicker() {
       this.dataset.e2ePickerOpened = '1';
       this.focus();
     };
   });
+
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.note-navigation-host')).toHaveCount(1);
-  await expect(page.locator('.note-navigation-host > .mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator('.note-navigation-host > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
+  const host = page.locator('.note-navigation-host');
+  const nav = host.locator(':scope > .mednote-page-sheet-nav');
+  const workspace = page.locator('.workspace');
+
+  await expect(host).toHaveCount(1);
+  await expect(nav).toHaveCount(1, { timeout: 10_000 });
+  await expect(workspace).toHaveClass(/workspace-mode-reader/);
+
+  // This is the transition that failed on the phone screenshot.
+  await page.locator('.workspace-mode-switcher button[title="Chỉ hiện Note"]').click();
+  await expect(workspace).toHaveClass(/workspace-mode-note/);
+  await expect(nav).toBeVisible({ timeout: 10_000 });
+  await expect(host.locator(':scope > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
   await expect(page.locator('aside[aria-label="Trang ghi chú"]')).toHaveCount(0);
-  await expect(page.locator('.workspace')).toHaveClass(/onenote-right-navigation-layout/);
+  await expect(workspace).toHaveClass(/onenote-right-navigation-layout/);
+
+  // Verify that Reader-mode synchronization did not replace the active notebook
+  // with a placeholder before the Note tab was opened.
+  const activeNotebook = await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('mednote-library-v2') || 'null');
+    const workspace = state?.workspaces?.find((item) => item.id === state.activeWorkspaceId);
+    return {
+      id: workspace?.activeNotebookId || '',
+      notebookIds: (workspace?.notebooks || []).map((item) => item.id),
+    };
+  });
+  expect(activeNotebook.id).toBe('e2e-notebook-1');
+  expect(activeNotebook.notebookIds).toContain('e2e-notebook-1');
 });
 
 test('all note sidebar topbar controls are live on mobile', async ({ page }) => {
@@ -94,12 +116,10 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(more).toBeVisible();
   await expect(close).toBeVisible();
 
-  // N: open/focus notebook picker.
   await pickerButton.click();
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
 
-  // +: invoke the real create-notebook prompt.
   page.once('dialog', async (dialog) => {
     expect(dialog.type()).toBe('prompt');
     expect(dialog.message()).toContain('Notebook');
@@ -107,7 +127,6 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   });
   await addNotebook.click();
 
-  // Search: open the real panel, type an existing Section name and get a result.
   await search.click();
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
   const searchInput = nav.locator('.mps-search-input');
@@ -120,8 +139,6 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'navigation');
   await expect(nav.locator('.mps-search-input')).toHaveCount(0);
 
-  // ...: the real menu opens and exposes the notebook actions. Validate rename
-  // invokes its real prompt. Menu persistence itself is covered separately below.
   await more.click();
   const menu = bookbar.locator('.mps-notebook-menu');
   await expect(menu).toHaveClass(/open/);
@@ -135,7 +152,6 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   });
   await menu.locator('[data-page-sheet-notebook-rename]').click();
 
-  // X: actually hides the sidebar and writes the tab-scoped hidden state.
   await close.click();
   await expect(page.locator('.workspace')).toHaveClass(/onenote-note-navigation-hidden/);
   await expect(page.locator('.note-navigation-host')).toBeHidden();
@@ -152,7 +168,6 @@ test('search, notebook list and more menu do not disappear after a few seconds',
   const pickerButton = bookbar.locator('[data-page-sheet-notebook-picker]');
   const notebookSelect = bookbar.locator('[data-notebook-select]');
 
-  // Search must survive multiple 900/1200 ms maintenance cycles.
   await search.click();
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
   await expect(nav.locator('.mps-search-input')).toBeVisible();
@@ -161,7 +176,6 @@ test('search, notebook list and more menu do not disappear after a few seconds',
   await expect(nav.locator('.mps-search-input')).toBeVisible();
   await nav.locator('[data-native-note-search-close]').click();
 
-  // The Notebook actions menu must also stay open instead of being detached.
   await more.click();
   const menu = bookbar.locator('.mps-notebook-menu');
   await expect(menu).toHaveClass(/open/);
@@ -170,8 +184,6 @@ test('search, notebook list and more menu do not disappear after a few seconds',
   await more.click();
   await expect(menu).not.toHaveClass(/open/);
 
-  // Notebook list: the select must remain the same focused element while its
-  // native picker is open. Replacing the sidebar would remove focus and close it.
   await pickerButton.click();
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
