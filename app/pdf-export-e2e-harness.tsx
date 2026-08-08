@@ -11,15 +11,9 @@ export default function PdfExportE2EHarness() {
         style={{ display: "flex", alignItems: "center", minHeight: 48, padding: 8, background: "#fff" }}
       />
 
-      <div className="note-thumbnails" style={{ marginTop: 12 }}>
-        <button type="button" className="note-thumb active" style={{ padding: 8 }}>
-          Tờ 1
-        </button>
-      </div>
-
       <div className="note-stage" style={{ marginTop: 12 }}>
         <div
-          className="note-paper"
+          className="note-paper" data-note-page-id="e2e-sheet-1"
           style={{
             width: 420,
             height: 594,

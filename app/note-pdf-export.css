@@ -220,7 +220,6 @@
   cursor: pointer;
 }
 
-.note-pdf-export-active .note-thumb,
 .note-pdf-export-active .note-view-control,
 .note-pdf-export-active .note-tool-cluster {
   pointer-events: none;

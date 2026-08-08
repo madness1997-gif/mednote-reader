@@ -15,8 +15,7 @@ export function injectStyle() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-.onenote-note-navigation{display:none!important}
-.note-thumbnails.onenote-navigation-active{width:360px!important;min-width:285px!important;max-width:520px!important;resize:horizontal}
+.note-navigation-host.onenote-navigation-active{width:360px!important;min-width:285px!important;max-width:520px!important;resize:horizontal}
 .${NAV_CLASS}{min-height:0;flex:1;display:flex;flex-direction:column;background:#fff;color:#292929;font-family:Segoe UI,Arial,sans-serif}
 .${NAV_CLASS} button,.${NAV_CLASS} select{font:inherit}
 .mps-bookbar{height:48px;display:flex;align-items:center;gap:5px;padding:7px 8px;border-bottom:1px solid #dedede;background:#fafafa;position:relative}
@@ -51,7 +50,7 @@ export function injectStyle() {
 .mps-empty{padding:24px 12px;color:#777;text-align:center;font-size:11px}
 .mednote-sheet-link-modal{position:fixed;inset:0;z-index:100000;display:grid;place-items:center;padding:18px;background:#10242d73}
 .mps-modal{width:min(540px,100%);max-height:90vh;overflow:auto;border-radius:15px;background:#fff;box-shadow:0 24px 80px #10242d55}.mps-modal header,.mps-modal footer{display:flex;align-items:center;gap:10px;padding:15px 17px}.mps-modal header{border-bottom:1px solid #e1e7e9}.mps-modal header strong{flex:1}.mps-modal footer{justify-content:flex-end}.mps-modal button{min-height:34px;padding:7px 11px;border:1px solid #c9d4d7;border-radius:8px;background:#fff;cursor:pointer}.mps-modal button.primary{border-color:#1d7181;background:#1d7181;color:#fff}.mps-modal-body{display:grid;gap:13px;padding:15px 17px}.mps-modal-body p{margin:0;color:#63777e;font-size:12px}.mps-modal-body>label{display:grid;gap:6px;font-size:12px}.mps-modal select{height:38px;padding:0 9px;border:1px solid #c8d5d8;border-radius:8px;background:#fff}.mps-link-modes{display:grid;grid-template-columns:1fr 1fr;gap:8px}.mps-link-modes label{display:flex;gap:8px;padding:10px;border:1px solid #d5dfe1;border-radius:9px}.mps-link-modes b,.mps-link-modes small{display:block}.mps-link-modes small{margin-top:3px;color:#71858c;font-size:10px}.mps-existing{display:grid;gap:6px}.mps-existing>div{display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #e1e7e9;border-radius:8px}.mps-existing span{min-width:0;flex:1;font-size:11px}
-@media(max-width:720px){.note-thumbnails.onenote-navigation-active{width:285px!important;min-width:230px!important}.mps-layout{grid-template-columns:88px minmax(0,1fr)}.mps-link-modes{grid-template-columns:1fr}}
+@media(max-width:720px){.note-navigation-host.onenote-navigation-active{width:285px!important;min-width:230px!important}.mps-layout{grid-template-columns:88px minmax(0,1fr)}.mps-link-modes{grid-template-columns:1fr}}
 `;
   document.head.append(style);
 }
@@ -152,7 +151,7 @@ function openNativeNotebookPicker(nav: HTMLElement) {
 
 function hideNativeNoteSidebar(nav: HTMLElement) {
   localStorage.setItem(NOTE_HIDDEN_KEY, "1");
-  const aside = nav.closest<HTMLElement>(".note-thumbnails");
+  const aside = nav.closest<HTMLElement>(".note-navigation-host");
   const workspace = nav.closest<HTMLElement>(".workspace");
   workspace?.classList.add("onenote-note-navigation-hidden");
   aside?.setAttribute("aria-hidden", "true");
@@ -197,7 +196,7 @@ export function renderNavigator(context: NonNullable<ReturnType<typeof currentCo
 export function mountNavigator() {
   normalizePageSheetModel();
   const context = currentContext();
-  const container = document.querySelector<HTMLElement>(".note-thumbnails");
+  const container = document.querySelector<HTMLElement>(".note-navigation-host");
   if (!context || !container) return;
   container.classList.add("onenote-navigation-active");
   const old = container.querySelector<HTMLElement>(`.${NAV_CLASS}`);

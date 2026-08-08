@@ -20,7 +20,8 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-navigation-host > .mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-navigation-host > :not(.mednote-page-sheet-nav)')).toHaveCount(0);
 });
 
 test('all note sidebar topbar controls are live on mobile', async ({ page }) => {
@@ -93,8 +94,8 @@ test('all note sidebar topbar controls are live on mobile', async ({ page }) => 
   // X: actually hides the sidebar and writes the persisted hidden state.
   await close.click();
   await expect(page.locator('.workspace')).toHaveClass(/onenote-note-navigation-hidden/);
-  await expect(page.locator('.note-thumbnails')).toBeHidden();
-  const hiddenState = await page.evaluate(() => localStorage.getItem('mednote-note-navigation-hidden'));
+  await expect(page.locator('.note-navigation-host')).toBeHidden();
+  const hiddenState = await page.evaluate(() => sessionStorage.getItem('mednote-note-navigation-hidden'));
   expect(hiddenState).toBe('1');
 });
 

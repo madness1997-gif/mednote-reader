@@ -2569,6 +2569,16 @@ export default function Home() {
     updateActiveNotebook((notebook) => ({ ...notebook, activePageId: pageId }));
   };
 
+  useEffect(() => {
+    const activateNotePage = (event: Event) => {
+      const pageId = (event as CustomEvent<string>).detail;
+      if (!pageId || !activeNotebook.pages.some((item) => item.id === pageId)) return;
+      setActiveNoteId(pageId);
+    };
+    window.addEventListener("mednote:activate-note-page", activateNotePage);
+    return () => window.removeEventListener("mednote:activate-note-page", activateNotePage);
+  }, [activeNotebook.id, activeNotebook.pages]);
+
   const sourcePages = useMemo(() => {
     if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
     return Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1);
@@ -4583,7 +4593,7 @@ export default function Home() {
           )}
 
           <div className="note-stage workspace-frame" ref={noteStageRef}>
-            <article className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+            <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
               if (!(event.target as HTMLElement).closest("[data-rich-editor-id]")) {
@@ -4621,15 +4631,7 @@ export default function Home() {
             <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Chọn đối tượng để di chuyển, đổi cỡ hoặc sắp xếp lớp" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "callout" ? "Bấm vị trí cần chú thích để tạo hộp callout có mũi tên" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
-
-        <aside className="note-thumbnails" aria-label="Trang ghi chú">
-          <div className="notes-heading"><select value={activeNotebook.id} onChange={(event) => updateActiveWorkspace((workspace) => ({ ...workspace, activeNotebookId: event.target.value }))} aria-label="Chọn sổ ghi chú">{activeWorkspace.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.title}</option>)}</select><button className="round-delete" aria-label="Xóa sổ note" title="Xóa sổ note" onClick={() => { void deleteNotebook(); }}><Trash2 size={14} /></button><button className="round-add" aria-label="Thêm trang" onClick={addNotePage}><Plus size={18} /></button></div>
-          {notePages.map((page, index) => {
-            const paperColor = PAPER_COLORS.find((color) => color.id === page.paper.color)?.swatch;
-            return <div className="note-thumb-wrap" key={page.id}><button className={`note-thumb ${page.id === activeNote.id ? "active" : ""}`} onClick={() => setActiveNoteId(page.id)}><span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: paperColor }}><strong>{page.title.slice(0, 15)}</strong><i /><i /><i /></span><b>{index + 1}</b></button>{page.id === activeNote.id && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={() => { void deleteNotePage(); }}><Trash2 size={13} /></button>}</div>;
-          })}
-          <button className="new-page" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={19} /></button>
-        </aside>
+        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />
       </section>
     </main>
   );

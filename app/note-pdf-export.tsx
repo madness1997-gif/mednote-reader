@@ -47,16 +47,23 @@ function uniqueIndices(indices: number[]) {
   return [...new Set(indices.filter((index) => Number.isInteger(index) && index >= 0))];
 }
 
+function notePageIds() {
+  const context = currentContext();
+  if (context) return ((context.notebook.pages || []) as SheetPage[]).map((sheet) => String(sheet.id));
+  const paper = document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
+  return paper?.dataset.notePageId ? [paper.dataset.notePageId] : [];
+}
+
 function buildExportPlans(): ExportPlan[] {
   const context = currentContext();
-  const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"));
+  const availablePageIds = notePageIds();
   if (!context) {
-    return thumbnails.length ? [{
+    return availablePageIds.length ? [{
       scope: "notebook",
       title: "Notebook",
-      detail: `${thumbnails.length} Sheet`,
+      detail: `${availablePageIds.length} Sheet`,
       fileName: "MedNote.pdf",
-      pageIndices: thumbnails.map((_, index) => index),
+      pageIndices: availablePageIds.map((_, index) => index),
     }] : [];
   }
 
@@ -129,31 +136,35 @@ function buildExportPlans(): ExportPlan[] {
 }
 
 async function activateNotePage(index: number) {
-  const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"));
-  const thumbnail = thumbnails[index];
-  if (!thumbnail) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
-  if (!thumbnail.classList.contains("active")) thumbnail.click();
+  const pageIds = notePageIds();
+  const pageId = pageIds[index];
+  if (!pageId) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
+
+  let paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  if (paper?.dataset.notePageId !== pageId) {
+    window.dispatchEvent(new CustomEvent("mednote:activate-note-page", { detail: pageId }));
+  }
 
   for (let attempt = 0; attempt < 45; attempt += 1) {
-    const current = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"))
-      .findIndex((item) => item.classList.contains("active"));
-    if (current === index) break;
+    paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+    if (paper?.dataset.notePageId === pageId) break;
     await nextFrame();
     if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
   }
 
   await settleLayout();
-  const paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
   if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
   return paper;
 }
 
 async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
-  const thumbnails = Array.from(document.querySelectorAll<HTMLButtonElement>(".note-thumbnails .note-thumb"));
-  if (!thumbnails.length) throw new Error("Notebook chưa có Sheet nào");
+  const pageIds = notePageIds();
+  if (!pageIds.length) throw new Error("Notebook chưa có Sheet nào");
   if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
-  const originalIndex = Math.max(0, thumbnails.findIndex((thumbnail) => thumbnail.classList.contains("active")));
+  const currentPaper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  const originalIndex = Math.max(0, pageIds.indexOf(currentPaper?.dataset.notePageId || pageIds[0]));
   const pdf = await createPdfDocument();
   document.body.classList.add("note-pdf-export-active");
 

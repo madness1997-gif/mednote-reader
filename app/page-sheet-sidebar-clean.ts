@@ -19,16 +19,12 @@ type RecentItem = {
 };
 
 const style = `
-/* The Page→Sheet navigator is the single source of truth. Never stack the legacy navigator under it. */
-.note-thumbnails:has(> .${NAV_CLASS}) > .onenote-note-navigation,
-.note-thumbnails:has(> .${NAV_CLASS}) > .notes-heading,
-.note-thumbnails:has(> .${NAV_CLASS}) > .note-thumb-wrap,
-.note-thumbnails:has(> .${NAV_CLASS}) > .new-page{display:none!important;visibility:hidden!important;pointer-events:none!important}
-.note-thumbnails:has(> .${NAV_CLASS}) > .${NAV_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important}
+/* The OneNote-style Page→Sheet navigator is the single note navigation source. */
+.note-navigation-host:has(> .${NAV_CLASS}) > .${NAV_CLASS}{display:grid!important;visibility:visible!important;opacity:1!important}
 
 /* OneNote-like structure: slim command rail + Sections column + Pages column. */
 .workspace.onenote-right-navigation-layout{--onenote-nav-width:clamp(360px,31vw,430px)!important}
-.note-thumbnails.onenote-navigation-active:has(> .${NAV_CLASS}){width:100%!important;min-width:0!important;max-width:none!important;resize:none!important;background:#fff!important;border-left:1px solid #e2e5e7!important}
+.note-navigation-host.onenote-navigation-active:has(> .${NAV_CLASS}){width:100%!important;min-width:0!important;max-width:none!important;resize:none!important;background:#fff!important;border-left:1px solid #e2e5e7!important}
 .${NAV_CLASS}{min-height:0!important;grid-template-columns:44px minmax(0,1fr)!important;grid-template-rows:42px minmax(0,1fr)!important;background:#fff!important;color:#263238!important;overflow:hidden!important}
 .${NAV_CLASS} .mps-bookbar{grid-column:2!important;grid-row:1!important;height:42px!important;display:flex!important;align-items:center!important;gap:4px!important;padding:5px 7px!important;background:#fff!important;border-bottom:1px solid #e5e8ea!important;overflow:visible!important}
 .${NAV_CLASS} .mps-book-icon{width:24px!important;height:24px!important;border-radius:4px!important;background:#7719aa!important;color:#fff!important;font-size:9px!important}
@@ -343,7 +339,7 @@ function prepareNavigator(nav: HTMLElement) {
   nav.dataset.cleanSidebar = "1";
   if (!nav.dataset.sidebarMode) nav.dataset.sidebarMode = "navigation";
   const aside = nav.parentElement;
-  if (aside?.classList.contains("note-thumbnails")) {
+  if (aside?.classList.contains("note-navigation-host")) {
     const legacy = aside.querySelector<HTMLElement>(":scope > .onenote-note-navigation");
     if (legacy) {
       legacy.style.setProperty("display", "none", "important");

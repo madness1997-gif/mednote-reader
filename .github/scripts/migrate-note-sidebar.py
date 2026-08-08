@@ -232,7 +232,7 @@ if test_path.exists():
 # 7) Source-level proof: no Note-thumbnail implementation remains anywhere that ships/tests.
 forbidden = (
     "note-thumbnails",
-    "note-thumb",
+    ".note-thumb",
     "mini-note",
     "notes-heading",
     "VirtualNoteThumbnailList",

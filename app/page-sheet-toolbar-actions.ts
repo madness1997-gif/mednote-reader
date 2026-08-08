@@ -184,7 +184,7 @@ function deleteActiveNotebook() {
 function closeNoteSidebarFallback(button: HTMLElement) {
   localStorage.setItem(NOTE_HIDDEN_KEY, "1");
   const workspace = button.closest<HTMLElement>(".workspace");
-  const aside = button.closest<HTMLElement>(".note-thumbnails");
+  const aside = button.closest<HTMLElement>(".note-navigation-host");
   workspace?.classList.add("onenote-note-navigation-hidden");
   aside?.style.setProperty("display", "none", "important");
   window.dispatchEvent(new Event("resize"));
