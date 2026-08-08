@@ -36,17 +36,15 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+          name: github-pages
           path: pages-dist
       - name: Create and wait for Pages deployment
         id: pages
         uses: actions/github-script@v7
-        env:
-          ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const artifactName = process.env.ARTIFACT_NAME;
+            const artifactName = 'github-pages';
             const { owner, repo } = context.repo;
             const runId = context.runId;
 
@@ -66,12 +64,11 @@ jobs:
             core.info(`Artifact id: ${artifact.id}`);
 
             const idToken = await core.getIDToken();
-            const buildVersion = `${context.sha}-${runId}-${process.env.GITHUB_RUN_ATTEMPT || '1'}`;
             const created = await github.request('POST /repos/{owner}/{repo}/pages/deployments', {
               owner,
               repo,
               artifact_id: artifact.id,
-              pages_build_version: buildVersion,
+              pages_build_version: context.sha,
               oidc_token: idToken,
             });
 
@@ -98,9 +95,6 @@ jobs:
               await new Promise(resolve => setTimeout(resolve, 5000));
             }
 
-            // Deliberately do not cancel the Pages deployment here. The official
-            // deploy-pages action cancels after 10 minutes; this repository has
-            // repeatedly needed longer in GitHub's Pages queue.
             throw new Error('Pages deployment is still processing after 20 minutes and was left active.');
       - name: Verify live version
         run: |
