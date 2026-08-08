@@ -1,0 +1,289 @@
+/* Resizable note stickers. Every sticker is still a normal MedNote text object, so
+   the existing drag/resize/layer controls and rich-text editor keep working. */
+.excerpt-sticker {
+  --sticker-bg: #fff4a8;
+  --sticker-border: #e2c75d;
+  --sticker-ink: #26343a;
+  isolation: isolate;
+  overflow: visible;
+  border: 1px solid var(--sticker-border) !important;
+  border-radius: 8px;
+  background: var(--sticker-bg) !important;
+  color: var(--sticker-ink);
+  box-shadow: 0 7px 16px rgba(40, 53, 59, .16), 0 1px 2px rgba(40, 53, 59, .12);
+}
+
+.excerpt-sticker .excerpt-content {
+  position: relative;
+  z-index: 2;
+  padding: 17px 12px 11px;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.excerpt-sticker .excerpt-rich-editor {
+  color: var(--sticker-ink);
+}
+
+.excerpt-sticker .excerpt-rich-editor[contenteditable="true"] {
+  min-height: 100%;
+  padding: 6px;
+  background: rgba(255, 255, 255, .2);
+  box-shadow: inset 0 0 0 1px rgba(39, 64, 70, .16);
+}
+
+.excerpt-sticker.selected {
+  outline-offset: 4px;
+}
+
+/* Classic Post-it with a folded lower-right corner. */
+.excerpt-sticker.sticker-classic-yellow {
+  --sticker-bg: linear-gradient(145deg, #fff7b9 0%, #fff086 72%, #f1d863 100%);
+  --sticker-border: #e3c85e;
+}
+.excerpt-sticker.sticker-classic-yellow::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  border-left: 1px solid #dfc152;
+  border-top: 1px solid #dfc152;
+  border-radius: 7px 0 7px 0;
+  background: linear-gradient(135deg, #f0d45e 0 48%, #fff7bf 49% 100%);
+  pointer-events: none;
+}
+
+/* Pink note held by a translucent piece of tape. */
+.excerpt-sticker.sticker-tape-pink {
+  --sticker-bg: linear-gradient(180deg, #ffe8ef, #ffd8e4);
+  --sticker-border: #e8b9c8;
+}
+.excerpt-sticker.sticker-tape-pink::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 27%;
+  z-index: 3;
+  width: 46%;
+  height: 18px;
+  border: 1px solid rgba(170, 133, 92, .18);
+  background: rgba(244, 226, 186, .78);
+  box-shadow: 0 2px 4px rgba(56, 43, 33, .08);
+  transform: rotate(-2deg);
+  pointer-events: none;
+}
+
+/* Mint note with a small pin. */
+.excerpt-sticker.sticker-pin-mint {
+  --sticker-bg: linear-gradient(180deg, #e4f8ee, #cef0df);
+  --sticker-border: #9dcfba;
+}
+.excerpt-sticker.sticker-pin-mint::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  z-index: 4;
+  width: 15px;
+  height: 15px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #278878;
+  box-shadow: 0 2px 5px rgba(35, 79, 73, .28);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.excerpt-sticker.sticker-pin-mint::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  z-index: 3;
+  width: 1px;
+  height: 14px;
+  background: rgba(60, 92, 88, .5);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Blue card with a protruding tab. */
+.excerpt-sticker.sticker-tab-blue {
+  --sticker-bg: linear-gradient(180deg, #e5f3ff, #d5ebfb);
+  --sticker-border: #9fc8e5;
+  border-radius: 7px 11px 11px 7px;
+}
+.excerpt-sticker.sticker-tab-blue::before {
+  content: "NOTE";
+  position: absolute;
+  top: 10px;
+  left: -12px;
+  z-index: 3;
+  padding: 4px 6px;
+  border-radius: 5px 0 0 5px;
+  background: #4e93bf;
+  color: white;
+  font: 800 7px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .08em;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  pointer-events: none;
+}
+.excerpt-sticker.sticker-tab-blue .excerpt-content { padding-left: 16px; }
+
+/* Clean clinical card for First Aid / medical notes. */
+.excerpt-sticker.sticker-clinical-card {
+  --sticker-bg: #ffffff;
+  --sticker-border: #7cb5b8;
+  border-width: 1px !important;
+  border-top-width: 7px !important;
+  border-radius: 6px;
+  box-shadow: 0 6px 14px rgba(29, 82, 87, .13);
+}
+.excerpt-sticker.sticker-clinical-card::before {
+  content: "CLINICAL NOTE";
+  position: absolute;
+  top: -5px;
+  left: 10px;
+  z-index: 3;
+  color: white;
+  font: 800 7px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .06em;
+  pointer-events: none;
+}
+.excerpt-sticker.sticker-clinical-card { border-top-color: #1b7184 !important; }
+
+/* High-yield card matching the First Aid pearl palette. */
+.excerpt-sticker.sticker-high-yield {
+  --sticker-bg: linear-gradient(180deg, #fff9c7, #fff2a8);
+  --sticker-border: #dfc96c;
+  border-left-width: 7px !important;
+  border-left-color: #8b2c58 !important;
+  border-radius: 4px 8px 8px 4px;
+}
+.excerpt-sticker.sticker-high-yield::before {
+  content: "HIGH-YIELD";
+  position: absolute;
+  top: 7px;
+  left: 9px;
+  z-index: 3;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #8b2c58;
+  color: white;
+  font: 800 7px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .04em;
+  pointer-events: none;
+}
+.excerpt-sticker.sticker-high-yield .excerpt-content { padding-top: 25px; }
+
+/* Sticker picker */
+.note-sticker-popover {
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(560px, calc(100vh - 250px));
+  overflow: auto;
+}
+
+.note-sticker-popover > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.note-sticker-popover > header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.note-sticker-popover > header strong { color: var(--navy); font-size: 12px; }
+.note-sticker-popover > header small { color: var(--muted); font-size: 8px; line-height: 1.3; }
+
+.note-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.note-sticker-grid > button {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 72px auto auto;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #d5e0e2;
+  border-radius: 9px;
+  background: #fbfdfd;
+  color: #42575f;
+  text-align: left;
+  cursor: pointer;
+}
+.note-sticker-grid > button:hover {
+  border-color: #75aeb1;
+  background: #f0f8f8;
+}
+.note-sticker-grid > button > b {
+  overflow: hidden;
+  color: var(--navy);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-sticker-grid > button > small {
+  min-height: 20px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.35;
+}
+
+.note-sticker-preview {
+  --preview-bg: #fff4a8;
+  position: relative;
+  width: 74%;
+  height: 58px;
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  border: 1px solid rgba(70, 85, 91, .18);
+  border-radius: 6px;
+  background: var(--preview-bg);
+  box-shadow: 0 4px 8px rgba(46, 61, 67, .13);
+}
+.note-sticker-preview > i {
+  color: #596a71;
+  font: 600 8px/1.2 "Segoe UI", Arial, sans-serif;
+  font-style: normal;
+}
+.note-sticker-preview.sticker-classic-yellow { --preview-bg: linear-gradient(145deg, #fff7b9, #fff086); }
+.note-sticker-preview.sticker-classic-yellow::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 15px; height: 15px; border: 1px solid #dfc152; border-right: 0; border-bottom: 0; background: linear-gradient(135deg, #f0d45e 0 48%, #fff7bf 49%); }
+.note-sticker-preview.sticker-tape-pink { --preview-bg: linear-gradient(#ffe8ef, #ffd8e4); }
+.note-sticker-preview.sticker-tape-pink::before { content: ""; position: absolute; top: -6px; left: 26%; width: 48%; height: 11px; background: rgba(244,226,186,.82); transform: rotate(-2deg); }
+.note-sticker-preview.sticker-pin-mint { --preview-bg: linear-gradient(#e4f8ee, #cef0df); }
+.note-sticker-preview.sticker-pin-mint::before { content: ""; position: absolute; top: -6px; left: 50%; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: #278878; transform: translateX(-50%); }
+.note-sticker-preview.sticker-tab-blue { --preview-bg: linear-gradient(#e5f3ff, #d5ebfb); }
+.note-sticker-preview.sticker-tab-blue::before { content: ""; position: absolute; left: -7px; top: 13px; width: 8px; height: 27px; border-radius: 3px 0 0 3px; background: #4e93bf; }
+.note-sticker-preview.sticker-clinical-card { --preview-bg: #fff; border-top: 6px solid #1b7184; }
+.note-sticker-preview.sticker-high-yield { --preview-bg: linear-gradient(#fff9c7, #fff2a8); border-left: 6px solid #8b2c58; }
+
+.note-sticker-popover > footer {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #e1e9eb;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.35;
+}
+
+@media (max-width: 760px) {
+  .note-sticker-popover {
+    width: auto;
+    max-height: calc(100vh - 238px);
+  }
+  .note-sticker-grid { grid-template-columns: repeat(2, minmax(126px, 1fr)); }
+  .note-sticker-grid > button { grid-template-rows: 62px auto auto; padding: 6px; }
+  .note-sticker-preview { height: 50px; }
+}
