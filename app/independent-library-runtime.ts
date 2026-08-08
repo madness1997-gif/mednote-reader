@@ -1,8 +1,12 @@
 import "./independent-library-repair";
 import "./native-library-three-groups";
 
-// Keep the relation/note-side functionality, but do not replace the native library drawer.
-// The native drawer is React-owned and is therefore much more reliable on mobile.
+// Keep the original relation-library synchronizer alive because the note sidebar
+// depends on its bootstrap/timing side effects. library-panel-fix.css keeps the
+// experimental replacement drawer hidden, so the React-owned 3-column Library
+// remains the visible drawer.
+void import("./independent-library-ui");
+
 void import("./relation-note-sidebar")
   .then(() => import("./relation-note-hide-native-thumbnails"))
   .then(() => import("./relation-note-right-layout"))
