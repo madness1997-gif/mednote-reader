@@ -65,7 +65,7 @@ export function LazyPdfPageView(props: LazyPdfPageViewProps) {
   const [cacheAllowed, setCacheAllowed] = useState(true);
   const [measuredHeight, setMeasuredHeight] = useState(props.estimatedHeight ?? 780);
   const cacheKey = useMemo(
-    () => \\`desktop-pdf-\${props.page}-\${Math.random().toString(16).slice(2)}\\`,
+    () => "desktop-pdf-" + props.page + "-" + Math.random().toString(16).slice(2),
     [props.document, props.page],
   );
 
@@ -187,7 +187,7 @@ export function desktopPdfCanvasBudgetPlugin(): Plugin {
       const next = normalizedCode
         .replace(
           managerImportNeedle,
-          `${managerImportNeedle}\nimport { desktopPdfCanvasBudget } from "./desktop-pdf-canvas-budget";`,
+          managerImportNeedle + '\nimport { desktopPdfCanvasBudget } from "./desktop-pdf-canvas-budget";',
         )
         .replace(oldLazyPageView, newLazyPageView);
       return { code: next, map: null };
