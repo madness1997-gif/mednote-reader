@@ -82,6 +82,11 @@ jobs:
             await page.addInitScript(() => {
               localStorage.clear();
               sessionStorage.clear();
+              // Reproduce an existing Android Chrome tab that had the Note sidebar
+              // hidden by an older build. The new app must clear both stale flags
+              // during startup and visibly restore the OneNote navigator.
+              localStorage.setItem('mednote-note-navigation-hidden', '1');
+              sessionStorage.setItem('mednote-note-navigation-hidden', '1');
               const now = Date.now();
               const notePage = {
                 id: 'live-page-1', title: 'TÊN CHỦ ĐỀ', titleHtml: 'TÊN CHỦ ĐỀ',
@@ -122,6 +127,8 @@ jobs:
                 navRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom } : null,
                 innerWidth: window.innerWidth,
                 scrollWidth: document.documentElement.scrollWidth,
+                localHidden: localStorage.getItem('mednote-note-navigation-hidden'),
+                sessionHidden: sessionStorage.getItem('mednote-note-navigation-hidden'),
                 bodyText: document.body.innerText.slice(0, 500),
                 scripts: [...document.scripts].map(s => s.src).filter(Boolean),
               };
@@ -131,6 +138,9 @@ jobs:
             console.log('LIVE_CONSOLE_ERRORS', JSON.stringify(consoleErrors, null, 2));
             await page.screenshot({ path: 'live-sidebar.png', fullPage: true });
             const r = result.navRect;
+            if (result.localHidden === '1' || result.sessionHidden === '1') {
+              throw new Error(`Stale note-sidebar hidden flag survived startup: ${JSON.stringify(result)}`);
+            }
             if (!result.navExists || result.navDisplay === 'none' || result.navVisibility === 'hidden' || !r || r.width < 190 || r.x < 600 || r.right > 981) {
               throw new Error(`Deployed OneNote sidebar is not visibly occupying the right side: ${JSON.stringify(result)}`);
             }
