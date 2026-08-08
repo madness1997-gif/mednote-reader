@@ -17,7 +17,8 @@ function classifyRow(row: HTMLElement): GroupKind | "hidden" {
     title.startsWith("ghi chú") ||
     title.startsWith("sổ ghi chú") ||
     title.startsWith("notebook") ||
-    /(^|—|-)\s*ghi chú\b/.test(title);
+    title.includes("ghi chú —") ||
+    title.includes("ghi chú -");
 
   if (hasNoPdf) return "standalone";
   if (noteLike) return "linked";
