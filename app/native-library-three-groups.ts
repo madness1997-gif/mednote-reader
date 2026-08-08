@@ -32,10 +32,13 @@ function injectStyle() {
   style.id = STYLE_ID;
   style.textContent = `
 .library-list.native-three-groups{
-  display:flex!important;
-  flex-direction:column!important;
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  grid-auto-rows:auto!important;
+  align-items:start!important;
+  column-gap:12px!important;
+  row-gap:6px!important;
   min-width:0!important;
-  gap:0!important;
   margin-top:14px!important;
   overflow:visible!important;
 }
@@ -47,7 +50,8 @@ function injectStyle() {
   width:100%!important;
   min-width:0!important;
   gap:6px!important;
-  margin:0 0 4px!important;
+  margin:0!important;
+  align-self:start!important;
 }
 .library-list.native-three-groups .library-item{
   grid-column:1!important;
@@ -75,7 +79,7 @@ function injectStyle() {
   overflow:hidden!important;
   text-overflow:ellipsis!important;
   white-space:nowrap!important;
-  font-size:13px!important;
+  font-size:12px!important;
   line-height:1.25!important;
 }
 .library-list.native-three-groups .library-item small{
@@ -171,39 +175,44 @@ function injectStyle() {
   display:flex!important;
   align-items:center!important;
   justify-content:space-between!important;
-  gap:10px!important;
+  gap:8px!important;
   width:100%!important;
   min-width:0!important;
-  margin:10px 0 6px!important;
-  padding:7px 2px 6px!important;
+  margin:0!important;
+  padding:7px 4px 6px!important;
   border-bottom:1px solid #dce5e7!important;
   color:#304a53!important;
 }
-.${HEADER_CLASS}:first-of-type{margin-top:0!important}
 .${HEADER_CLASS} strong{
   min-width:0!important;
   overflow:hidden!important;
   text-overflow:ellipsis!important;
   white-space:nowrap!important;
-  font-size:12px!important;
+  font-size:11px!important;
   font-weight:800!important;
   letter-spacing:.01em!important;
 }
 .${HEADER_CLASS} span{
   flex:0 0 auto!important;
-  font-size:10px!important;
+  font-size:9px!important;
   color:#87969b!important;
   font-weight:700!important;
 }
 @media(max-width:640px){
-  .library-list.native-three-groups .library-item strong{font-size:12px!important}
-  .${HEADER_CLASS} strong{font-size:11px!important}
+  .library-list.native-three-groups{
+    min-width:720px!important;
+    grid-template-columns:repeat(3,minmax(228px,1fr))!important;
+    column-gap:10px!important;
+  }
+  .library-list.native-three-groups .library-item strong{font-size:11px!important}
+  .${HEADER_CLASS} strong{font-size:10px!important}
+  .${HEADER_CLASS} span{font-size:8px!important}
 }
 `;
   document.head.append(style);
 }
 
-const orderBase: Record<GroupKind, number> = { pdf: 1000, linked: 2000, standalone: 3000 };
+const columnOf: Record<GroupKind, number> = { pdf: 1, linked: 2, standalone: 3 };
 
 function ensureHeader(list: HTMLElement, kind: GroupKind, label: string) {
   let header = list.querySelector<HTMLElement>(`:scope > .${HEADER_CLASS}[data-group="${kind}"]`);
@@ -217,7 +226,9 @@ function ensureHeader(list: HTMLElement, kind: GroupKind, label: string) {
     header.append(strong, count);
     list.append(header);
   }
-  header.style.order = String(orderBase[kind]);
+  header.style.order = "";
+  header.style.gridColumn = String(columnOf[kind]);
+  header.style.gridRow = "1";
   return header;
 }
 
@@ -270,6 +281,8 @@ function organizeList(list: HTMLElement) {
   rows.forEach((row) => {
     const kind = classifyRow(row);
     row.style.order = "";
+    row.style.gridColumn = "";
+    row.style.gridRow = "";
     if (kind === "hidden") {
       row.style.display = "none";
       return;
@@ -278,11 +291,12 @@ function organizeList(list: HTMLElement) {
     row.style.display = "";
     row.dataset.libraryGroup = kind;
     counts[kind] += 1;
-    row.style.order = String(orderBase[kind] + counts[kind]);
+    row.style.gridColumn = String(columnOf[kind]);
+    row.style.gridRow = String(counts[kind] + 1);
     enhanceRow(row);
   });
 
-  const pdfHeader = ensureHeader(list, "pdf", "Tài liệu PDF / cụm tài liệu");
+  const pdfHeader = ensureHeader(list, "pdf", "Tài liệu PDF / cụm PDF");
   const linkedHeader = ensureHeader(list, "linked", "Note gắn tài liệu");
   const standaloneHeader = ensureHeader(list, "standalone", "Note độc lập");
 
