@@ -5,11 +5,13 @@ const NOTE_RESTORE_CLASS = "onenote-note-navigation-restore";
 const NOTE_CLOSE_CLASS = "onenote-note-navigation-close";
 const READER_CLOSE_CLASS = "reader-navigation-close";
 
-// Old builds persisted this preference indefinitely. Clear that stale value and
-// keep hide/show scoped to the current tab so the sidebar starts visible again
-// when the app is reopened.
+// Sidebar visibility must never get stuck across reloads/deploys. Older builds
+// persisted this flag in localStorage, while newer builds used sessionStorage.
+// Clear both forms on startup so a stale hidden flag cannot make the OneNote
+// navigator disappear permanently in an existing Android Chrome tab.
 try {
   localStorage.removeItem(NOTE_HIDDEN_KEY);
+  sessionStorage.removeItem(NOTE_HIDDEN_KEY);
 } catch {
   // Storage can be unavailable in hardened/private browsing contexts.
 }
