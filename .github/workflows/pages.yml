@@ -110,7 +110,7 @@ jobs:
               };
               const notebook = {
                 id: 'live-notebook-1',
-                title: 'Ghi chú — live',
+                title: 'Sổ 2 — Ghi chú — live',
                 pages: [notePage],
                 activePageId: notePage.id,
                 createdAt: now,
@@ -126,17 +126,19 @@ jobs:
                 workspaces: [{
                   id: 'live-workspace-1',
                   kind: 'document',
-                  name: 'live.pdf',
+                  name: 'Sổ 2 — Ghi chú — live',
                   documents: [document],
                   activeDocumentId: document.id,
                   notebooks: [notebook],
-                  activeNotebookId: notebook.id,
+                  // Reproduce the Android screenshot bug: React still renders the
+                  // first notebook, while the old sidebar context returned null.
+                  activeNotebookId: 'stale-missing-notebook-id',
                   sourcePage: 1,
                 }],
                 activeWorkspaceId: 'live-workspace-1',
                 readerShare: 50,
                 workspaceMode: 'note',
-                noteZoom: 100,
+                noteZoom: 1,
                 savedAt: now,
               }));
             });
@@ -147,6 +149,8 @@ jobs:
 
             const nav = page.locator('.mednote-page-sheet-nav');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
+            const selectedNotebook = await nav.locator('[data-notebook-select]').inputValue();
+            if (selectedNotebook !== 'live-notebook-1') throw new Error(`Wrong sidebar notebook ${selectedNotebook}`);
 
             // Exact reported failure: tapping Show briefly reveals the sidebar,
             // then another state/polling pass hides it again. Keep it visible for
