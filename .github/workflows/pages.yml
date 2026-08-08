@@ -7,21 +7,16 @@ on:
 
 permissions:
   contents: read
-  actions: read
   pages: write
   id-token: write
 
 concurrency:
   group: pages-publish
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment:
-      name: github-pages
-      url: https://madness1997-gif.github.io/mednote-reader/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,69 +28,36 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com
       - name: Stamp deployment version
         run: echo "${GITHUB_SHA}" > pages-dist/deploy-version.txt
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
         with:
-          name: github-pages
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages-${{ github.run_id }}
           path: pages-dist
-      - name: Create and wait for Pages deployment
-        id: pages
-        uses: actions/github-script@v7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
         with:
-          github-token: ${{ github.token }}
-          script: |
-            const artifactName = 'github-pages';
-            const { owner, repo } = context.repo;
-            const runId = context.runId;
+          artifact_name: github-pages-${{ github.run_id }}
+          timeout: 600000
 
-            let artifact;
-            for (let i = 0; i < 30; i++) {
-              const result = await github.rest.actions.listWorkflowRunArtifacts({
-                owner,
-                repo,
-                run_id: runId,
-                per_page: 100,
-              });
-              artifact = result.data.artifacts.find(item => item.name === artifactName);
-              if (artifact) break;
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-            if (!artifact) throw new Error(`Pages artifact ${artifactName} not found`);
-            core.info(`Artifact id: ${artifact.id}`);
-
-            const idToken = await core.getIDToken();
-            const created = await github.request('POST /repos/{owner}/{repo}/pages/deployments', {
-              owner,
-              repo,
-              artifact_id: artifact.id,
-              pages_build_version: context.sha,
-              oidc_token: idToken,
-            });
-
-            const deploymentId = created.data.id;
-            core.info(`Pages deployment id: ${deploymentId}`);
-            core.info(`Pages URL: ${created.data.page_url || ''}`);
-            core.setOutput('deployment_id', deploymentId);
-
-            for (let i = 1; i <= 240; i++) {
-              const response = await github.request('GET /repos/{owner}/{repo}/pages/deployments/{deploymentId}', {
-                owner,
-                repo,
-                deploymentId,
-              });
-              const status = response.data.status;
-              core.info(`Pages status ${i}: ${status}`);
-              if (status === 'succeed') {
-                core.info('Pages deployment succeeded');
-                return;
-              }
-              if (['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status)) {
-                throw new Error(`Pages deployment ended with ${status}`);
-              }
-              await new Promise(resolve => setTimeout(resolve, 5000));
-            }
-
-            throw new Error('Pages deployment is still processing after 20 minutes and was left active.');
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Verify live version
         run: |
           set -euo pipefail
@@ -108,63 +70,100 @@ jobs:
             fi
             sleep 5
           done
-          echo "Pages API succeeded but live version did not refresh in time"
+          echo "Live site did not refresh to ${GITHUB_SHA}"
           exit 1
       - name: Install live browser verifier
         run: |
           npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
           npx playwright install --with-deps chromium
-      - name: Verify live sidebar stays open
+      - name: Open production and verify sidebar stability
         run: |
           node - <<'NODE'
           const { chromium } = require('@playwright/test');
           (async () => {
             const browser = await chromium.launch({ headless: true });
-            const context = await browser.newContext({ viewport: { width: 980, height: 1500 }, hasTouch: true, isMobile: false });
+            const context = await browser.newContext({
+              viewport: { width: 980, height: 1500 },
+              hasTouch: true,
+              isMobile: false,
+            });
             const page = await context.newPage();
             const errors = [];
             page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
             page.on('pageerror', err => errors.push(`pageerror: ${err.message}`));
+
             await page.addInitScript(() => {
               localStorage.clear();
               sessionStorage.clear();
               const now = Date.now();
               const notePage = {
-                id: 'live-page-1', title: 'TÊN CHỦ ĐỀ', titleHtml: 'TÊN CHỦ ĐỀ',
+                id: 'live-page-1',
+                title: 'TÊN CHỦ ĐỀ',
+                titleHtml: 'TÊN CHỦ ĐỀ',
                 body: 'TỔNG QUAN YẾU TỐ NGUY CƠ CƠ CHẾ LÂM SÀNG CHẨN ĐOÁN ĐIỀU TRỊ',
                 bodyHtml: '<p>TỔNG QUAN</p><p>YẾU TỐ NGUY CƠ</p><p>CƠ CHẾ</p><p>LÂM SÀNG</p><p>CHẨN ĐOÁN</p><p>ĐIỀU TRỊ</p>',
-                citationPage: null, strokes: [], excerpts: [],
+                citationPage: null,
+                strokes: [],
+                excerpts: [],
                 paper: { size: 'a4', orientation: 'portrait', template: 'first-aid', color: 'white' },
                 text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
               };
-              const notebook = { id: 'live-notebook-1', title: 'Ghi chú — live', pages: [notePage], activePageId: notePage.id, createdAt: now };
-              const document = { id: 'live-document-1', name: 'live.pdf', size: 123456, lastModified: now, reader: { page: 1, zoom: 1, fitMode: 'page', rotation: 0, viewMode: 'single', bookmarks: [], annotations: [] } };
+              const notebook = {
+                id: 'live-notebook-1',
+                title: 'Ghi chú — live',
+                pages: [notePage],
+                activePageId: notePage.id,
+                createdAt: now,
+              };
+              const document = {
+                id: 'live-document-1',
+                name: 'live.pdf',
+                size: 123456,
+                lastModified: now,
+                reader: { page: 1, zoom: 1, fitMode: 'page', rotation: 0, viewMode: 'single', bookmarks: [], annotations: [] },
+              };
               localStorage.setItem('mednote-library-v2', JSON.stringify({
-                workspaces: [{ id: 'live-workspace-1', kind: 'document', name: 'live.pdf', documents: [document], activeDocumentId: document.id, notebooks: [notebook], activeNotebookId: notebook.id, sourcePage: 1 }],
-                activeWorkspaceId: 'live-workspace-1', readerShare: 50, workspaceMode: 'note', noteZoom: 100, savedAt: now,
+                workspaces: [{
+                  id: 'live-workspace-1',
+                  kind: 'document',
+                  name: 'live.pdf',
+                  documents: [document],
+                  activeDocumentId: document.id,
+                  notebooks: [notebook],
+                  activeNotebookId: notebook.id,
+                  sourcePage: 1,
+                }],
+                activeWorkspaceId: 'live-workspace-1',
+                readerShare: 50,
+                workspaceMode: 'note',
+                noteZoom: 100,
+                savedAt: now,
               }));
             });
 
             const url = `https://madness1997-gif.github.io/mednote-reader/?live-sidebar=${Date.now()}`;
             const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
             if (!response || response.status() !== 200) throw new Error(`Live page status ${response?.status()}`);
+
             const nav = page.locator('.mednote-page-sheet-nav');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
 
-            // Reproduce the exact symptom: hide -> show -> wait. The sidebar must
-            // not flash and disappear again after the polling/mutation routines run.
+            // Exact reported failure: tapping Show briefly reveals the sidebar,
+            // then another state/polling pass hides it again. Keep it visible for
+            // several polling cycles to prove that no re-hide occurs.
             await page.locator('[data-note-navigation-close]').click();
-            await page.locator('[data-note-navigation-restore]').waitFor({ state: 'visible', timeout: 5000 });
-            await page.locator('[data-note-navigation-restore]').click();
+            const restore = page.locator('[data-note-navigation-restore]');
+            await restore.waitFor({ state: 'visible', timeout: 5000 });
+            await restore.click();
             await page.waitForTimeout(3500);
-            if (!(await nav.isVisible())) throw new Error('Sidebar disappeared again after restore');
+            if (!(await nav.isVisible())) throw new Error('Sidebar flashed and disappeared after restore');
 
-            // Also verify entering Note mode explicitly clears a previous hide.
+            // Entering Note is also an explicit request to show the Note sidebar.
             await page.locator('[data-note-navigation-close]').click();
             const noteMode = page.locator('.workspace-mode-switcher button').filter({ hasText: /^Note$/ });
             await noteMode.click();
             await page.waitForTimeout(3500);
-            if (!(await nav.isVisible())) throw new Error('Sidebar disappeared again after clicking Note mode');
+            if (!(await nav.isVisible())) throw new Error('Sidebar flashed and disappeared after clicking Note mode');
 
             const box = await nav.boundingBox();
             if (!box || box.width < 190 || box.x < 600 || box.x + box.width > 981) {
