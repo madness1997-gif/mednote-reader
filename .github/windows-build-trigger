@@ -1,3 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-09T01:08:00+07:00
-Base app commit: 91236abed706fa2f1bae36103f9dc12d4986fa9d
+Requested: 2026-08-09T01:12:00+07:00
+Base app commit: 04dbad686e1f09b0ec312281e0b63e7286d70d01
+Reason: retry after normalizing CRLF for desktop transform plugins
