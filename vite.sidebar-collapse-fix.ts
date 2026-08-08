@@ -1,7 +1,8 @@
 import type { Plugin } from "vite";
 
 const CLOSE_GUARD = '    if (performance.now() < suppressCloseUntil) return;';
-const CLOSE_GUARD_REPLACEMENT = '    // Close must always respond to an explicit click/tap. The old 900 ms guard\n    // could swallow the user's first attempt to hide the sidebar after entering Note.';
+const CLOSE_GUARD_REPLACEMENT = `    // Close must always respond to an explicit click/tap. The old 900 ms guard
+    // could swallow the user's first attempt to hide the sidebar after entering Note.`;
 
 export function sidebarCollapseFixPlugin(): Plugin {
   return {
