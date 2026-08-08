@@ -1,4 +1,4 @@
-/* Stable mobile library drawer: keep the workspace unchanged behind it. */
+/* Keep the workspace untouched behind the library drawer. */
 .library-backdrop {
   position: fixed !important;
   inset: 0 !important;
@@ -20,7 +20,7 @@
   content: none !important;
 }
 
-/* Use the React-owned native panel. Widen it so the three library groups can sit side by side. */
+/* A compact, readable drawer: one vertical list instead of three squeezed columns. */
 .library-backdrop > .library-panel {
   position: fixed !important;
   top: 0 !important;
@@ -32,12 +32,14 @@
   visibility: visible !important;
   opacity: 1 !important;
   transform: none !important;
-  width: min(1080px, 96vw) !important;
-  max-width: 96vw !important;
+  width: clamp(340px, 34vw, 430px) !important;
+  min-width: 280px !important;
+  max-width: min(500px, 96vw) !important;
   height: 100vh !important;
   height: 100dvh !important;
   overflow-y: auto !important;
-  overflow-x: auto !important;
+  overflow-x: hidden !important;
+  resize: horizontal;
   background: #f7f9fa !important;
   border-right: 1px solid var(--line);
   box-shadow: 12px 0 30px rgba(18,35,49,.12) !important;
@@ -47,8 +49,10 @@
 
 @media (max-width: 640px) {
   .library-backdrop > .library-panel {
-    width: 96vw !important;
-    max-width: 96vw !important;
+    width: 90vw !important;
+    min-width: 0 !important;
+    max-width: 90vw !important;
+    resize: none;
   }
 }
 
