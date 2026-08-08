@@ -30,14 +30,35 @@ function injectStyle() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-.library-list.native-three-groups{display:flex!important;flex-direction:column!important;gap:6px!important;margin-top:14px!important}
-.library-list.native-three-groups > .library-row{flex:0 0 auto}
-.${HEADER_CLASS}{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;padding:7px 3px 3px;border-bottom:1px solid #dce5e7;color:#304a53}
-.${HEADER_CLASS}:first-of-type{margin-top:0}
-.${HEADER_CLASS} strong{font-size:11px;font-weight:800;letter-spacing:.01em}
-.${HEADER_CLASS} span{font-size:9px;color:#87969b;font-weight:650}
-@media(max-width:520px){
-  .${HEADER_CLASS}{padding-top:6px}
+.library-list.native-three-groups{
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  grid-auto-rows:auto!important;
+  align-items:start!important;
+  gap:7px 10px!important;
+  margin-top:14px!important;
+}
+.library-list.native-three-groups > .library-row{min-width:0!important;align-self:start!important}
+.library-list.native-three-groups .library-row{grid-template-columns:minmax(0,1fr) 30px 30px!important;gap:4px!important}
+.library-list.native-three-groups .library-item{grid-template-columns:28px minmax(0,1fr)!important;gap:7px!important;padding:8px!important}
+.library-list.native-three-groups .library-icon{width:28px!important;height:28px!important;border-radius:7px!important}
+.library-list.native-three-groups .library-item strong{font-size:11px!important}
+.library-list.native-three-groups .library-item small{display:none!important}
+.library-list.native-three-groups .library-action{width:30px!important;min-width:30px!important;border-radius:8px!important}
+.${HEADER_CLASS}{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-width:0;
+  padding:7px 4px 5px;
+  border-bottom:1px solid #dce5e7;
+  color:#304a53;
+}
+.${HEADER_CLASS} strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.01em}
+.${HEADER_CLASS} span{flex:0 0 auto;font-size:9px;color:#87969b;font-weight:650}
+@media(max-width:640px){
+  .library-list.native-three-groups{min-width:620px!important;grid-template-columns:repeat(3,minmax(190px,1fr))!important}
   .${HEADER_CLASS} strong{font-size:10px}
   .${HEADER_CLASS} span{font-size:8px}
 }
@@ -45,7 +66,9 @@ function injectStyle() {
   document.head.append(style);
 }
 
-function ensureHeader(list: HTMLElement, kind: GroupKind, label: string, order: number) {
+const columnOf: Record<GroupKind, number> = { pdf: 1, linked: 2, standalone: 3 };
+
+function ensureHeader(list: HTMLElement, kind: GroupKind, label: string) {
   let header = list.querySelector<HTMLElement>(`:scope > .${HEADER_CLASS}[data-group="${kind}"]`);
   if (!header) {
     header = document.createElement("div");
@@ -57,7 +80,8 @@ function ensureHeader(list: HTMLElement, kind: GroupKind, label: string, order: 
     header.append(strong, count);
     list.append(header);
   }
-  header.style.order = String(order);
+  header.style.gridColumn = String(columnOf[kind]);
+  header.style.gridRow = "1";
   return header;
 }
 
@@ -67,23 +91,24 @@ function organizeList(list: HTMLElement) {
 
   list.classList.add("native-three-groups");
   const counts: Record<GroupKind, number> = { pdf: 0, linked: 0, standalone: 0 };
-  const offsets: Record<GroupKind, number> = { pdf: 10, linked: 110, standalone: 210 };
 
   rows.forEach((row) => {
     const kind = classifyRow(row);
+    row.style.order = "";
     if (kind === "hidden") {
       row.style.display = "none";
       return;
     }
     row.style.display = "";
     row.dataset.libraryGroup = kind;
-    row.style.order = String(offsets[kind] + counts[kind]);
+    row.style.gridColumn = String(columnOf[kind]);
+    row.style.gridRow = String(counts[kind] + 2);
     counts[kind] += 1;
   });
 
-  const pdfHeader = ensureHeader(list, "pdf", "Tài liệu PDF / cụm PDF", 0);
-  const linkedHeader = ensureHeader(list, "linked", "Note gắn tài liệu", 100);
-  const standaloneHeader = ensureHeader(list, "standalone", "Note độc lập", 200);
+  const pdfHeader = ensureHeader(list, "pdf", "Tài liệu PDF / cụm PDF");
+  const linkedHeader = ensureHeader(list, "linked", "Note gắn tài liệu");
+  const standaloneHeader = ensureHeader(list, "standalone", "Note độc lập");
 
   const setCount = (header: HTMLElement, count: number) => {
     const node = header.querySelector<HTMLElement>("span");
