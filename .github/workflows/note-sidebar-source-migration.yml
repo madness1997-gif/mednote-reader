@@ -47,4 +47,4 @@ jobs:
           git commit -m "Replace note thumbnails with OneNote sidebar source"
           git push origin HEAD:main
 
-# migration revision: suspension host updated
+# migration revision: compact host boundary fixed
