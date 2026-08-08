@@ -1,5 +1,6 @@
 import "./independent-library-repair";
 import "./native-library-three-groups";
+import "./page-sheet-active-context-repair";
 
 // Keep the original relation-library synchronizer alive because note/library
 // relations still depend on its bootstrap/timing side effects. The visible
