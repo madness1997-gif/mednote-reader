@@ -1,19 +1,8 @@
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
-import { Trash2 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 const DEFAULT_PDF_ITEM_SIZE = 142;
-const DEFAULT_NOTE_ITEM_SIZE = 150;
 const OVERSCAN_ITEMS = 5;
-
-const NOTE_PAPER_SWATCH: Record<string, string> = {
-  white: "#ffffff",
-  ivory: "#fffaf0",
-  yellow: "#fff8cf",
-  mint: "#eefaf3",
-  blue: "#eef7fc",
-  dark: "#263139",
-};
 
 type VirtualRange = { start: number; end: number };
 
@@ -147,8 +136,6 @@ function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocume
     return () => {
       disposed = true;
       task?.cancel();
-      // Zeroing the backing store releases the bitmap immediately instead of
-      // waiting for Chromium's canvas GC after a virtualized row is unmounted.
       canvas.width = 0;
       canvas.height = 0;
     };
@@ -207,57 +194,6 @@ export function VirtualPdfThumbnailList({
           )}
         </div>
       ))}
-      {virtual.bottomSpacer > 0 && <div aria-hidden="true" style={{ height: virtual.bottomSpacer }} />}
-    </div>
-  );
-}
-
-type NoteThumbPage = {
-  id: string;
-  title: string;
-  paper: { template: string; color: string };
-};
-
-export function VirtualNoteThumbnailList({
-  pages,
-  activePageId,
-  onSelect,
-  onDeleteActive,
-}: {
-  pages: NoteThumbPage[];
-  activePageId: string;
-  onSelect: (pageId: string) => void;
-  onDeleteActive: () => void;
-}) {
-  const activeIndex = pages.findIndex((page) => page.id === activePageId);
-  const virtual = useVirtualWindow(pages.length, activeIndex, DEFAULT_NOTE_ITEM_SIZE);
-  const visiblePages = pages.slice(virtual.range.start, virtual.range.end);
-
-  return (
-    <div
-      ref={virtual.listRef}
-      className="virtual-note-thumb-list"
-      data-virtual-total={pages.length}
-      data-virtual-start={virtual.range.start}
-      data-virtual-end={virtual.range.end}
-      style={{ display: "flex", flexDirection: "column" }}
-    >
-      {virtual.topSpacer > 0 && <div aria-hidden="true" style={{ height: virtual.topSpacer }} />}
-      {visiblePages.map((page, offset) => {
-        const index = virtual.range.start + offset;
-        const active = page.id === activePageId;
-        return (
-          <div className="note-thumb-wrap" data-virtual-item key={page.id} style={{ paddingBottom: 10 }}>
-            <button className={`note-thumb ${active ? "active" : ""}`} style={{ marginBottom: 0 }} onClick={() => onSelect(page.id)}>
-              <span className={`mini-note template-${page.paper.template}`} style={{ backgroundColor: NOTE_PAPER_SWATCH[page.paper.color] ?? NOTE_PAPER_SWATCH.white }}>
-                <strong>{page.title.slice(0, 15)}</strong><i /><i /><i />
-              </span>
-              <b>{index + 1}</b>
-            </button>
-            {active && <button className="note-thumb-delete" aria-label={`Xóa trang ${index + 1}`} title="Xóa trang note" onClick={onDeleteActive}><Trash2 size={13} /></button>}
-          </div>
-        );
-      })}
       {virtual.bottomSpacer > 0 && <div aria-hidden="true" style={{ height: virtual.bottomSpacer }} />}
     </div>
   );
