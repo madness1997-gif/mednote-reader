@@ -110,12 +110,10 @@ test('all note sidebar topbar controls are live in desktop-site mode', async ({ 
   await expect(notebookSelect).toHaveAttribute('data-e2e-picker-opened', '1');
   await expect(notebookSelect).toBeFocused();
 
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('prompt');
-    expect(dialog.message()).toContain('Notebook');
-    await dialog.dismiss();
-  });
   await addNotebook.click();
+  await expect(page.locator('.mednote-native-dialog')).toBeVisible();
+  await page.locator('.mednote-native-dialog [data-cancel]').click();
+  await expect(page.locator('.mednote-native-dialog')).toBeHidden();
 
   await search.click();
   await expect(nav).toHaveAttribute('data-sidebar-mode', 'search');
@@ -135,12 +133,10 @@ test('all note sidebar topbar controls are live in desktop-site mode', async ({ 
   await expect(menu.locator('[data-page-sheet-notebook-rename]')).toBeVisible();
   await expect(menu.locator('[data-page-sheet-notebook-delete]')).toBeVisible();
 
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('prompt');
-    expect(dialog.message()).toContain('Notebook');
-    await dialog.dismiss();
-  });
   await menu.locator('[data-page-sheet-notebook-rename]').click();
+  await expect(page.locator('.mednote-native-dialog')).toBeVisible();
+  await page.locator('.mednote-native-dialog [data-cancel]').click();
+  await expect(page.locator('.mednote-native-dialog')).toBeHidden();
 
   await close.click();
   await expect(page.locator('.workspace')).toHaveClass(/onenote-note-navigation-hidden/);

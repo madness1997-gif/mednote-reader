@@ -65,7 +65,7 @@ export function createSection(notebookId: string, title: string) {
   record.activeSectionId = section.id;
   record.updatedAt = now();
   writeStateAndLibrary(synced.state, synced.library, true);
-  return true;
+  return section.id;
 }
 
 export function renameSection(notebookId: string, sectionId: string, title: string) {

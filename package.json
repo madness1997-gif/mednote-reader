@@ -1,6 +1,6 @@
 {
   "name": "mednote-reader",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -20,6 +20,7 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "22.15.3",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

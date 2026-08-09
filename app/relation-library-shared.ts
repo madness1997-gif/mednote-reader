@@ -141,6 +141,10 @@ export function readJson<T>(key: string, fallback: T): T {
 }
 
 export function readAppState(): AppState | null {
+  if (typeof window !== "undefined") {
+    const live = (window as Window & { __MEDNOTE_LIVE_STATE__?: AppState }).__MEDNOTE_LIVE_STATE__;
+    if (live && Array.isArray(live.workspaces)) return clone(live);
+  }
   const value = readJson<AppState | null>(APP_KEY, null);
   return value && Array.isArray(value.workspaces) ? value : null;
 }

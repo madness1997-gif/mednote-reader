@@ -7,6 +7,27 @@ const RESTORE_REPLACEMENT = `    const restore = async () => {\n      try {\n   
 const OLD_SAVE_EFFECT = `  useEffect(() => {\n    if (!ready) return;\n    try {\n      const savedAt = Date.now();\n      localSavedAtRef.current = savedAt;\n      localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt } satisfies PersistedLibrary));\n    } catch { /* storage may be unavailable in private browsing */ }\n  }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);`;
 const NEW_SAVE_EFFECT = `  useEffect(() => {\n    if (!ready) return;\n    const savedAt = Date.now();\n    localSavedAtRef.current = savedAt;\n    const savedWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary");\n    const persistedActiveWorkspaceId = savedWorkspaces.some((workspace) => workspace.id === activeWorkspaceId)\n      ? activeWorkspaceId\n      : savedWorkspaces[0]?.id || activeWorkspaceId;\n    const snapshot = { workspaces: savedWorkspaces, activeWorkspaceId: persistedActiveWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt } satisfies PersistedLibrary;\n\n    // IndexedDB v4 keeps lightweight page summaries in notebook records and\n    // leaves full note bodies/strokes/excerpts in per-page records. Publish the\n    // React-owned state so the OneNote/sidebar runtimes operate on the same\n    // workspace without forcing every page to hydrate into memory.\n    (window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = snapshot;\n    window.dispatchEvent(new CustomEvent("mednote-live-state-changed"));\n\n    const timer = window.setTimeout(() => {\n      void saveIncrementalLibrary(snapshot as any).then(() => {\n        try {\n          localStorage.setItem(STORAGE_KEY, JSON.stringify({ storage: "indexeddb-v4", savedAt }));\n        } catch { /* the IndexedDB save already succeeded */ }\n      }).catch(() => {\n        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)); } catch { /* no local persistence available */ }\n      });\n    }, 260);\n    return () => window.clearTimeout(timer);\n  }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);`;
 
+const SYNCHRONIZED_SAVE_EFFECT = NEW_SAVE_EFFECT
+  .replace(
+    '    const savedWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary");\n    const persistedActiveWorkspaceId',
+    '    const savedWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID);\n    const activeTemporary = workspaces.find((workspace) => workspace.id === activeWorkspaceId && workspace.kind === "temporary");\n    const mirroredNotebookId = activeTemporary?.notebooks.find((notebook) => !isReaderPlaceholder(notebook))?.id;\n    const persistedActiveWorkspaceId',
+  )
+  .replace(
+    '      : savedWorkspaces[0]?.id || activeWorkspaceId;',
+    '      : savedWorkspaces.find((workspace) => mirroredNotebookId && workspace.notebooks.some((notebook) => notebook.id === mirroredNotebookId))?.id\n        || savedWorkspaces[0]?.id\n        || "";',
+  )
+  .replace(
+    '(window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = snapshot;\n    window.dispatchEvent(new CustomEvent("mednote-live-state-changed"));',
+    '(window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = JSON.parse(JSON.stringify(snapshot)) as PersistedLibrary;\n    window.dispatchEvent(new CustomEvent("mednote-live-state-changed", { detail: { origin: "react" } }));',
+  )
+  .replace(
+    '    const snapshot = { workspaces: savedWorkspaces, activeWorkspaceId: persistedActiveWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt } satisfies PersistedLibrary;',
+    '    const persistentWorkspaceMode: WorkspaceMode = activeTemporary && mirroredNotebookId ? "note" : workspaceMode;\n    const snapshot = { workspaces: savedWorkspaces, activeWorkspaceId: persistedActiveWorkspaceId, readerShare, workspaceMode: persistentWorkspaceMode, noteZoom, savedAt } satisfies PersistedLibrary;',
+  );
+
+const SAVE_EFFECT_START = "  // MEDNOTE_AUTOSAVE_EFFECT_START\n";
+const SAVE_EFFECT_END = "  // MEDNOTE_AUTOSAVE_EFFECT_END";
+
 const RELATION_READ_ANCHOR = `export function readAppState(): AppState | null {\n  const value = readJson<AppState | null>(APP_KEY, null);\n  return value && Array.isArray(value.workspaces) ? value : null;\n}`;
 const RELATION_READ_REPLACEMENT = `export function readAppState(): AppState | null {\n  // The app's source of truth is IndexedDB. Prefer the currently hydrated React\n  // snapshot so relation/sidebar runtimes can navigate lazy page shells without\n  // forcing the full note library back into localStorage.\n  try {\n    if (typeof window !== "undefined") {\n      const live = (window as Window & { __MEDNOTE_LIVE_STATE__?: AppState }).__MEDNOTE_LIVE_STATE__;\n      if (live && Array.isArray(live.workspaces)) return JSON.parse(JSON.stringify(live)) as AppState;\n    }\n  } catch { /* fall through to legacy persistence */ }\n  const value = readJson<AppState | null>(APP_KEY, null);\n  return value && Array.isArray(value.workspaces) ? value : null;\n}`;
 const RELATION_UNTOUCHED_ANCHOR = `export function defaultTemplateIsUntouched(page: AnyObject | undefined) {\n  if (!page || page.strokes?.length || page.excerpts?.length) return false;`;
@@ -52,6 +73,13 @@ function replaceRequired(code: string, anchor: string, replacement: string, labe
   return code.replace(anchor, replacement);
 }
 
+function replaceMarkedBlock(code: string, startMarker: string, endMarker: string, replacement: string, label: string) {
+  const start = code.indexOf(startMarker);
+  const end = start < 0 ? -1 : code.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) throw new Error(`Không tìm thấy ${label} để bật lazy note hydration.`);
+  return `${code.slice(0, start + startMarker.length)}${replacement}\n${code.slice(end)}`;
+}
+
 export function incrementalLibraryPersistencePlugin(): Plugin {
   return {
     name: "mednote-incremental-library-persistence",
@@ -61,7 +89,7 @@ export function incrementalLibraryPersistencePlugin(): Plugin {
 
       if (normalizedId.endsWith("/app/relation-library-shared.ts")) {
         let next = code;
-        next = replaceRequired(next, RELATION_READ_ANCHOR, RELATION_READ_REPLACEMENT, "readAppState của relation runtime");
+        if (!next.includes("__MEDNOTE_LIVE_STATE__")) next = replaceRequired(next, RELATION_READ_ANCHOR, RELATION_READ_REPLACEMENT, "readAppState của relation runtime");
         next = replaceRequired(next, RELATION_UNTOUCHED_ANCHOR, RELATION_UNTOUCHED_REPLACEMENT, "kiểm tra note mặc định của relation runtime");
         return { code: next, map: null };
       }
@@ -76,7 +104,9 @@ export function incrementalLibraryPersistencePlugin(): Plugin {
       next = replaceRequired(next, HYDRATION_EFFECT_ANCHOR, HYDRATION_EFFECT_REPLACEMENT, "effect hydrate trang note");
       next = replaceRequired(next, RESTORE_ANCHOR, RESTORE_REPLACEMENT, "luồng restore localStorage");
       next = next.replace("localSavedAt > indexedSavedAt", "localSavedAt >= indexedSavedAt");
-      next = replaceRequired(next, OLD_SAVE_EFFECT, NEW_SAVE_EFFECT, "autosave localStorage cũ");
+      next = next.includes(SAVE_EFFECT_START)
+        ? replaceMarkedBlock(next, SAVE_EFFECT_START, SAVE_EFFECT_END, SYNCHRONIZED_SAVE_EFFECT, "autosave đồng bộ")
+        : replaceRequired(next, OLD_SAVE_EFFECT, SYNCHRONIZED_SAVE_EFFECT, "autosave localStorage cũ");
       next = replaceRequired(next, UPDATE_ACTIVE_NOTE_ANCHOR, UPDATE_ACTIVE_NOTE_REPLACEMENT, "updateActiveNote");
       next = replaceRequired(next, MEANINGFUL_DATA_ANCHOR, MEANINGFUL_DATA_REPLACEMENT, "kiểm tra dữ liệu cục bộ");
       next = replaceRequired(next, SYNC_START_ANCHOR, SYNC_START_REPLACEMENT, "đầu luồng Drive sync");

@@ -4,7 +4,7 @@ import {
 import { buildPanel, closeLibrary, decodeSource, injectStyle, openAndReload, promptName, reload } from "./relation-library-ui-base";
 import { showAttachSourceDialog, showMovePageDialog, showRelationDialog } from "./relation-library-ui-dialogs";
 
-function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
+async function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   const target = (event.target as HTMLElement).closest<HTMLElement>("[data-close],[data-import],[data-new-notebook],[data-open-source],[data-open-target],[data-relate-source],[data-relate-target],[data-rename-document],[data-delete-document],[data-rename-group],[data-delete-group],[data-add-section],[data-rename-section],[data-delete-section],[data-add-page],[data-move-page],[data-rename-notebook],[data-delete-notebook]");
   if (!target) return;
   const view = getLibraryView();
@@ -16,7 +16,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
     return;
   }
   if (target.dataset.newNotebook !== undefined) {
-    const name = promptName("Tên notebook", "Notebook mới");
+    const name = await promptName("Tên Notebook", "Notebook mới");
     if (name) openAndReload(() => createNotebook(name));
     return;
   }
@@ -32,20 +32,20 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.renameDocument) {
     const record = view.documents.find((item) => item.id === target.dataset.renameDocument);
-    const name = promptName("Đổi tên PDF", record ? titleOf(record.name) : "");
+    const name = await promptName("Đổi tên PDF", record ? titleOf(record.name) : "");
     if (name) openAndReload(() => renameDocument(target.dataset.renameDocument!, name));
     return;
   }
   if (target.dataset.deleteDocument) {
     const record = view.documents.find((item) => item.id === target.dataset.deleteDocument);
     if (window.confirm(`Xóa PDF “${record?.name || ""}” khỏi thư viện? Notebook, section và trang ghi chú vẫn được giữ độc lập; liên kết về PDF này sẽ được gỡ.`)) {
-      void deleteDocument(target.dataset.deleteDocument!).then((ok) => { if (ok) reload(); });
+      void deleteDocument(target.dataset.deleteDocument!).then((ok) => { if (ok) closeLibrary(backdrop); });
     }
     return;
   }
   if (target.dataset.renameGroup) {
     const group = view.groups.find((item) => item.id === target.dataset.renameGroup);
-    const name = promptName("Đổi tên bộ PDF", group?.name || "");
+    const name = await promptName("Đổi tên bộ PDF", group?.name || "");
     if (name) openAndReload(() => renameGroup(target.dataset.renameGroup!, name));
     return;
   }
@@ -55,14 +55,14 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
     return;
   }
   if (target.dataset.addSection) {
-    const name = promptName("Tên section", "Section mới");
+    const name = await promptName("Tên Section", "Section mới");
     if (name) openAndReload(() => createSection(target.dataset.addSection!, name));
     return;
   }
   if (target.dataset.renameSection) {
     const [notebookId, sectionId] = target.dataset.renameSection.split("|");
     const section = view.notebooks.find((item) => item.id === notebookId)?.sections.find((item) => item.id === sectionId);
-    const name = promptName("Đổi tên section", section?.title || "");
+    const name = await promptName("Đổi tên Section", section?.title || "");
     if (name) openAndReload(() => renameSection(notebookId, sectionId, name));
     return;
   }
@@ -75,7 +75,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.addPage) {
     const [notebookId, sectionId] = target.dataset.addPage.split("|");
-    const name = promptName("Tên trang", "Trang mới");
+    const name = await promptName("Tên Page", "Page mới");
     if (name) openAndReload(() => createPage(notebookId, sectionId, name));
     return;
   }
@@ -85,7 +85,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.renameNotebook) {
     const notebook = view.notebooks.find((item) => item.id === target.dataset.renameNotebook);
-    const name = promptName("Đổi tên notebook", notebook?.title || "");
+    const name = await promptName("Đổi tên Notebook", notebook?.title || "");
     if (name) openAndReload(() => renameNotebook(target.dataset.renameNotebook!, name));
     return;
   }
@@ -116,7 +116,7 @@ function mount() {
     nativePanel.style.display = "none";
     const panel = buildPanel(backdrop);
     if (panel) {
-      panel.addEventListener("click", (event) => handleClick(event, panel, backdrop));
+      panel.addEventListener("click", (event) => { void handleClick(event, panel, backdrop); });
       backdrop.append(panel);
     }
   }

@@ -1,6 +1,7 @@
 import { deleteNotebook, renameNotebook } from "./independent-library-core";
 import { addSheet } from "./page-sheet-actions";
 import { currentContext, pageGroups, sheetLogicalId } from "./page-sheet-state";
+import { requestText } from "./mednote-dialog";
 
 const STYLE_ID = "mednote-sidebar-notebook-actions-style";
 const ADD_SHEET_ATTR = "pageSheetAddSheet";
@@ -170,8 +171,8 @@ function openNotebookPicker(source: HTMLElement) {
 function renameActiveNotebook() {
   const context = currentContext();
   if (!context) return;
-  const title = window.prompt("Đổi tên Notebook", context.record.title)?.trim();
-  if (title && renameNotebook(context.record.id, title)) window.location.reload();
+  void requestText({ title: "Đổi tên Notebook", label: "Tên Notebook", value: context.record.title })
+    .then((title) => { if (title) renameNotebook(context.record.id, title); });
 }
 
 function deleteActiveNotebook() {

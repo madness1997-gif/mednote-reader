@@ -91,6 +91,8 @@ export async function deleteDocument(documentId: string) {
   // A removed PDF leaves every note usable on its own, without a stale source link.
   synced.library.relations = synced.library.relations.filter((relation) => !(relation.source.type === "document" && relation.source.id === documentId));
   ensureVisibleWorkspace(synced.state);
+  const activeWorkspace = synced.state.workspaces.find((workspace) => String(workspace.id) === String(synced.state.activeWorkspaceId));
+  if (activeWorkspace && !(activeWorkspace.documents || []).length) synced.state.workspaceMode = "note";
   writeStateAndLibrary(synced.state, synced.library, true);
   await deletePdfBlob(documentId);
   return true;

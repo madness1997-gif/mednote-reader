@@ -4,13 +4,21 @@ test.use({ viewport: { width: 1280, height: 900 } });
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
-async function promptAndReload(page, locator, answer) {
-  page.once('dialog', (dialog) => dialog.accept(answer));
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-    locator.click(),
-  ]);
+async function submitName(page, locator, answer) {
+  await locator.click();
+  const dialog = page.locator('.mednote-native-dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('input[type="text"]').fill(answer);
+  await dialog.locator('button[type="submit"]').click();
+  await expect(dialog).toBeHidden();
   await expect(page.locator('.mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
+}
+
+async function reloadAndFindNavigator(page) {
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const nav = page.locator('.mednote-page-sheet-nav');
+  await expect(nav).toBeVisible({ timeout: 10_000 });
+  return nav;
 }
 
 test('add and rename Notebook, Section, Page, and add Sheet survive every reload', async ({ page }) => {
@@ -62,30 +70,39 @@ test('add and rename Notebook, Section, Page, and add Sheet survive every reload
   await expect(nav).toBeVisible({ timeout: 10_000 });
   await expect(nav.locator('.mps-section strong', { hasText: 'Phần 1' })).toBeVisible();
 
-  await promptAndReload(page, nav.locator('[data-add-section]').first(), 'Nội tiết');
-  nav = page.locator('.mednote-page-sheet-nav');
+  await submitName(page, nav.locator('[data-new-notebook]'), 'Sổ Nội tiết');
+  await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Sổ Nội tiết');
+  nav = await reloadAndFindNavigator(page);
+  await expect(nav.locator('[data-notebook-select] option:checked')).toHaveText('Sổ Nội tiết');
+
+  await submitName(page, nav.locator('[data-add-section]').first(), 'Nội tiết');
+  await expect(page.locator('.mednote-page-sheet-nav .mps-section strong', { hasText: 'Nội tiết' })).toBeVisible();
+  nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.mps-section strong', { hasText: 'Nội tiết' })).toBeVisible();
 
-  await promptAndReload(page, nav.locator('[data-add-page]').first(), 'Đái tháo đường');
-  nav = page.locator('.mednote-page-sheet-nav');
+  await submitName(page, nav.locator('[data-add-page]').first(), 'Đái tháo đường');
+  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'Đái tháo đường' })).toBeVisible();
+  nav = await reloadAndFindNavigator(page);
   const pageCard = nav.locator('.mps-page-card', { hasText: 'Đái tháo đường' });
   await expect(pageCard).toBeVisible();
 
   await pageCard.locator(':scope > .mps-page-head > .mps-sidebar-more').click();
-  await promptAndReload(page, pageCard.locator('[data-rename-page]'), 'ĐTĐ type 2');
-  nav = page.locator('.mednote-page-sheet-nav');
+  await submitName(page, pageCard.locator('[data-rename-page]'), 'ĐTĐ type 2');
+  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'ĐTĐ type 2' })).toBeVisible();
+  nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.mps-page-card', { hasText: 'ĐTĐ type 2' })).toBeVisible();
 
   const sectionRow = nav.locator('.mps-section', { hasText: 'Nội tiết' });
   await sectionRow.locator(':scope > .mps-sidebar-more').click();
-  await promptAndReload(page, sectionRow.locator('[data-rename-section]'), 'Chuyển hóa');
-  nav = page.locator('.mednote-page-sheet-nav');
+  await submitName(page, sectionRow.locator('[data-rename-section]'), 'Chuyển hóa');
+  await expect(page.locator('.mednote-page-sheet-nav .mps-section strong', { hasText: 'Chuyển hóa' })).toBeVisible();
+  nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.mps-section strong', { hasText: 'Chuyển hóa' })).toBeVisible();
 
   await nav.locator('[data-page-sheet-notebook-more]').click();
-  await promptAndReload(page, nav.locator('[data-page-sheet-notebook-rename]'), 'Nội tiết học');
-  nav = page.locator('.mednote-page-sheet-nav');
-  await expect(nav.locator('[data-notebook-select]')).toHaveValue('hierarchy-notebook-1');
+  await submitName(page, nav.locator('[data-page-sheet-notebook-rename]'), 'Nội tiết học');
+  await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Nội tiết học');
+  nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('[data-notebook-select] option:checked')).toHaveText('Nội tiết học');
 
   await page.locator('[data-page-sheet-add-sheet]').click();

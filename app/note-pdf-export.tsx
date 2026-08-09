@@ -1,5 +1,5 @@
 import { ChevronDown, FileDown } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { currentContext, pageGroups, type SheetPage } from "./page-sheet-state";
 import { appendPaperToPdf, createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
@@ -194,6 +194,7 @@ function makePdfUrl(bytes: Uint8Array) {
 
 export default function NotePdfExporter() {
   const [target, setTarget] = useState<HTMLElement | null>(null);
+  const [plans, setPlans] = useState<ExportPlan[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [ready, setReady] = useState<ReadyPdf | null>(null);
@@ -201,18 +202,40 @@ export default function NotePdfExporter() {
   const readyUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const findTarget = () => setTarget(document.querySelector<HTMLElement>(".note-file-actions"));
+    const findTarget = () => {
+      const next = document.querySelector<HTMLElement>(".note-file-actions");
+      setTarget((current) => current === next ? current : next);
+    };
     findTarget();
     const observer = new MutationObserver(findTarget);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    let frame = 0;
+    const refreshPlans = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const next = buildExportPlans();
+        setPlans((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+      });
+    };
+    refreshPlans();
+    window.addEventListener("mednote-live-state-changed", refreshPlans);
+    window.addEventListener("mednote-note-context-changed", refreshPlans);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("mednote-live-state-changed", refreshPlans);
+      window.removeEventListener("mednote-note-context-changed", refreshPlans);
+    };
+  }, [target]);
+
   useEffect(() => () => {
     if (readyUrlRef.current) URL.revokeObjectURL(readyUrlRef.current);
   }, []);
 
-  const plans = useMemo(() => buildExportPlans(), [target, menuOpen, progress, ready, error]);
   if (!target) return null;
   const exporting = progress !== null;
 

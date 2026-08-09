@@ -2,6 +2,7 @@ import {
   getLibraryView, relationTargetLabel, targetKey, titleOf,
   type LibraryView, type Relation, type RelationSource, type RelationTarget,
 } from "./independent-library-core";
+import { requestText } from "./mednote-dialog";
 
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -113,12 +114,12 @@ export function closeLibrary(backdrop: HTMLElement) {
   backdrop.querySelector<HTMLButtonElement>('.library-panel button[aria-label="Đóng"]')?.click();
 }
 
-export function openAndReload(action: () => boolean) {
+export function openAndReload(action: () => unknown) {
   if (action()) reload();
 }
 
 export function promptName(message: string, current = "") {
-  return window.prompt(message, current)?.trim() || "";
+  return requestText({ title: message, label: "Tên", value: current });
 }
 
 export function fullTargetLabel(view: LibraryView, target: RelationTarget) {

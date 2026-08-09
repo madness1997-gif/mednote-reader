@@ -1,6 +1,7 @@
 import { getLibraryView, readAppState, type AnyObject } from "./independent-library-core";
 import { addSheet, createLogicalPage, targetForGroup, targetForSheet } from "./page-sheet-actions";
 import { escapeHtml, pageGroups } from "./page-sheet-state";
+import { requestText } from "./mednote-dialog";
 
 export function regroupLibraryTree() {
   const panel = document.querySelector<HTMLElement>(".relation-library");
@@ -43,8 +44,8 @@ export function handleLibraryCustomActions(event: Event) {
   event.stopImmediatePropagation();
   if (element.dataset.libraryAddPage) {
     const [notebookId, sectionId] = element.dataset.libraryAddPage.split("|");
-    const title = window.prompt("Tên Page", "Page mới")?.trim();
-    if (title && createLogicalPage(notebookId, sectionId, title)) window.location.reload();
+    void requestText({ title: "Thêm Page", label: "Tên Page", value: "Page mới", confirmLabel: "Thêm" })
+      .then((title) => { if (title) createLogicalPage(notebookId, sectionId, title); });
     return;
   }
   if (element.dataset.libraryAddSheet) {

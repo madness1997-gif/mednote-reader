@@ -29,7 +29,7 @@ export function createLogicalPage(notebookId: string, sectionId: string, title: 
   sheet.logicalPageTitle = title;
   sheet.sheetTitle = "Tờ 1";
   sheet.sheetOrder = 0;
-  return updateNotebook(notebookId, (notebook, record) => {
+  const created = updateNotebook(notebookId, (notebook, record) => {
     const section = record.sections.find((item: NoteSection) => item.id === sectionId);
     if (!section) return;
     notebook.pages = [...(notebook.pages || []), sheet];
@@ -38,6 +38,7 @@ export function createLogicalPage(notebookId: string, sectionId: string, title: 
     section.updatedAt = now();
     record.activeSectionId = section.id;
   });
+  return created ? logicalId : false;
 }
 
 export function addSheet(notebookId: string, sectionId: string, logicalPageId: string) {

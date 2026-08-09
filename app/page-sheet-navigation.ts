@@ -4,6 +4,7 @@ import {
 } from "./independent-library-core";
 import { addSheet, createLogicalPage, deleteSheets, moveLogicalPage, openLogicalPage, openSheet, renameLogicalPage, reorderSheet, targetForGroup, targetForSheet, targetMatches } from "./page-sheet-actions";
 import { showLinkDialog } from "./page-sheet-link-ui";
+import { requestSelect, requestText } from "./mednote-dialog";
 import { ACTIVE_SECTION_KEY, EXPANDED_PAGE_KEY, NAV_CLASS, STYLE_ID, currentContext, escapeHtml, normalizePageSheetModel, pageGroups, sheetLogicalId, sheetTitle, type PageGroup, type ScopedTarget, type SheetPage } from "./page-sheet-state";
 
 const NOTE_HIDDEN_KEY = "mednote-note-navigation-hidden";
@@ -168,12 +169,16 @@ export function renderNavigator(context: NonNullable<ReturnType<typeof currentCo
   nav.className = NAV_CLASS;
   nav.dataset.signature = JSON.stringify({
     notebookId: record.id,
+    notebookTitle: record.title,
+    notebooks: view.notebooks.filter((item) => item.available).map((item) => [item.id, item.title]),
     activeSectionId: activeSection.id,
     activeSheetId: String(activeSheet?.id || ""),
     expandedId,
     sections: record.sections.map((section) => [section.id, section.title, section.pageIds]),
     pages: (notebook.pages || []).map((page: SheetPage) => [page.id, page.logicalPageId, page.logicalPageTitle, page.sheetOrder]),
-    relationStamp: view.updatedAt,
+    relations: view.relations
+      .filter((relation) => relation.target.notebookId === record.id)
+      .map((relation) => [relation.id, relation.kind, relation.target.type, relation.target.id]),
   });
   const notebookOptions = view.notebooks.filter((item) => item.available).map((item) => `<option value="${escapeHtml(item.id)}"${item.id === record.id ? " selected" : ""}>${escapeHtml(item.title)}</option>`).join("");
   const sectionRows = record.sections.map((section) => `<div class="mps-section${section.id === activeSection.id ? " active" : ""}" data-open-section="${escapeHtml(section.id)}" style="--section-color:${sectionColor(section.id)}"><span class="mps-section-copy"><strong>${escapeHtml(section.title)}</strong><small>${pageGroups(notebook, section).length} Page</small></span><span class="mps-section-actions"><button class="mps-mini" title="Đổi tên Section" data-rename-section="${escapeHtml(section.id)}">✎</button><button class="mps-mini" title="Xóa Section" data-delete-section="${escapeHtml(section.id)}">⌫</button></span></div>`).join("");
@@ -251,8 +256,8 @@ export function handleNavigatorClick(event: Event) {
 
   if (element.dataset.pageSheetNotebookRename !== undefined) {
     closeNativeNotebookMenu(nav);
-    const title = window.prompt("Đổi tên Notebook", record.title)?.trim();
-    if (title && renameNotebook(record.id, title)) window.location.reload();
+    void requestText({ title: "Đổi tên Notebook", label: "Tên Notebook", value: record.title })
+      .then((title) => { if (title) renameNotebook(record.id, title); });
     return;
   }
   if (element.dataset.pageSheetNotebookDelete !== undefined) {
@@ -261,13 +266,13 @@ export function handleNavigatorClick(event: Event) {
     return;
   }
   if (element.dataset.newNotebook !== undefined) {
-    const title = window.prompt("Tên Notebook", "Notebook mới")?.trim();
-    if (title && createNotebook(title)) window.location.reload();
+    void requestText({ title: "Tạo Notebook", label: "Tên Notebook", value: "Notebook mới", confirmLabel: "Tạo" })
+      .then((title) => { if (title) createNotebook(title); });
     return;
   }
   if (element.dataset.addSection !== undefined) {
-    const title = window.prompt("Tên Section", "Section mới")?.trim();
-    if (title && createSection(record.id, title)) window.location.reload();
+    void requestText({ title: "Thêm Section", label: "Tên Section", value: "Section mới", confirmLabel: "Thêm" })
+      .then((title) => { if (title) createSection(record.id, title); });
     return;
   }
   if (element.dataset.openSection) {
@@ -280,8 +285,9 @@ export function handleNavigatorClick(event: Event) {
   }
   if (element.dataset.renameSection) {
     const section = record.sections.find((item) => item.id === element.dataset.renameSection);
-    const title = window.prompt("Đổi tên Section", section?.title || "")?.trim();
-    if (title && renameSection(record.id, element.dataset.renameSection, title)) window.location.reload();
+    const sectionId = element.dataset.renameSection;
+    void requestText({ title: "Đổi tên Section", label: "Tên Section", value: section?.title || "" })
+      .then((title) => { if (title) renameSection(record.id, sectionId, title); });
     return;
   }
   if (element.dataset.deleteSection) {
@@ -292,8 +298,8 @@ export function handleNavigatorClick(event: Event) {
     return;
   }
   if (element.dataset.addPage !== undefined) {
-    const title = window.prompt("Tên Page", "Page mới")?.trim();
-    if (title && createLogicalPage(record.id, activeSection.id, title)) window.location.reload();
+    void requestText({ title: "Thêm Page", label: "Tên Page", value: "Page mới", confirmLabel: "Thêm" })
+      .then((title) => { if (title) createLogicalPage(record.id, activeSection.id, title); });
     return;
   }
   if (element.dataset.openPage) {
@@ -324,8 +330,9 @@ export function handleNavigatorClick(event: Event) {
   }
   if (element.dataset.renamePage) {
     const group = groups.find((item) => item.id === element.dataset.renamePage);
-    const title = window.prompt("Đổi tên Page", group?.title || "")?.trim();
-    if (group && title && renameLogicalPage(record.id, group.id, title)) window.location.reload();
+    if (!group) return;
+    void requestText({ title: "Đổi tên Page", label: "Tên Page", value: group.title })
+      .then((title) => { if (title) renameLogicalPage(record.id, group.id, title); });
     return;
   }
   if (element.dataset.deletePage) {
@@ -358,9 +365,13 @@ export function handleNavigatorClick(event: Event) {
     const logicalId = element.dataset.movePage;
     const options = record.sections.filter((section) => section.id !== activeSection.id);
     if (!options.length) return void window.alert("Notebook chưa có Section khác.");
-    const answer = window.prompt(`Chuyển Page sang Section nào?\n${options.map((section, index) => `${index + 1}. ${section.title}`).join("\n")}`, "1")?.trim();
-    const selected = options[Number(answer) - 1];
-    if (selected && moveLogicalPage(record.id, logicalId, selected.id)) window.location.reload();
+    void requestSelect({
+      title: "Chuyển Page",
+      label: "Section đích",
+      value: options[0].id,
+      options: options.map((section) => ({ value: section.id, label: section.title })),
+      confirmLabel: "Chuyển",
+    }).then((sectionId) => { if (sectionId) moveLogicalPage(record.id, logicalId, sectionId); });
   }
 }
 

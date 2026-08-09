@@ -156,7 +156,13 @@ export function syncFromApp() {
   const currentLibrary = libraryFromState(state);
   const result = reconcile(state, currentLibrary);
   const embedded = state.workspaces.find((workspace) => workspace.id === META_WORKSPACE_ID)?.relationLibrary as RelationLibrary | undefined;
-  const needsStateWrite = result.changed || !embedded || stableLibrary(embedded) !== stableLibrary(result.library);
+  // React deliberately publishes only user-visible workspaces in its live
+  // snapshot. Treating the absent hidden metadata workspace as a mutation made
+  // every read write it back, after which React removed it again. That feedback
+  // loop continuously re-rendered Home and could race workspace-mode changes.
+  // The dedicated relation key remains authoritative; only write app state when
+  // reconciliation actually changed data or an existing embedded copy is stale.
+  const needsStateWrite = result.changed || Boolean(embedded && stableLibrary(embedded) !== stableLibrary(result.library));
   if (!needsStateWrite) return { state: result.state, library: currentLibrary };
   return writeStateAndLibrary(result.state, result.library, true);
 }
