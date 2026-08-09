@@ -1,4 +1,4 @@
-import type { NoteGraph } from "./note-domain";
+import type { NoteStructure } from "./note-domain";
 
 export type DocumentRecord = {
   id: string;
@@ -103,7 +103,7 @@ function duplicateIssues<T extends { id: string }>(records: T[], entity: Documen
   return issues;
 }
 
-export function validateDocumentGraph(graph: DocumentGraph, notes: NoteGraph): DocumentInvariantIssue[] {
+export function validateDocumentGraph(graph: DocumentGraph, notes: NoteStructure): DocumentInvariantIssue[] {
   const issues = [
     ...duplicateIssues(graph.documents, "document"),
     ...duplicateIssues(graph.contexts, "context"),
@@ -151,7 +151,7 @@ export function validateDocumentGraph(graph: DocumentGraph, notes: NoteGraph): D
   return issues;
 }
 
-export function assertDocumentGraph(graph: DocumentGraph, notes: NoteGraph) {
+export function assertDocumentGraph(graph: DocumentGraph, notes: NoteStructure) {
   const issues = validateDocumentGraph(graph, notes);
   if (issues.length) throw new DocumentInvariantError(issues);
 }

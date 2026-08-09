@@ -1,0 +1,12 @@
+{
+  "notebookCount": 4,
+  "sectionsPerNotebook": 5,
+  "pagesPerSection": 10,
+  "sheetsPerPage": 5,
+  "contentBytesPerSheet": 8192,
+  "maxMigrationMs": 20000,
+  "maxMigrationHeapBytes": 268435456,
+  "maxStructureLoadMs": 5000,
+  "maxStructureHeapBytes": 33554432,
+  "maxSerializedStructureBytes": 262144
+}

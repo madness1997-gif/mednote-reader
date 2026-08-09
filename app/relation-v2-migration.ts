@@ -1,5 +1,5 @@
 import type { DocumentGraph, DocumentLinkRelation, DocumentRecord, NoteDocumentLink } from "./document-domain";
-import { ordered, type NoteGraph } from "./note-domain";
+import { ordered, type NoteStructure } from "./note-domain";
 import type { LibraryV6 } from "./note-repository";
 
 export type LegacyRelationV2 = {
@@ -37,7 +37,7 @@ function normalizeGroups(relation: LegacyRelationV2 | undefined, documents: Docu
   }));
 }
 
-function resolveRelationTarget(target: Record<string, any>, notes: NoteGraph) {
+function resolveRelationTarget(target: Record<string, any>, notes: NoteStructure) {
   const sheetToPage = new Map(notes.sheets.map((sheet) => [sheet.id, sheet.pageId]));
   const pageIds = new Set(notes.pages.map((page) => page.id));
   const sheetIds = new Set(notes.sheets.map((sheet) => sheet.id));
@@ -60,7 +60,7 @@ function resolveRelationTarget(target: Record<string, any>, notes: NoteGraph) {
 }
 
 export function migrateRelationV2(
-  notes: NoteGraph,
+  notes: NoteStructure,
   documents: DocumentRecord[],
   existingLinks: Record<string, any>[],
   relation?: LegacyRelationV2,

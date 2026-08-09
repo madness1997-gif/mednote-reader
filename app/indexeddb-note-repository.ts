@@ -1,6 +1,6 @@
 import { assertDocumentGraph, type DocumentGraph, type DocumentLinkRelation, type NoteDocumentLink } from "./document-domain";
 import type { DocumentRepository } from "./document-repository";
-import { assertNoteGraph, noteContextForSheet, ordered, type ActiveNoteState, type Notebook, type NoteGraph, type Page, type Section, type Sheet, type SheetContent } from "./note-domain";
+import { assertNoteStructure, assertSheetContents, hydrateSheet, noteContextForSheet, ordered, type ActiveNoteState, type Notebook, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
 import { NOTE_SCHEMA_VERSION, type CreateNotebookInput, type CreatePageInput, type CreateSectionInput, type CreateSheetInput, type LibraryPreferences, type LibraryV6, type NoteRepository } from "./note-repository";
 
 export const V6_KEYS = {
@@ -10,6 +10,7 @@ export const V6_KEYS = {
   section: "library:v6:section:",
   page: "library:v6:page:",
   sheet: "library:v6:sheet:",
+  sheetContent: "library:v6:sheet-content:",
   document: "library:v6:document:",
   context: "library:v6:document-context:",
   group: "library:v6:document-group:",
@@ -37,11 +38,17 @@ type StoreTransaction = { transaction: IDBTransaction; store: IDBObjectStore };
 
 export class RepositoryCorruptionError extends Error {
   readonly missingKeys: string[];
+  readonly unexpectedKeys: string[];
 
-  constructor(missingKeys: string[]) {
-    super(`Kho note v6 thiếu record: ${missingKeys.join(", ")}`);
+  constructor(missingKeys: string[], unexpectedKeys: string[] = []) {
+    const details = [
+      missingKeys.length ? `thiếu record: ${missingKeys.join(", ")}` : "",
+      unexpectedKeys.length ? `có record mồ côi: ${unexpectedKeys.join(", ")}` : "",
+    ].filter(Boolean).join("; ");
+    super(`Kho note v6 ${details}`);
     this.name = "RepositoryCorruptionError";
     this.missingKeys = missingKeys;
+    this.unexpectedKeys = unexpectedKeys;
   }
 }
 
@@ -94,7 +101,7 @@ function metaFor(library: LibraryV6): V6Meta {
   };
 }
 
-function v6RecordKeys(meta: V6Meta) {
+function v6StructureRecordKeys(meta: V6Meta) {
   return [
     V6_KEYS.meta,
     V6_KEYS.workspace,
@@ -102,12 +109,25 @@ function v6RecordKeys(meta: V6Meta) {
     ...meta.sectionIds.map((id) => `${V6_KEYS.section}${id}`),
     ...meta.pageIds.map((id) => `${V6_KEYS.page}${id}`),
     ...meta.sheetIds.map((id) => `${V6_KEYS.sheet}${id}`),
+  ];
+}
+
+function v6ContentRecordKeys(meta: V6Meta) {
+  return meta.sheetIds.map((id) => `${V6_KEYS.sheetContent}${id}`);
+}
+
+function v6DocumentRecordKeys(meta: V6Meta) {
+  return [
     ...meta.documentIds.map((id) => `${V6_KEYS.document}${id}`),
     ...meta.contextIds.map((id) => `${V6_KEYS.context}${id}`),
     ...meta.groupIds.map((id) => `${V6_KEYS.group}${id}`),
     ...meta.linkIds.map((id) => `${V6_KEYS.link}${id}`),
     ...meta.linkRelationIds.map((id) => `${V6_KEYS.linkRelation}${id}`),
   ];
+}
+
+function v6RecordKeys(meta: V6Meta) {
+  return [...v6StructureRecordKeys(meta), ...v6ContentRecordKeys(meta), ...v6DocumentRecordKeys(meta)];
 }
 
 function recordEntries(library: LibraryV6, meta = metaFor(library)): Array<[string, unknown]> {
@@ -118,6 +138,7 @@ function recordEntries(library: LibraryV6, meta = metaFor(library)): Array<[stri
     ...library.notes.sections.map((record) => [`${V6_KEYS.section}${record.id}`, record] as [string, unknown]),
     ...library.notes.pages.map((record) => [`${V6_KEYS.page}${record.id}`, record] as [string, unknown]),
     ...library.notes.sheets.map((record) => [`${V6_KEYS.sheet}${record.id}`, record] as [string, unknown]),
+    ...library.notes.sheets.map((record) => [`${V6_KEYS.sheetContent}${record.id}`, library.sheetContents[record.id]] as [string, unknown]),
     ...library.documents.documents.map((record) => [`${V6_KEYS.document}${record.id}`, record] as [string, unknown]),
     ...library.documents.contexts.map((record) => [`${V6_KEYS.context}${record.id}`, record] as [string, unknown]),
     ...library.documents.groups.map((record) => [`${V6_KEYS.group}${record.id}`, record] as [string, unknown]),
@@ -128,7 +149,8 @@ function recordEntries(library: LibraryV6, meta = metaFor(library)): Array<[stri
 
 function assertLibrary(library: LibraryV6) {
   if (library.version !== NOTE_SCHEMA_VERSION) throw new RepositoryMutationError(`Repository chỉ nhận schema v${NOTE_SCHEMA_VERSION}`);
-  assertNoteGraph(library.notes);
+  assertNoteStructure(library.notes);
+  assertSheetContents(library.notes, library.sheetContents);
   assertDocumentGraph(library.documents, library.notes);
 }
 
@@ -188,6 +210,42 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
     return value;
   }
 
+  private async requiredRecordMap(store: IDBObjectStore, keys: string[]) {
+    const values = await Promise.all(keys.map(async (key) => [key, await requestValue(store.get(key))] as const));
+    const missing = values.filter(([, value]) => value === undefined).map(([key]) => key);
+    if (missing.length) throw new RepositoryCorruptionError(missing);
+    return new Map(values);
+  }
+
+  private recordsFromIds<T>(records: Map<string, unknown>, ids: string[], prefix: string) {
+    return ids.map((id) => clone(records.get(`${prefix}${id}`) as T));
+  }
+
+  private noteStructureFromRecords(meta: V6Meta, records: Map<string, unknown>) {
+    const notes: NoteStructure = {
+      workspace: clone(records.get(V6_KEYS.workspace) as NoteStructure["workspace"]),
+      notebooks: this.recordsFromIds<Notebook>(records, meta.notebookIds, V6_KEYS.notebook),
+      sections: this.recordsFromIds<Section>(records, meta.sectionIds, V6_KEYS.section),
+      pages: this.recordsFromIds<Page>(records, meta.pageIds, V6_KEYS.page),
+      sheets: this.recordsFromIds<Sheet>(records, meta.sheetIds, V6_KEYS.sheet),
+      active: clone(meta.active),
+    };
+    assertNoteStructure(notes);
+    return notes;
+  }
+
+  private documentGraphFromRecords(meta: V6Meta, notes: NoteStructure, records: Map<string, unknown>) {
+    const documents: DocumentGraph = {
+      documents: this.recordsFromIds<DocumentGraph["documents"][number]>(records, meta.documentIds, V6_KEYS.document),
+      contexts: this.recordsFromIds<DocumentGraph["contexts"][number]>(records, meta.contextIds, V6_KEYS.context),
+      groups: this.recordsFromIds<DocumentGraph["groups"][number]>(records, meta.groupIds, V6_KEYS.group),
+      links: this.recordsFromIds<NoteDocumentLink>(records, meta.linkIds, V6_KEYS.link),
+      linkRelations: this.recordsFromIds<DocumentLinkRelation>(records, meta.linkRelationIds, V6_KEYS.linkRelation),
+    };
+    assertDocumentGraph(documents, notes);
+    return documents;
+  }
+
   async flush() {
     await this.queue;
   }
@@ -198,46 +256,69 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
       if (!meta) return null;
       if (meta.version !== NOTE_SCHEMA_VERSION) throw new RepositoryCorruptionError([V6_KEYS.meta]);
-      const keys = v6RecordKeys(meta).filter((key) => key !== V6_KEYS.meta);
-      const values = await Promise.all(keys.map(async (key) => [key, await requestValue(store.get(key))] as const));
-      const records = new Map(values);
-      const missing = values.filter(([, value]) => value === undefined).map(([key]) => key);
-      if (missing.length) throw new RepositoryCorruptionError(missing);
-      const fromIds = <T>(ids: string[], prefix: string) => ids.map((id) => clone(records.get(`${prefix}${id}`) as T));
-      const notes: NoteGraph = {
-        workspace: clone(records.get(V6_KEYS.workspace) as NoteGraph["workspace"]),
-        notebooks: fromIds<Notebook>(meta.notebookIds, V6_KEYS.notebook),
-        sections: fromIds<Section>(meta.sectionIds, V6_KEYS.section),
-        pages: fromIds<Page>(meta.pageIds, V6_KEYS.page),
-        sheets: fromIds<Sheet>(meta.sheetIds, V6_KEYS.sheet),
-        active: clone(meta.active),
-      };
-      const documents: DocumentGraph = {
-        documents: fromIds<DocumentGraph["documents"][number]>(meta.documentIds, V6_KEYS.document),
-        contexts: fromIds<DocumentGraph["contexts"][number]>(meta.contextIds, V6_KEYS.context),
-        groups: fromIds<DocumentGraph["groups"][number]>(meta.groupIds, V6_KEYS.group),
-        links: fromIds<NoteDocumentLink>(meta.linkIds, V6_KEYS.link),
-        linkRelations: fromIds<DocumentLinkRelation>(meta.linkRelationIds, V6_KEYS.linkRelation),
-      };
-      const library: LibraryV6 = { version: NOTE_SCHEMA_VERSION, notes, documents, preferences: clone(meta.preferences), savedAt: meta.savedAt };
+      const expectedKeys = v6RecordKeys(meta).filter((key) => key !== V6_KEYS.meta);
+      const [records, storedKeys] = await Promise.all([
+        this.requiredRecordMap(store, expectedKeys),
+        requestValue(store.getAllKeys()),
+      ]);
+      const expected = new Set(v6RecordKeys(meta));
+      const unexpectedContentKeys = storedKeys.map(String)
+        .filter((key) => key.startsWith(V6_KEYS.sheetContent) && !expected.has(key));
+      if (unexpectedContentKeys.length) throw new RepositoryCorruptionError([], unexpectedContentKeys);
+      const notes = this.noteStructureFromRecords(meta, records);
+      const documents = this.documentGraphFromRecords(meta, notes, records);
+      const sheetContents = Object.fromEntries(meta.sheetIds.map((id) => [id, clone(records.get(`${V6_KEYS.sheetContent}${id}`) as SheetContent)])) as SheetContentMap;
+      const library: LibraryV6 = { version: NOTE_SCHEMA_VERSION, notes, sheetContents, documents, preferences: clone(meta.preferences), savedAt: meta.savedAt };
       assertLibrary(library);
       return library;
     });
   }
 
-  async loadNoteGraph() {
-    return (await this.loadLibrary())?.notes || null;
+  async loadNoteStructure() {
+    await this.flush();
+    return this.transaction("readonly", async ({ store }) => {
+      const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+      if (!meta) return null;
+      if (meta.version !== NOTE_SCHEMA_VERSION) throw new RepositoryCorruptionError([V6_KEYS.meta]);
+      const keys = v6StructureRecordKeys(meta).filter((key) => key !== V6_KEYS.meta);
+      return this.noteStructureFromRecords(meta, await this.requiredRecordMap(store, keys));
+    });
   }
 
   async loadDocumentGraph() {
-    return (await this.loadLibrary())?.documents || null;
+    await this.flush();
+    return this.transaction("readonly", async ({ store }) => {
+      const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+      if (!meta) return null;
+      if (meta.version !== NOTE_SCHEMA_VERSION) throw new RepositoryCorruptionError([V6_KEYS.meta]);
+      const keys = [...v6StructureRecordKeys(meta), ...v6DocumentRecordKeys(meta)].filter((key) => key !== V6_KEYS.meta);
+      const records = await this.requiredRecordMap(store, keys);
+      const notes = this.noteStructureFromRecords(meta, records);
+      return this.documentGraphFromRecords(meta, notes, records);
+    });
+  }
+
+  async loadSheet(sheetId: string) {
+    await this.flush();
+    return this.transaction("readonly", async ({ store }) => {
+      const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+      if (!meta || !meta.sheetIds.includes(sheetId)) return null;
+      const sheetKey = `${V6_KEYS.sheet}${sheetId}`;
+      const contentKey = `${V6_KEYS.sheetContent}${sheetId}`;
+      const records = await this.requiredRecordMap(store, [sheetKey, contentKey]);
+      return hydrateSheet(clone(records.get(sheetKey) as Sheet), clone(records.get(contentKey) as SheetContent));
+    });
   }
 
   async loadSheetContent(sheetId: string) {
     await this.flush();
     return this.transaction("readonly", async ({ store }) => {
-      const sheet = await requestValue(store.get(`${V6_KEYS.sheet}${sheetId}`)) as Sheet | undefined;
-      return sheet ? clone(sheet.content) : null;
+      const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+      if (!meta || !meta.sheetIds.includes(sheetId)) return null;
+      const key = `${V6_KEYS.sheetContent}${sheetId}`;
+      const content = await requestValue(store.get(key)) as SheetContent | undefined;
+      if (content === undefined) throw new RepositoryCorruptionError([key]);
+      return clone(content);
     });
   }
 
@@ -247,12 +328,12 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
     return this.enqueue(async () => {
       const nextMeta = metaFor(snapshot);
       await this.transaction("readwrite", async ({ store }) => {
-        const previous = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+        const storedKeys = await requestValue(store.getAllKeys());
         recordEntries(snapshot, nextMeta).forEach(([key, value]) => store.put(clone(value), key));
-        if (previous?.version === NOTE_SCHEMA_VERSION) {
-          const nextKeys = new Set(v6RecordKeys(nextMeta));
-          v6RecordKeys(previous).filter((key) => !nextKeys.has(key)).forEach((key) => store.delete(key));
-        }
+        const nextKeys = new Set(v6RecordKeys(nextMeta));
+        storedKeys.map(String)
+          .filter((key) => key.startsWith("library:v6:") && !nextKeys.has(key))
+          .forEach((key) => store.delete(key));
       });
     });
   }
@@ -269,17 +350,20 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
         requestValue(store.get(`${V6_KEYS.section}${sectionId}`)),
         requestValue(store.get(`${V6_KEYS.page}${pageId}`)),
         requestValue(store.get(`${V6_KEYS.sheet}${sheetId}`)),
+        requestValue(store.get(`${V6_KEYS.sheetContent}${sheetId}`)),
       ]);
       if (existing.some((value) => value !== undefined)) throw new RepositoryMutationError("ID tạo Notebook đã tồn tại");
       const notebook: Notebook = { id: notebookId, title: cleanTitle(input.title, "Sổ ghi chú"), order: meta.notebookIds.length };
       const section: Section = { id: sectionId, notebookId, title: cleanTitle(input.sectionTitle || "Phần 1", "Phần 1"), order: 0 };
       const page: Page = { id: pageId, sectionId, title: cleanTitle(input.pageTitle || "Page 1", "Page 1"), order: 0 };
-      const sheet: Sheet = { id: sheetId, pageId, order: 0, content: clone(input.content || {}) };
+      const sheet: Sheet = { id: sheetId, pageId, order: 0 };
+      const content = clone(input.content || {});
       const active = noteContextForSheet({ workspace: { id: "", title: "" }, notebooks: [notebook], sections: [section], pages: [page], sheets: [sheet], active: meta.active }, sheetId)!;
       store.put(notebook, `${V6_KEYS.notebook}${notebookId}`);
       store.put(section, `${V6_KEYS.section}${sectionId}`);
       store.put(page, `${V6_KEYS.page}${pageId}`);
       store.put(sheet, `${V6_KEYS.sheet}${sheetId}`);
+      store.put(content, `${V6_KEYS.sheetContent}${sheetId}`);
       store.put(touchMeta({ ...meta, notebookIds: [...meta.notebookIds, notebookId], sectionIds: [...meta.sectionIds, sectionId], pageIds: [...meta.pageIds, pageId], sheetIds: [...meta.sheetIds, sheetId], active }), V6_KEYS.meta);
       return active;
     }));
@@ -305,15 +389,18 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       const section = await this.requireRecord<Section>(store, `${V6_KEYS.section}${input.sectionId}`, `Section ${input.sectionId}`);
       const id = input.id || idOf("page");
       const sheetId = input.sheetId || idOf("sheet");
-      if (await requestValue(store.get(`${V6_KEYS.page}${id}`)) !== undefined || await requestValue(store.get(`${V6_KEYS.sheet}${sheetId}`)) !== undefined) {
+      if (await requestValue(store.get(`${V6_KEYS.page}${id}`)) !== undefined
+        || await requestValue(store.get(`${V6_KEYS.sheet}${sheetId}`)) !== undefined
+        || await requestValue(store.get(`${V6_KEYS.sheetContent}${sheetId}`)) !== undefined) {
         throw new RepositoryMutationError("ID tạo Page/Sheet đã tồn tại");
       }
       const pages = await this.recordsByIds<Page>(store, meta.pageIds, V6_KEYS.page);
       const record: Page = { id, sectionId: section.id, title: cleanTitle(input.title, "Page mới"), order: pages.filter((item) => item.sectionId === section.id).length };
-      const sheet: Sheet = { id: sheetId, pageId: id, order: 0, content: clone(input.content || {}) };
+      const sheet: Sheet = { id: sheetId, pageId: id, order: 0 };
       const active = { activeNotebookId: section.notebookId, activeSectionId: section.id, activePageId: id, activeSheetId: sheetId };
       store.put(record, `${V6_KEYS.page}${id}`);
       store.put(sheet, `${V6_KEYS.sheet}${sheetId}`);
+      store.put(clone(input.content || {}), `${V6_KEYS.sheetContent}${sheetId}`);
       store.put(touchMeta({ ...meta, pageIds: [...meta.pageIds, id], sheetIds: [...meta.sheetIds, sheetId], active }), V6_KEYS.meta);
       return active;
     }));
@@ -325,11 +412,13 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       const page = await this.requireRecord<Page>(store, `${V6_KEYS.page}${input.pageId}`, `Page ${input.pageId}`);
       const section = await this.requireRecord<Section>(store, `${V6_KEYS.section}${page.sectionId}`, `Section ${page.sectionId}`);
       const id = input.id || idOf("sheet");
-      if (await requestValue(store.get(`${V6_KEYS.sheet}${id}`)) !== undefined) throw new RepositoryMutationError(`Sheet ${id} đã tồn tại`);
+      if (await requestValue(store.get(`${V6_KEYS.sheet}${id}`)) !== undefined
+        || await requestValue(store.get(`${V6_KEYS.sheetContent}${id}`)) !== undefined) throw new RepositoryMutationError(`Sheet ${id} đã tồn tại`);
       const sheets = await this.recordsByIds<Sheet>(store, meta.sheetIds, V6_KEYS.sheet);
-      const record: Sheet = { id, pageId: page.id, order: sheets.filter((item) => item.pageId === page.id).length, content: clone(input.content || {}) };
+      const record: Sheet = { id, pageId: page.id, order: sheets.filter((item) => item.pageId === page.id).length };
       const active = { activeNotebookId: section.notebookId, activeSectionId: section.id, activePageId: page.id, activeSheetId: id };
       store.put(record, `${V6_KEYS.sheet}${id}`);
+      store.put(clone(input.content || {}), `${V6_KEYS.sheetContent}${id}`);
       store.put(touchMeta({ ...meta, sheetIds: [...meta.sheetIds, id], active }), V6_KEYS.meta);
       return active;
     }));
@@ -445,6 +534,7 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       sectionIds.forEach((recordId) => store.delete(`${V6_KEYS.section}${recordId}`));
       pageIds.forEach((recordId) => store.delete(`${V6_KEYS.page}${recordId}`));
       sheetIds.forEach((recordId) => store.delete(`${V6_KEYS.sheet}${recordId}`));
+      sheetIds.forEach((recordId) => store.delete(`${V6_KEYS.sheetContent}${recordId}`));
       const nextMeta: V6Meta = {
         ...meta,
         notebookIds: meta.notebookIds.filter((recordId) => !notebookIds.has(recordId)),
@@ -466,6 +556,7 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       const sheets = await this.recordsByIds<Sheet>(store, meta.sheetIds, V6_KEYS.sheet);
       if (sheets.filter((record) => record.pageId === sheet.pageId).length <= 1) throw new RepositoryMutationError("Page phải luôn có ít nhất một Sheet");
       store.delete(`${V6_KEYS.sheet}${id}`);
+      store.delete(`${V6_KEYS.sheetContent}${id}`);
       const nextMeta = { ...meta, sheetIds: meta.sheetIds.filter((recordId) => recordId !== id) };
       await this.deleteTargetLinks(store, nextMeta, (link) => link.targetType === "sheet" && link.targetId === id);
       await this.repairOrders(store, nextMeta);
@@ -522,8 +613,8 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
     const snapshot = clone(content);
     return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
       const meta = await this.requireMeta(store);
-      const sheet = await this.requireRecord<Sheet>(store, `${V6_KEYS.sheet}${sheetId}`, `Sheet ${sheetId}`);
-      store.put({ ...sheet, content: snapshot }, `${V6_KEYS.sheet}${sheetId}`);
+      await this.requireRecord<Sheet>(store, `${V6_KEYS.sheet}${sheetId}`, `Sheet ${sheetId}`);
+      store.put(snapshot, `${V6_KEYS.sheetContent}${sheetId}`);
       store.put(touchMeta(meta), V6_KEYS.meta);
     }));
   }

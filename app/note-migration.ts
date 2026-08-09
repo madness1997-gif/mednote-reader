@@ -1,5 +1,5 @@
 import { assertDocumentGraph, type DocumentGraph, type DocumentRecord } from "./document-domain";
-import { assertNoteGraph, ordered, type ActiveNoteState, type NoteGraph, type Page, type Section, type Sheet, type SheetContent } from "./note-domain";
+import { assertNoteStructure, assertSheetContents, ordered, type ActiveNoteState, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
 import { IndexedDbNoteRepository } from "./indexeddb-note-repository";
 import { NOTE_SCHEMA_VERSION, type LibraryV6 } from "./note-repository";
 import { migrateRelationV2, stableMigrationId, type LegacyRelationV2 } from "./relation-v2-migration";
@@ -132,7 +132,7 @@ function normalizeSiblingOrders<T extends { order: number }>(records: T[], paren
   return records;
 }
 
-function defaultActive(notes: Omit<NoteGraph, "active">, requested: Partial<ActiveNoteState> = {}): ActiveNoteState {
+function defaultActive(notes: Omit<NoteStructure, "active">, requested: Partial<ActiveNoteState> = {}): ActiveNoteState {
   const requestedPage = notes.pages.find((record) => record.id === requested.activePageId);
   const requestedSection = notes.sections.find((record) => record.id === requested.activeSectionId);
   const requestedNotebookId = notes.notebooks.some((record) => record.id === requested.activeNotebookId) ? requested.activeNotebookId : "";
@@ -149,7 +149,8 @@ function defaultActive(notes: Omit<NoteGraph, "active">, requested: Partial<Acti
 }
 
 function finishLibrary(
-  notes: Omit<NoteGraph, "active"> & { active?: ActiveNoteState },
+  notes: Omit<NoteStructure, "active"> & { active?: ActiveNoteState },
+  sheetContents: SheetContentMap,
   contexts: AnyRecord[],
   relation: LegacyRelationV2 | undefined,
   existingLinks: AnyRecord[],
@@ -157,10 +158,10 @@ function finishLibrary(
   savedAt: number,
   warnings: string[],
 ) {
-  const noteGraph: NoteGraph = { ...notes, active: notes.active || defaultActive(notes) };
+  const noteStructure: NoteStructure = { ...notes, active: notes.active || defaultActive(notes) };
   const documents = collectDocuments(contexts, relation);
   const documentContexts = buildDocumentContexts(contexts, documents);
-  const normalizedRelations = migrateRelationV2(noteGraph, documents, existingLinks, relation);
+  const normalizedRelations = migrateRelationV2(noteStructure, documents, existingLinks, relation);
   warnings.push(...normalizedRelations.warnings);
   const documentGraph: DocumentGraph = {
     documents,
@@ -169,11 +170,13 @@ function finishLibrary(
     links: normalizedRelations.links,
     linkRelations: normalizedRelations.linkRelations,
   };
-  assertNoteGraph(noteGraph);
-  assertDocumentGraph(documentGraph, noteGraph);
+  assertNoteStructure(noteStructure);
+  assertSheetContents(noteStructure, sheetContents);
+  assertDocumentGraph(documentGraph, noteStructure);
   return {
     version: NOTE_SCHEMA_VERSION,
-    notes: noteGraph,
+    notes: noteStructure,
+    sheetContents,
     documents: documentGraph,
     preferences,
     savedAt,
@@ -189,7 +192,7 @@ function migrationReport(sourceVersion: 3 | 4 | 5, library: LibraryV6, warnings:
     sheetCount: library.notes.sheets.length,
     documentCount: library.documents.documents.length,
     linkCount: library.documents.links.length,
-    sheetContentHashes: Object.fromEntries(library.notes.sheets.map((sheet) => [sheet.id, contentHash(sheet.content)])),
+    sheetContentHashes: Object.fromEntries(library.notes.sheets.map((sheet) => [sheet.id, contentHash(library.sheetContents[sheet.id])])),
     warnings,
   };
 }
@@ -201,8 +204,9 @@ export function migrateV5ToV6(source: V5MigrationSource, relation?: LegacyRelati
     notebooks: clone(source.notebooks).map((record, index) => ({ id: String(record.id), title: String(record.title || "Sổ ghi chú"), order: normalizedOrder(record.order, index) })),
     sections: clone(source.sections).map((record, index) => ({ id: String(record.id), notebookId: String(record.notebookId), title: String(record.title || "Phần 1"), order: normalizedOrder(record.order, index) })),
     pages: clone(source.pages).map((record, index) => ({ id: String(record.id), sectionId: String(record.sectionId), title: String(record.title || "Page mới"), order: normalizedOrder(record.order, index) })),
-    sheets: clone(source.sheets).map((record, index) => ({ id: String(record.id), pageId: String(record.pageId), order: normalizedOrder(record.order, index), content: stripNavigation(record.content || {}) })),
+    sheets: clone(source.sheets).map((record, index) => ({ id: String(record.id), pageId: String(record.pageId), order: normalizedOrder(record.order, index) })),
   };
+  const sheetContents = Object.fromEntries(source.sheets.map((record) => [String(record.id), stripNavigation(record.content || {})])) as SheetContentMap;
   normalizeSiblingOrders(notesBase.notebooks, () => "workspace");
   normalizeSiblingOrders(notesBase.sections, (record) => record.notebookId);
   normalizeSiblingOrders(notesBase.pages, (record) => record.sectionId);
@@ -215,6 +219,7 @@ export function migrateV5ToV6(source: V5MigrationSource, relation?: LegacyRelati
   });
   const library = finishLibrary(
     { ...notesBase, active },
+    sheetContents,
     source.contexts,
     relation,
     source.links,
@@ -239,10 +244,11 @@ export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersio
     if (String(notebook.id || "").startsWith("__mednote_reader_placeholder__:")) return;
     if (!notebookSources.has(String(notebook.id)) || workspace.id === snapshot.activeWorkspaceId) notebookSources.set(String(notebook.id), notebook);
   }));
-  const notebooks: NoteGraph["notebooks"] = [];
+  const notebooks: NoteStructure["notebooks"] = [];
   const sections: Section[] = [];
   const pages: Page[] = [];
   const sheets: Sheet[] = [];
+  const sheetContents: SheetContentMap = {};
   const sheetToPage = new Map<string, string>();
 
   [...notebookSources.values()].forEach((notebook, notebookOrder) => {
@@ -281,7 +287,8 @@ export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersio
       pages.push({ id: logicalId, sectionId, title: String(preferred.logicalPageTitle || preferred.title || "Page mới").trim() || "Page mới", order });
       groupSheets.forEach((sheet, sheetOrder) => {
         const id = String(sheet.id);
-        sheets.push({ id, pageId: logicalId, order: sheetOrder, content: stripNavigation(sheet) });
+        sheets.push({ id, pageId: logicalId, order: sheetOrder });
+        sheetContents[id] = stripNavigation(sheet);
         sheetToPage.set(id, logicalId);
       });
     });
@@ -301,6 +308,7 @@ export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersio
   });
   const library = finishLibrary(
     { ...notesBase, active },
+    sheetContents,
     contexts,
     relation,
     [],
@@ -317,10 +325,11 @@ export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersio
 }
 
 export function verifyMigration(result: MigrationResult, expectedSheetHashes?: Record<string, string>) {
-  assertNoteGraph(result.library.notes);
+  assertNoteStructure(result.library.notes);
+  assertSheetContents(result.library.notes, result.library.sheetContents);
   assertDocumentGraph(result.library.documents, result.library.notes);
   if (expectedSheetHashes) {
-    const actual = Object.fromEntries(result.library.notes.sheets.map((sheet) => [sheet.id, contentHash(sheet.content)]));
+    const actual = Object.fromEntries(result.library.notes.sheets.map((sheet) => [sheet.id, contentHash(result.library.sheetContents[sheet.id])]));
     const mismatches = Object.entries(expectedSheetHashes).filter(([id, hash]) => actual[id] !== hash);
     if (mismatches.length) throw new Error(`Migration làm thay đổi Sheet.content: ${mismatches.map(([id]) => id).join(", ")}`);
   }
@@ -437,7 +446,7 @@ export async function migrateStoredLibraryToV6(options: {
   await repository.replaceLibrary(result.library);
   const reloaded = await repository.loadLibrary();
   if (!reloaded) throw new Error("Đã ghi v6 nhưng không load lại được");
-  const reloadedHashes = Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(sheet.content)]));
+  const reloadedHashes = Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(reloaded.sheetContents[sheet.id])]));
   verifyMigration({ library: reloaded, report: result.report }, result.report.sheetContentHashes);
   if (stableStringify(reloadedHashes) !== stableStringify(result.report.sheetContentHashes)) throw new Error("Hash Sheet.content thay đổi sau transaction v6");
   return { library: reloaded, report: result.report };

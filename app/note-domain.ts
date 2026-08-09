@@ -31,8 +31,13 @@ export type Sheet = {
   id: EntityId;
   pageId: EntityId;
   order: number;
+};
+
+export type HydratedSheet = Sheet & {
   content: SheetContent;
 };
+
+export type SheetContentMap = Record<EntityId, SheetContent>;
 
 export type ActiveNoteState = {
   activeNotebookId: EntityId;
@@ -41,7 +46,7 @@ export type ActiveNoteState = {
   activeSheetId: EntityId;
 };
 
-export type NoteGraph = {
+export type NoteStructure = {
   workspace: Workspace;
   notebooks: Notebook[];
   sections: Section[];
@@ -57,11 +62,13 @@ export type NoteInvariantCode =
   | "empty-page"
   | "invalid-order"
   | "invalid-active-chain"
+  | "missing-content"
+  | "orphan-content"
   | "navigation-metadata-in-content";
 
 export type NoteInvariantIssue = {
   code: NoteInvariantCode;
-  entity: "workspace" | "notebook" | "section" | "page" | "sheet" | "active";
+  entity: "workspace" | "notebook" | "section" | "page" | "sheet" | "sheet-content" | "active";
   id: string;
   message: string;
 };
@@ -143,7 +150,7 @@ function groupByParent<T>(records: T[], parent: (record: T) => string) {
   return [...groups.values()];
 }
 
-export function validateNoteGraph(graph: NoteGraph): NoteInvariantIssue[] {
+export function validateNoteStructure(graph: NoteStructure): NoteInvariantIssue[] {
   const issues: NoteInvariantIssue[] = [];
   issues.push(...duplicateIssues(graph.notebooks, "notebook"));
   issues.push(...duplicateIssues(graph.sections, "section"));
@@ -168,15 +175,6 @@ export function validateNoteGraph(graph: NoteGraph): NoteInvariantIssue[] {
   graph.sheets.forEach((sheet) => {
     if (!pages.has(sheet.pageId)) {
       issues.push({ code: "missing-parent", entity: "sheet", id: sheet.id, message: `Sheet ${sheet.id} không có Page ${sheet.pageId}` });
-    }
-    const copiedNavigation = Object.keys(sheet.content).filter((field) => NAVIGATION_CONTENT_FIELDS.has(field));
-    if (copiedNavigation.length) {
-      issues.push({
-        code: "navigation-metadata-in-content",
-        entity: "sheet",
-        id: sheet.id,
-        message: `Sheet.content ${sheet.id} chứa metadata điều hướng: ${copiedNavigation.join(", ")}`,
-      });
     }
   });
 
@@ -223,8 +221,47 @@ export function validateNoteGraph(graph: NoteGraph): NoteInvariantIssue[] {
   return issues;
 }
 
-export function assertNoteGraph(graph: NoteGraph) {
-  const issues = validateNoteGraph(graph);
+export function validateSheetContents(structure: NoteStructure, contents: SheetContentMap): NoteInvariantIssue[] {
+  const issues: NoteInvariantIssue[] = [];
+  const sheetIds = new Set(structure.sheets.map((sheet) => sheet.id));
+  structure.sheets.forEach((sheet) => {
+    if (!Object.hasOwn(contents, sheet.id)) {
+      issues.push({
+        code: "missing-content",
+        entity: "sheet-content",
+        id: sheet.id,
+        message: `Sheet ${sheet.id} thiếu SheetContent record`,
+      });
+      return;
+    }
+    const copiedNavigation = Object.keys(contents[sheet.id]).filter((field) => NAVIGATION_CONTENT_FIELDS.has(field));
+    if (copiedNavigation.length) {
+      issues.push({
+        code: "navigation-metadata-in-content",
+        entity: "sheet-content",
+        id: sheet.id,
+        message: `SheetContent ${sheet.id} chứa metadata điều hướng: ${copiedNavigation.join(", ")}`,
+      });
+    }
+  });
+  Object.keys(contents).filter((id) => !sheetIds.has(id)).forEach((id) => {
+    issues.push({
+      code: "orphan-content",
+      entity: "sheet-content",
+      id,
+      message: `SheetContent ${id} không có Sheet metadata tương ứng`,
+    });
+  });
+  return issues;
+}
+
+export function assertNoteStructure(structure: NoteStructure) {
+  const issues = validateNoteStructure(structure);
+  if (issues.length) throw new NoteInvariantError(issues);
+}
+
+export function assertSheetContents(structure: NoteStructure, contents: SheetContentMap) {
+  const issues = validateSheetContents(structure, contents);
   if (issues.length) throw new NoteInvariantError(issues);
 }
 
@@ -232,7 +269,7 @@ export function ordered<T extends { order: number }>(records: T[]) {
   return [...records].sort((left, right) => left.order - right.order);
 }
 
-export function noteContextForSheet(graph: NoteGraph, sheetId: string): ActiveNoteState | null {
+export function noteContextForSheet(graph: NoteStructure, sheetId: string): ActiveNoteState | null {
   const sheet = graph.sheets.find((record) => record.id === sheetId);
   const page = sheet && graph.pages.find((record) => record.id === sheet.pageId);
   const section = page && graph.sections.find((record) => record.id === page.sectionId);
@@ -243,4 +280,8 @@ export function noteContextForSheet(graph: NoteGraph, sheetId: string): ActiveNo
     activePageId: page.id,
     activeSheetId: sheet.id,
   };
+}
+
+export function hydrateSheet(sheet: Sheet, content: SheetContent): HydratedSheet {
+  return { ...sheet, content };
 }

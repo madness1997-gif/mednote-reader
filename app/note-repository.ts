@@ -1,5 +1,5 @@
 import type { DocumentGraph } from "./document-domain";
-import type { ActiveNoteState, NoteGraph, SheetContent } from "./note-domain";
+import type { ActiveNoteState, HydratedSheet, NoteStructure, SheetContent, SheetContentMap } from "./note-domain";
 
 export const NOTE_SCHEMA_VERSION = 6 as const;
 
@@ -12,7 +12,8 @@ export type LibraryPreferences = {
 
 export type LibraryV6 = {
   version: typeof NOTE_SCHEMA_VERSION;
-  notes: NoteGraph;
+  notes: NoteStructure;
+  sheetContents: SheetContentMap;
   documents: DocumentGraph;
   preferences: LibraryPreferences;
   savedAt: number;
@@ -34,8 +35,12 @@ export type CreatePageInput = { id?: string; sectionId: string; title: string; s
 export type CreateSheetInput = { id?: string; pageId: string; content?: SheetContent };
 
 export interface NoteRepository {
+  /** Full, eager bundle reserved for migration, export, backup and integrity verification. */
   loadLibrary(): Promise<LibraryV6 | null>;
-  loadNoteGraph(): Promise<NoteGraph | null>;
+  /** Default startup read: hierarchy and active IDs only; never reads SheetContent records. */
+  loadNoteStructure(): Promise<NoteStructure | null>;
+  /** Hydrates exactly one Sheet at the repository boundary. */
+  loadSheet(sheetId: string): Promise<HydratedSheet | null>;
   loadSheetContent(sheetId: string): Promise<SheetContent | null>;
   replaceLibrary(library: LibraryV6): Promise<void>;
   createNotebook(input: CreateNotebookInput): Promise<ActiveNoteState>;
