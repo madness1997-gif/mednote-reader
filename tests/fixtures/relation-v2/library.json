@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "documents": [
+    { "id": "doc-ada", "name": "ADA-2026.pdf", "size": 1000, "lastModified": 1786258700000, "available": true },
+    { "id": "doc-idsa", "name": "IDSA-AMR-2026.pdf", "size": 2000, "lastModified": 1786258701000, "available": true }
+  ],
+  "groups": [
+    { "id": "group-guidelines", "name": "Guidelines", "documentIds": ["doc-ada", "doc-idsa"], "createdAt": 1786258600000, "updatedAt": 1786258800000 }
+  ],
+  "notebooks": [
+    {
+      "id": "nb-endo",
+      "title": "Nội tiết",
+      "workspaceId": "relation-note:nb-endo",
+      "sections": [
+        { "id": "sec-diabetes", "title": "Đái tháo đường", "pageIds": ["sheet-dm-1", "sheet-dm-2"], "createdAt": 1786258600000, "updatedAt": 1786258800000 },
+        { "id": "sec-thyroid", "title": "Tuyến giáp", "pageIds": ["sheet-thyroid-1"], "createdAt": 1786258600000, "updatedAt": 1786258800000 }
+      ],
+      "activeSectionId": "sec-diabetes",
+      "available": true,
+      "updatedAt": 1786258800000
+    }
+  ],
+  "relations": [
+    {
+      "id": "relation-group-page",
+      "kind": "workspace",
+      "source": { "type": "group", "id": "group-guidelines" },
+      "target": { "type": "page", "id": "page-dm", "notebookId": "nb-endo", "sectionId": "sec-diabetes", "pageId": "sheet-dm-1", "logicalPageId": "page-dm", "scope": "page" },
+      "isDefault": true,
+      "createdAt": 1786258600000,
+      "updatedAt": 1786258800000,
+      "lastOpenedAt": 1786258790000,
+      "snapshot": { "workspaceMode": "split", "readerShare": 48, "noteZoom": 1.1, "activeDocumentId": "doc-ada", "pdfPages": { "doc-ada": 12, "doc-idsa": 3 } }
+    },
+    {
+      "id": "relation-content-block",
+      "kind": "content",
+      "source": { "type": "document", "id": "doc-ada" },
+      "target": { "type": "block", "id": "fa-1", "notebookId": "nb-endo", "sectionId": "sec-diabetes", "pageId": "sheet-dm-2", "logicalPageId": "page-dm", "scope": "sheet" },
+      "createdAt": 1786258600000,
+      "updatedAt": 1786258800000,
+      "locator": { "documentId": "doc-ada", "pdfPage": 12, "rect": { "x": 10, "y": 20, "width": 100, "height": 40 }, "annotationId": "ann-1", "quote": "SGLT2 inhibitor" }
+    }
+  ],
+  "updatedAt": 1786258800000
+}

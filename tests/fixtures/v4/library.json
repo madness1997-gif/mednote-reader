@@ -1,0 +1,29 @@
+{
+  "workspaces": [
+    {
+      "id": "legacy-context-v4",
+      "kind": "empty",
+      "name": "Note độc lập",
+      "documents": [],
+      "activeDocumentId": null,
+      "notebooks": [
+        {
+          "id": "nb-independent",
+          "title": "Sổ độc lập",
+          "activePageId": "sheet-independent",
+          "createdAt": 1786258600000,
+          "pages": [
+            { "id": "sheet-independent", "title": "Suy giáp", "titleHtml": "Suy giáp", "pageId": "page-independent", "order": 0, "body": "Levothyroxine", "bodyHtml": "<p>Levothyroxine</p>", "strokes": [], "excerpts": [], "paper": { "template": "first-aid" } }
+          ]
+        }
+      ],
+      "activeNotebookId": "nb-independent",
+      "sourcePage": 1
+    }
+  ],
+  "activeWorkspaceId": "legacy-context-v4",
+  "readerShare": 50,
+  "workspaceMode": "note",
+  "noteZoom": 1,
+  "savedAt": 1786258801000
+}

@@ -1,0 +1,30 @@
+{
+  "workspaces": [
+    {
+      "id": "legacy-context",
+      "kind": "document",
+      "name": "Legacy ADA",
+      "documents": [{ "id": "doc-ada", "name": "ADA-2026.pdf", "size": 1000, "lastModified": 1786258700000 }],
+      "activeDocumentId": "doc-ada",
+      "notebooks": [
+        {
+          "id": "nb-endo",
+          "title": "Nội tiết",
+          "activePageId": "sheet-dm-2",
+          "createdAt": 1786258600000,
+          "pages": [
+            { "id": "sheet-dm-1", "title": "Điều trị ĐTĐ", "titleHtml": "Điều trị ĐTĐ", "logicalPageId": "page-dm", "logicalPageTitle": "Điều trị ĐTĐ", "sheetTitle": "Tờ 1", "sheetOrder": 0, "body": "Metformin là lựa chọn nền tảng", "bodyHtml": "<p>Metformin là lựa chọn nền tảng</p>", "strokes": [{ "id": "stroke-1" }], "excerpts": [] },
+            { "id": "sheet-dm-2", "title": "Điều trị ĐTĐ", "titleHtml": "Điều trị ĐTĐ", "logicalPageId": "page-dm", "logicalPageTitle": "Điều trị ĐTĐ", "sheetTitle": "Tờ 2", "sheetOrder": 1, "body": "SGLT2i", "bodyHtml": "<p>SGLT2i</p>", "strokes": [], "excerpts": [{ "id": "excerpt-1", "kind": "text", "text": "CKD" }] }
+          ]
+        }
+      ],
+      "activeNotebookId": "nb-endo",
+      "sourcePage": 12
+    }
+  ],
+  "activeWorkspaceId": "legacy-context",
+  "readerShare": 50,
+  "workspaceMode": "split",
+  "noteZoom": 1,
+  "savedAt": 1786258800000
+}

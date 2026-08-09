@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "version": 5,
+    "notebookIds": ["nb-endo"],
+    "sectionIds": ["sec-diabetes", "sec-thyroid"],
+    "pageIds": ["page-dm", "page-thyroid"],
+    "sheetIds": ["sheet-dm-1", "sheet-dm-2", "sheet-thyroid-1"],
+    "linkIds": ["v5-link-doc-a-page-dm"],
+    "contextIds": ["context-ada"],
+    "activeDocumentContextId": "context-ada",
+    "activeNotebookId": "nb-endo",
+    "activeSectionId": "sec-diabetes",
+    "activePageId": "page-dm",
+    "activeSheetId": "sheet-dm-2",
+    "readerShare": 48,
+    "workspaceMode": "split",
+    "noteZoom": 1.1,
+    "savedAt": 1786258800000
+  },
+  "workspace": { "id": "workspace", "title": "MedNote" },
+  "notebooks": [
+    { "id": "nb-endo", "title": "Nội tiết", "order": 0 }
+  ],
+  "sections": [
+    { "id": "sec-diabetes", "notebookId": "nb-endo", "title": "Đái tháo đường", "order": 0 },
+    { "id": "sec-thyroid", "notebookId": "nb-endo", "title": "Tuyến giáp", "order": 1 }
+  ],
+  "pages": [
+    { "id": "page-dm", "sectionId": "sec-diabetes", "title": "Điều trị ĐTĐ", "order": 0 },
+    { "id": "page-thyroid", "sectionId": "sec-thyroid", "title": "Cường giáp", "order": 0 }
+  ],
+  "sheets": [
+    {
+      "id": "sheet-dm-1",
+      "pageId": "page-dm",
+      "order": 0,
+      "content": {
+        "body": "Metformin là lựa chọn nền tảng",
+        "bodyHtml": "<p>Metformin là lựa chọn nền tảng</p>",
+        "strokes": [{ "id": "stroke-1", "points": [[1, 2], [3, 4]] }],
+        "excerpts": [{ "id": "excerpt-1", "kind": "text", "text": "ADA 2026" }],
+        "paper": { "size": "a4", "template": "first-aid" }
+      }
+    },
+    {
+      "id": "sheet-dm-2",
+      "pageId": "page-dm",
+      "order": 1,
+      "content": {
+        "body": "SGLT2i ưu tiên khi có CKD hoặc HF",
+        "bodyHtml": "<p>SGLT2i ưu tiên khi có CKD hoặc HF</p>",
+        "strokes": [],
+        "excerpts": [{ "id": "image-1", "kind": "image", "assetId": "asset-1" }],
+        "firstAidBlocks": [{ "id": "fa-1", "label": "ĐIỀU TRỊ", "content": "Cá thể hóa" }]
+      }
+    },
+    {
+      "id": "sheet-thyroid-1",
+      "pageId": "page-thyroid",
+      "order": 0,
+      "content": {
+        "body": "Thyrozol",
+        "bodyHtml": "<p>Thyrozol</p>",
+        "strokes": [],
+        "excerpts": []
+      }
+    }
+  ],
+  "links": [
+    { "id": "v5-link-doc-a-page-dm", "documentId": "doc-ada", "targetType": "page", "targetId": "page-dm" }
+  ],
+  "contexts": [
+    {
+      "id": "context-ada",
+      "kind": "document",
+      "name": "ADA Standards",
+      "documents": [
+        { "id": "doc-ada", "name": "ADA-2026.pdf", "size": 1000, "lastModified": 1786258700000, "reader": { "page": 12, "zoom": 1.25 } },
+        { "id": "doc-idsa", "name": "IDSA-AMR-2026.pdf", "size": 2000, "lastModified": 1786258701000, "reader": { "page": 3, "zoom": 1 } }
+      ],
+      "activeDocumentId": "doc-ada",
+      "notebookIds": ["nb-endo"],
+      "sourcePage": 12
+    }
+  ]
+}

@@ -23,6 +23,10 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - name: Verify normalized note domain and repository
+        run: |
+          npm run typecheck
+          npm run test:wave1
       - run: npm run build:pages
         env:
           VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com

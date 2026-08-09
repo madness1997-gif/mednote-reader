@@ -16,5 +16,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "app/page.tsx", "app/pdf-reader.tsx", "app/pdfium-renderer.ts", "app/pdf-worker.d.ts", "app/incremental-library-store.ts", "vite.github.config.ts", "vite.desktop.config.ts", "vite.pdf-assets.ts", "vite.incremental-library-persistence.ts"]
+  "include": ["src", "app/page.tsx", "app/pdf-reader.tsx", "app/pdfium-renderer.ts", "app/pdf-worker.d.ts", "app/incremental-library-store.ts", "app/note-domain.ts", "app/document-domain.ts", "app/note-repository.ts", "app/document-repository.ts", "app/indexeddb-note-repository.ts", "app/note-migration.ts", "app/relation-v2-migration.ts", "vite.github.config.ts", "vite.desktop.config.ts", "vite.pdf-assets.ts", "vite.incremental-library-persistence.ts"]
 }
