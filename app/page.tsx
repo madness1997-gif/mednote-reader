@@ -4028,7 +4028,7 @@ export default function Home() {
       if (logicalPageId) {
         const liveState = readAppState();
         const liveNotebook = liveState?.workspaces.flatMap((item) => item.notebooks || []).find((notebook) => String(notebook.id) === selectedNotebook.id);
-        const physicalPage = (liveNotebook?.pages || []).find((page: Record<string, unknown>) => String(page.logicalPageId || page.id) === logicalPageId);
+        const physicalPage = (liveNotebook?.pages || []).find((page: Record<string, unknown>) => String(page.pageId || page.id) === logicalPageId);
         relationTarget = {
           type: "page",
           id: logicalPageId,

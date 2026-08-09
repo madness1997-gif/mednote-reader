@@ -11,10 +11,11 @@ export const ACTIVE_SECTION_KEY = "mednote-page-sheet-active-section:";
 export const EXPANDED_PAGE_KEY = "mednote-page-sheet-expanded-page:";
 
 export type SheetPage = AnyObject & {
+  pageId?: string;
+  order?: number;
+  // Read only during the one-time v4 -> v5 migration.
   logicalPageId?: string;
   logicalPageTitle?: string;
-  sheetTitle?: string;
-  sheetOrder?: number;
 };
 
 export type ScopedTarget = RelationTarget & {
@@ -37,11 +38,11 @@ export function sourceKey(source: RelationSource) {
 }
 
 export function sheetLogicalId(sheet: SheetPage) {
-  return String(sheet.logicalPageId || sheet.id);
+  return String(sheet.pageId || sheet.logicalPageId || sheet.id);
 }
 
 export function sheetTitle(sheet: SheetPage, index: number) {
-  return String(sheet.sheetTitle || `Tờ ${index + 1}`);
+  return `Tờ ${index + 1}`;
 }
 
 export function pageGroups(notebook: AnyObject, section: NoteSection): PageGroup[] {
@@ -65,7 +66,7 @@ export function pageGroups(notebook: AnyObject, section: NoteSection): PageGroup
   }
   return [...groups.values()].map((group) => ({
     ...group,
-    sheets: group.sheets.sort((a, b) => Number(a.sheetOrder || 0) - Number(b.sheetOrder || 0)),
+    sheets: group.sheets.sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
   }));
 }
 
@@ -143,14 +144,8 @@ export function normalizePageSheetModel() {
     const activeSheet = pages.find((page) => String(page.id) === activeId);
 
     for (const page of pages) {
-      if (!page.logicalPageId) {
-        page.logicalPageId = String(page.id);
-        changed = true;
-      }
-      if (!page.logicalPageTitle) {
-        page.logicalPageTitle = String(page.title || "Page mới");
-        changed = true;
-      }
+      if (!page.pageId) { page.pageId = String(page.logicalPageId || page.id); changed = true; }
+      if (page.logicalPageId !== undefined) { delete page.logicalPageId; changed = true; }
     }
 
     const groups = new Map<string, SheetPage[]>();
@@ -163,8 +158,8 @@ export function normalizePageSheetModel() {
 
     for (const [logicalId, sheets] of groups) {
       sheets.sort((a, b) => {
-        const orderA = Number.isFinite(Number(a.sheetOrder)) ? Number(a.sheetOrder) : pages.indexOf(a);
-        const orderB = Number.isFinite(Number(b.sheetOrder)) ? Number(b.sheetOrder) : pages.indexOf(b);
+        const orderA = Number.isFinite(Number(a.order)) ? Number(a.order) : pages.indexOf(a);
+        const orderB = Number.isFinite(Number(b.order)) ? Number(b.order) : pages.indexOf(b);
         return orderA - orderB;
       });
       const activeInGroup = sheets.find((sheet) => String(sheet.id) === activeId);
@@ -174,12 +169,13 @@ export function normalizePageSheetModel() {
         : "";
       const canonicalTitle = editedTitle || savedTitle;
       sheets.forEach((sheet, index) => {
-        if (sheet.logicalPageId !== logicalId) { sheet.logicalPageId = logicalId; changed = true; }
-        if (sheet.logicalPageTitle !== canonicalTitle) { sheet.logicalPageTitle = canonicalTitle; changed = true; }
+        if (sheet.pageId !== logicalId) { sheet.pageId = logicalId; changed = true; }
+        if (sheet.logicalPageId !== undefined) { delete sheet.logicalPageId; changed = true; }
+        if (sheet.logicalPageTitle !== undefined) { delete sheet.logicalPageTitle; changed = true; }
         if (sheet.title !== canonicalTitle) { sheet.title = canonicalTitle; sheet.titleHtml = canonicalTitle; changed = true; }
-        const nextSheetTitle = `Tờ ${index + 1}`;
-        if (sheet.sheetTitle !== nextSheetTitle) { sheet.sheetTitle = nextSheetTitle; changed = true; }
-        if (sheet.sheetOrder !== index) { sheet.sheetOrder = index; changed = true; }
+        if (sheet.sheetTitle !== undefined) { delete sheet.sheetTitle; changed = true; }
+        if (sheet.sheetOrder !== undefined) { delete sheet.sheetOrder; changed = true; }
+        if (sheet.order !== index) { sheet.order = index; changed = true; }
       });
     }
 

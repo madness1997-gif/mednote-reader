@@ -23,12 +23,10 @@ export function updateNotebook(notebookId: string, mutate: (notebook: AnyObject,
 }
 
 export function createLogicalPage(notebookId: string, sectionId: string, title: string) {
-  const logicalId = uid("logical-page");
+  const logicalId = uid("page");
   const sheet = blankPage(uid("page"), title) as SheetPage;
-  sheet.logicalPageId = logicalId;
-  sheet.logicalPageTitle = title;
-  sheet.sheetTitle = "Tờ 1";
-  sheet.sheetOrder = 0;
+  sheet.pageId = logicalId;
+  sheet.order = 0;
   const created = updateNotebook(notebookId, (notebook, record) => {
     const section = record.sections.find((item: NoteSection) => item.id === sectionId);
     if (!section) return;
@@ -48,12 +46,10 @@ export function addSheet(notebookId: string, sectionId: string, logicalPageId: s
     if (!section) return;
     const existing = (notebook.pages || []).filter((page: SheetPage) => sheetLogicalId(page) === logicalPageId) as SheetPage[];
     if (!existing.length) return;
-    const title = String(existing[0].logicalPageTitle || existing[0].title || "Page mới");
+    const title = String(existing[0].title || "Page mới");
     const sheet = blankPage(uid("page"), title) as SheetPage;
-    sheet.logicalPageId = logicalPageId;
-    sheet.logicalPageTitle = title;
-    sheet.sheetOrder = existing.length;
-    sheet.sheetTitle = `Tờ ${existing.length + 1}`;
+    sheet.pageId = logicalPageId;
+    sheet.order = existing.length;
     createdId = String(sheet.id);
     const lastId = String(existing.sort((a, b) => Number(a.sheetOrder || 0) - Number(b.sheetOrder || 0)).at(-1)?.id || "");
     const insertAt = Math.max(0, section.pageIds.indexOf(lastId) + 1);
@@ -71,7 +67,6 @@ export function renameLogicalPage(notebookId: string, logicalPageId: string, tit
   return updateNotebook(notebookId, (notebook) => {
     for (const page of notebook.pages || []) {
       if (sheetLogicalId(page) !== logicalPageId) continue;
-      page.logicalPageTitle = title;
       page.title = title;
       page.titleHtml = title;
     }
@@ -113,18 +108,16 @@ export function deleteSheets(notebookId: string, logicalPageId: string, sheetId?
   if (!notebook.pages.length) {
     const section = record.sections[0];
     const replacementTitle = "Page mới";
-    const replacementLogicalId = uid("logical-page");
+    const replacementLogicalId = uid("page");
     const replacement = blankPage(uid("page"), replacementTitle) as SheetPage;
-    replacement.logicalPageId = replacementLogicalId;
-    replacement.logicalPageTitle = replacementTitle;
-    replacement.sheetTitle = "Tờ 1";
-    replacement.sheetOrder = 0;
+    replacement.pageId = replacementLogicalId;
+    replacement.order = 0;
     notebook.pages = [replacement];
     notebook.activePageId = replacement.id;
     section.pageIds.push(String(replacement.id));
     record.activeSectionId = section.id;
   } else if (remainingGroup.length) {
-    const next = remainingGroup.sort((a, b) => Number(a.sheetOrder || 0) - Number(b.sheetOrder || 0))[0];
+    const next = remainingGroup.sort((a, b) => Number(a.order || 0) - Number(b.order || 0))[0];
     notebook.activePageId = next.id;
     for (const relation of synced.library.relations) {
       const target = relation.target as ScopedTarget;
@@ -148,14 +141,13 @@ export function reorderSheet(notebookId: string, sectionId: string, logicalPageI
     const section = record.sections.find((item: NoteSection) => item.id === sectionId);
     if (!section) return;
     const sheets = (notebook.pages || []).filter((page: SheetPage) => sheetLogicalId(page) === logicalPageId)
-      .sort((a: SheetPage, b: SheetPage) => Number(a.sheetOrder || 0) - Number(b.sheetOrder || 0));
+      .sort((a: SheetPage, b: SheetPage) => Number(a.order || 0) - Number(b.order || 0));
     const index = sheets.findIndex((sheet: SheetPage) => String(sheet.id) === sheetId);
     const targetIndex = index + direction;
     if (index < 0 || targetIndex < 0 || targetIndex >= sheets.length) return;
     [sheets[index], sheets[targetIndex]] = [sheets[targetIndex], sheets[index]];
     sheets.forEach((sheet: SheetPage, order: number) => {
-      sheet.sheetOrder = order;
-      sheet.sheetTitle = `Tờ ${order + 1}`;
+      sheet.order = order;
     });
     const ids = new Set(sheets.map((sheet: SheetPage) => String(sheet.id)));
     const first = section.pageIds.findIndex((id: string) => ids.has(id));

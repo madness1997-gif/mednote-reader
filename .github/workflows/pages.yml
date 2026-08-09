@@ -178,8 +178,8 @@ jobs:
                 });
                 try {
                   return await new Promise((resolve, reject) => {
-                    const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v3:meta');
-                    request.onsuccess = () => resolve(request.result?.activeWorkspaceId || '');
+                    const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v5:meta');
+                    request.onsuccess = () => resolve(request.result?.activeDocumentContextId || '');
                     request.onerror = () => reject(request.error);
                   });
                 } finally {
@@ -192,7 +192,7 @@ jobs:
 
             // Recreate the IndexedDB-only startup used by real sessions.
             await page.evaluate(() => {
-              localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v4', savedAt: Date.now() }));
+              localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v5', savedAt: Date.now() }));
             });
             await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
 

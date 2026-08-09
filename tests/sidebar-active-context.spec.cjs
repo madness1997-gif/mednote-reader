@@ -77,8 +77,8 @@ test('OneNote sidebar survives an IndexedDB-only reload like the real phone sess
     });
     try {
       return await new Promise((resolve, reject) => {
-        const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v3:meta');
-        request.onsuccess = () => resolve(request.result?.activeWorkspaceId || '');
+        const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v5:meta');
+        request.onsuccess = () => resolve(request.result?.activeDocumentContextId || '');
         request.onerror = () => reject(request.error);
       });
     } finally {
@@ -91,7 +91,7 @@ test('OneNote sidebar survives an IndexedDB-only reload like the real phone sess
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
     page.evaluate(() => {
-      localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v4', savedAt: Date.now() }));
+      localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v5', savedAt: Date.now() }));
       window.location.reload();
     }),
   ]);
@@ -188,6 +188,16 @@ test('opening a lazy page renders its hydrated body without a React update loop'
     page2Lazy: true,
     page2Body: '',
   });
+
+  // Let the autosave run while page 2 is still a lazy shell. Its empty render
+  // fields must not replace the full normalized Sheet.content in IndexedDB.
+  await page.waitForTimeout(700);
+  await expect.poll(() => page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => { const request = indexedDB.open('mednote-local', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const body = await new Promise((resolve, reject) => { const request = db.transaction('documents', 'readonly').objectStore('documents').get('library:v5:sheet:lazy-render-page-2'); request.onsuccess = () => resolve(request.result?.content?.body || ''); request.onerror = () => reject(request.error); });
+    db.close();
+    return body;
+  }), { timeout: 12_000 }).toBe('LAZY_RENDER_CONTENT');
 
   await page.evaluate(() => {
     const next = structuredClone(window.__MEDNOTE_LIVE_STATE__);

@@ -175,7 +175,7 @@ export function renderNavigator(context: NonNullable<ReturnType<typeof currentCo
     activeSheetId: String(activeSheet?.id || ""),
     expandedId,
     sections: record.sections.map((section) => [section.id, section.title, section.pageIds]),
-    pages: (notebook.pages || []).map((page: SheetPage) => [page.id, page.logicalPageId, page.logicalPageTitle, page.sheetOrder]),
+    pages: (notebook.pages || []).map((page: SheetPage) => [page.id, page.pageId, page.title, page.order]),
     relations: view.relations
       .filter((relation) => relation.target.notebookId === record.id)
       .map((relation) => [relation.id, relation.kind, relation.target.type, relation.target.id]),
