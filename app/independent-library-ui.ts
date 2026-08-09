@@ -38,7 +38,7 @@ function handleClick(event: Event, panel: HTMLElement, backdrop: HTMLElement) {
   }
   if (target.dataset.deleteDocument) {
     const record = view.documents.find((item) => item.id === target.dataset.deleteDocument);
-    if (window.confirm(`Xóa PDF “${record?.name || ""}” khỏi thư viện? Notebook, section và trang ghi chú vẫn được giữ; các trích dẫn cũ chỉ còn dấu nguồn không khả dụng.`)) {
+    if (window.confirm(`Xóa PDF “${record?.name || ""}” khỏi thư viện? Notebook, section và trang ghi chú vẫn được giữ độc lập; liên kết về PDF này sẽ được gỡ.`)) {
       void deleteDocument(target.dataset.deleteDocument!).then((ok) => { if (ok) reload(); });
     }
     return;

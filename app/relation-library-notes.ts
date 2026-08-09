@@ -33,7 +33,7 @@ export function createNotebook(title: string) {
     id: workspaceId, kind: "empty", name: notebook.title, documents: [], activeDocumentId: null,
     notebooks: [notebook], activeNotebookId: notebook.id, sourcePage: 1,
   });
-  const section: NoteSection = { id: uid("section"), title: "Chưa phân loại", pageIds: [notebook.pages[0].id], createdAt: now(), updatedAt: now() };
+  const section: NoteSection = { id: uid("section"), title: "Phần 1", pageIds: [notebook.pages[0].id], createdAt: now(), updatedAt: now() };
   synced.library.notebooks.push({
     id: notebook.id, title: notebook.title, workspaceId, sections: [section], activeSectionId: section.id, available: true, updatedAt: now(),
   });

@@ -59,7 +59,7 @@ async function deletePdfBlob(documentId: string) {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
-  } catch { /* Keep the unavailable source record for content traceability. */ }
+  } catch { /* The metadata update still succeeds when the browser cannot open IndexedDB. */ }
 }
 
 export async function deleteDocument(documentId: string) {
@@ -69,13 +69,27 @@ export async function deleteDocument(documentId: string) {
     if (workspace.id === META_WORKSPACE_ID) return [];
     const documents = (workspace.documents || []).filter((document: AnyObject) => String(document.id) !== documentId);
     if (!documents.length && (workspace.notebooks || []).every(isPlaceholderNotebook)) return [];
-    return [{ ...workspace, documents, activeDocumentId: documents.some((item: AnyObject) => item.id === workspace.activeDocumentId) ? workspace.activeDocumentId : documents[0]?.id || null, kind: documents.length > 1 ? "collection" : documents.length ? "document" : "empty" }];
+    const activeSourceDeleted = String(workspace.activeDocumentId || "") === documentId;
+    const notebooks = (workspace.notebooks || []).map((notebook: AnyObject) => ({
+      ...notebook,
+      pages: (notebook.pages || []).map((page: AnyObject) => {
+        const detached = (page.excerpts || []).some((excerpt: AnyObject) => String(excerpt.documentId || "") === documentId);
+        return {
+          ...page,
+          citationPage: detached || activeSourceDeleted ? null : page.citationPage,
+          excerpts: (page.excerpts || []).map((excerpt: AnyObject) => String(excerpt.documentId || "") === documentId
+            ? { ...excerpt, sourceKind: "manual", documentId: undefined, documentName: undefined, page: undefined, rect: undefined }
+            : excerpt),
+        };
+      }),
+    }));
+    return [{ ...workspace, documents, notebooks, activeDocumentId: documents.some((item: AnyObject) => item.id === workspace.activeDocumentId) ? workspace.activeDocumentId : documents[0]?.id || null, kind: documents.length > 1 ? "collection" : documents.length ? "document" : "empty" }];
   });
   const record = synced.library.documents.find((document) => document.id === documentId);
   if (record) record.available = false;
   synced.library.groups = synced.library.groups.map((group) => ({ ...group, documentIds: group.documentIds.filter((id) => id !== documentId), updatedAt: now() })).filter((group) => group.documentIds.length);
-  // Workspace relations cannot open a deleted source. Content relations stay as an unavailable trace.
-  synced.library.relations = synced.library.relations.filter((relation) => relation.kind === "content" || !(relation.source.type === "document" && relation.source.id === documentId));
+  // A removed PDF leaves every note usable on its own, without a stale source link.
+  synced.library.relations = synced.library.relations.filter((relation) => !(relation.source.type === "document" && relation.source.id === documentId));
   ensureVisibleWorkspace(synced.state);
   writeStateAndLibrary(synced.state, synced.library, true);
   await deletePdfBlob(documentId);
@@ -83,7 +97,8 @@ export async function deleteDocument(documentId: string) {
 }
 
 export function pdfInput() {
-  return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]')).find((input) => input.accept.toLowerCase().includes("pdf"));
+  return document.querySelector<HTMLInputElement>('input[type="file"][data-pdf-input="library"]')
+    || Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]')).find((input) => input.accept.toLowerCase().includes("pdf"));
 }
 
 export function importPdf() {

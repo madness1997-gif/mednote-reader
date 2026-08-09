@@ -87,6 +87,16 @@ function reconcile(state: AppState, inputLibrary: RelationLibrary) {
     documentIds: group.documentIds.filter((id, index, array) => array.indexOf(id) === index),
   })).filter((group) => group.documentIds.length > 0);
 
+  // A deleted PDF must never keep a relation that can reopen or point back to
+  // a stale source. The notebook itself stays available as an independent note.
+  const availableDocumentIds = new Set(library.documents.filter((document) => document.available).map((document) => document.id));
+  const availableGroupIds = new Set(library.groups
+    .filter((group) => group.documentIds.some((id) => availableDocumentIds.has(id)))
+    .map((group) => group.id));
+  library.relations = library.relations.filter((relation) => relation.source.type === "document"
+      ? availableDocumentIds.has(relation.source.id)
+      : availableGroupIds.has(relation.source.id));
+
   for (const notebookRecord of library.notebooks.filter((item) => item.available)) {
     const found = findNotebook(state, notebookRecord.id);
     if (!found) continue;

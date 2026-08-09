@@ -274,7 +274,7 @@ type DictionaryLookupState = {
 
 type WorkspaceItem = {
   id: string;
-  kind: "document" | "collection" | "demo" | "empty";
+  kind: "document" | "collection" | "temporary" | "demo" | "empty";
   name: string;
   documents: LibraryDocument[];
   activeDocumentId: string | null;
@@ -801,7 +801,7 @@ function normalizeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
   };
 }
 
-function createBlankPage(citationPage = 1, index = 1, paper: PaperSettings = DEFAULT_NEW_NOTE_PAPER, text: TextSettings = DEFAULT_NEW_NOTE_TEXT): NotePage {
+function createBlankPage(citationPage: number | null = 1, index = 1, paper: PaperSettings = DEFAULT_NEW_NOTE_PAPER, text: TextSettings = DEFAULT_NEW_NOTE_TEXT): NotePage {
   const firstAid = paper.template === "first-aid";
   return {
     id: uid("page"),
@@ -825,6 +825,28 @@ function createNotebook(title: string, citationPage = 1): Notebook {
     activePageId: page.id,
     createdAt: Date.now(),
   };
+}
+
+const READER_PLACEHOLDER_PREFIX = "__mednote_reader_placeholder__:";
+
+function createReaderPlaceholder(sourceId: string): Notebook {
+  const page = createBlankPage(null, 1, { ...DEFAULT_NEW_NOTE_PAPER, template: "blank" });
+  page.id = `${READER_PLACEHOLDER_PREFIX}page:${sourceId}`;
+  page.title = "Reader";
+  page.titleHtml = "Reader";
+  page.body = "";
+  page.bodyHtml = "";
+  return {
+    id: `${READER_PLACEHOLDER_PREFIX}${sourceId}`,
+    title: "Reader",
+    pages: [page],
+    activePageId: page.id,
+    createdAt: 0,
+  };
+}
+
+function isReaderPlaceholder(notebook: Notebook | undefined) {
+  return Boolean(notebook && notebook.id.startsWith(READER_PLACEHOLDER_PREFIX));
 }
 
 function createDemoWorkspace(pages: NotePage[] = initialPages): WorkspaceItem {
@@ -2075,7 +2097,9 @@ function InkCanvas({ tool, color, width, penStyle, shape, strokes, onCommit }: I
 }
 
 export default function Home() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewPdfInputRef = useRef<HTMLInputElement>(null);
+  const libraryPdfInputRef = useRef<HTMLInputElement>(null);
+  const temporaryPdfBlobsRef = useRef(new Map<string, Blob>());
   const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
@@ -2686,6 +2710,11 @@ export default function Home() {
       return;
     }
     setPdfStatus("loading");
+    const temporaryBlob = temporaryPdfBlobsRef.current.get(activeDocument.id);
+    if (temporaryBlob) {
+      setPdfSource({ blob: temporaryBlob, documentId: activeDocument.id });
+      return () => { cancelled = true; };
+    }
     void readLocalPdf(activeDocument.id).then((stored) => {
       if (cancelled) return;
       if (!stored) {
@@ -3467,7 +3496,16 @@ export default function Home() {
       let proxy: PDFDocumentProxy | null = target.id === loadedDocumentId ? currentPdfDocument : null;
       const temporary = !proxy;
       try {
-        if (!proxy) proxy = await loadStoredPdfDocument(target.id);
+        if (!proxy) {
+          const temporaryBlob = temporaryPdfBlobsRef.current.get(target.id);
+          if (temporaryBlob) {
+            const pdfjs = await import("pdfjs-dist");
+            pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+            proxy = await pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(await temporaryBlob.arrayBuffer()))).promise;
+          } else {
+            proxy = await loadStoredPdfDocument(target.id);
+          }
+        }
         if (!proxy) continue;
         for (let pageNumber = 1; pageNumber <= proxy.numPages && found.length < 300; pageNumber += 1) {
           const page = await proxy.getPage(pageNumber);
@@ -3515,7 +3553,8 @@ export default function Home() {
     }
     setToast(mode === "print" ? "Đang chuẩn bị bản in…" : "Đang tạo PDF có chú thích…");
     try {
-      const stored = await readLocalPdf(activeDocument.id);
+      const temporaryBlob = temporaryPdfBlobsRef.current.get(activeDocument.id);
+      const stored = temporaryBlob ? { blob: temporaryBlob, name: activeDocument.name } : await readLocalPdf(activeDocument.id);
       if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");
       const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
       const output = await PDFDocument.load(await stored.blob.arrayBuffer(), { ignoreEncryption: true });
@@ -3760,56 +3799,110 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
-  const handlePdfFiles = async (selection: FileList | null) => {
+  const handlePdfFiles = async (selection: FileList | null, saveToLibrary: boolean) => {
     const files = Array.from(selection ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
     if (!files.length) {
       setToast("Vui lòng chọn tệp PDF");
       return;
     }
-    const documents: LibraryDocument[] = files.map((file) => ({
-      id: `doc-${stableId(`${file.name}:${file.size}:${file.lastModified}`)}`,
+    const sessionToken = uid("session");
+    const documents: LibraryDocument[] = files.map((file, index) => ({
+      id: saveToLibrary
+        ? `doc-${stableId(`${file.name}:${file.size}:${file.lastModified}`)}`
+        : `temp-doc-${sessionToken}-${index}`,
       name: file.name,
       size: file.size,
       lastModified: file.lastModified,
       reader: { ...DEFAULT_READER },
     }));
-    try {
-      await Promise.all(files.map((file, index) => saveLocalPdf(file, documents[index])));
-    } catch {
-      setToast("PDF mở được nhưng chưa lưu trên thiết bị");
+    if (saveToLibrary) {
+      try {
+        await Promise.all(files.map((file, index) => saveLocalPdf(file, documents[index])));
+      } catch {
+        setToast("PDF mở được nhưng chưa lưu trên thiết bị");
+      }
+    } else {
+      temporaryPdfBlobsRef.current.clear();
+      files.forEach((file, index) => temporaryPdfBlobsRef.current.set(documents[index].id, file));
     }
 
-    const workspaceId = files.length === 1
-      ? `workspace-${documents[0].id}`
-      : `collection-${stableId(documents.map((document) => document.id).sort().join(":"))}`;
-    const existing = workspaces.find((workspace) => workspace.id === workspaceId);
+    const workspaceId = saveToLibrary
+      ? files.length === 1
+        ? `workspace-${documents[0].id}`
+        : `collection-${stableId(documents.map((document) => document.id).sort().join(":"))}`
+      : `temporary-${sessionToken}`;
+    const existing = saveToLibrary ? workspaces.find((workspace) => workspace.id === workspaceId) : undefined;
     if (existing) {
       setActiveWorkspaceId(existing.id);
       setLibraryOpen(false);
-      setActiveTool("text");
-      setToast("Đã mở lại ghi chú đã lưu");
+      setWorkspaceMode("reader");
+      setToast("Đã mở lại PDF trong thư viện");
       return;
     }
 
     const name = files.length === 1
       ? files[0].name.replace(/\.pdf$/i, "")
       : `Bộ tài liệu · ${files[0].name.replace(/\.pdf$/i, "")} +${files.length - 1}`;
-    const notebook = createNotebook(`Ghi chú — ${name}`);
+    const placeholder = createReaderPlaceholder(workspaceId);
     const workspace: WorkspaceItem = {
       id: workspaceId,
-      kind: files.length === 1 ? "document" : "collection",
+      kind: saveToLibrary ? (files.length === 1 ? "document" : "collection") : "temporary",
       name,
       documents,
       activeDocumentId: documents[0].id,
-      notebooks: [notebook],
-      activeNotebookId: notebook.id,
+      notebooks: [placeholder],
+      activeNotebookId: placeholder.id,
       sourcePage: 1,
     };
-    setWorkspaces((items) => [workspace, ...items.filter((item) => item.kind !== "empty")]);
+    setWorkspaces((items) => [workspace, ...items.filter((item) => item.kind !== "temporary")]);
     setActiveWorkspaceId(workspace.id);
-    setActiveTool("text");
+    setWorkspaceMode("reader");
     setLibraryOpen(false);
-    setToast(files.length === 1 ? "Đã tạo sổ ghi chú cho tài liệu" : "Đã tạo ghi chú cho cụm tài liệu");
+    setToast(saveToLibrary
+      ? (files.length === 1 ? "Đã lưu PDF vào thư viện — chưa tạo note" : "Đã lưu cụm PDF — chưa tạo note")
+      : (files.length === 1 ? "Đang xem PDF tạm — không lưu, không tạo note" : "Đang xem cụm PDF tạm — không lưu, không tạo note"));
+  };
+
+  const saveTemporaryWorkspace = async () => {
+    if (activeWorkspace.kind !== "temporary") return;
+    const savedDocuments = activeWorkspace.documents.map((document) => ({
+      ...document,
+      id: `doc-${stableId(`${document.name}:${document.size}:${document.lastModified}`)}`,
+    }));
+    const savedWorkspaceId = savedDocuments.length === 1
+      ? `workspace-${savedDocuments[0].id}`
+      : `collection-${stableId(savedDocuments.map((document) => document.id).sort().join(":"))}`;
+    const existing = workspaces.find((workspace) => workspace.id === savedWorkspaceId);
+    if (existing) {
+      setWorkspaces((items) => items.filter((workspace) => workspace.id !== activeWorkspace.id));
+      setActiveWorkspaceId(existing.id);
+      temporaryPdfBlobsRef.current.clear();
+      setToast("PDF này đã có trong thư viện");
+      return;
+    }
+    try {
+      await Promise.all(activeWorkspace.documents.map(async (document, index) => {
+        const blob = temporaryPdfBlobsRef.current.get(document.id);
+        if (!blob) throw new Error("missing temporary PDF");
+        await saveLocalPdf(blob, savedDocuments[index]);
+      }));
+      const placeholder = createReaderPlaceholder(savedWorkspaceId);
+      const savedWorkspace: WorkspaceItem = {
+        ...activeWorkspace,
+        id: savedWorkspaceId,
+        kind: savedDocuments.length === 1 ? "document" : "collection",
+        documents: savedDocuments,
+        activeDocumentId: savedDocuments[0].id,
+        notebooks: [placeholder],
+        activeNotebookId: placeholder.id,
+      };
+      setWorkspaces((items) => items.map((workspace) => workspace.id === activeWorkspace.id ? savedWorkspace : workspace));
+      setActiveWorkspaceId(savedWorkspaceId);
+      temporaryPdfBlobsRef.current.clear();
+      setToast("Đã lưu PDF đang xem vào thư viện — chưa tạo note");
+    } catch {
+      setToast("Không thể lưu PDF đang xem vào thư viện");
+    }
   };
 
   const addNotePage = () => {
@@ -3820,14 +3913,21 @@ export default function Home() {
   };
 
   const addNotebook = () => {
-    const notebook = createNotebook(`Sổ ${activeWorkspace.notebooks.length + 1} — ${activeWorkspace.name}`, sourcePage);
+    const existingNotebooks = activeWorkspace.notebooks.filter((item) => !isReaderPlaceholder(item));
+    const notebook = createNotebook(
+      activeWorkspace.documents.length
+        ? `Ghi chú — ${activeWorkspace.name}`
+        : `Sổ ghi chú ${existingNotebooks.length + 1}`,
+      activeWorkspace.documents.length ? sourcePage : 1,
+    );
     updateActiveWorkspace((workspace) => ({
       ...workspace,
-      notebooks: [...workspace.notebooks, notebook],
+      notebooks: [...workspace.notebooks.filter((item) => !isReaderPlaceholder(item)), notebook],
       activeNotebookId: notebook.id,
     }));
     setActiveTool("text");
-    setToast("Đã tạo sổ ghi chú mới");
+    setWorkspaceMode(activeWorkspace.documents.length ? "split" : "note");
+    setToast(activeWorkspace.documents.length ? "Đã tạo note cho tài liệu" : "Đã tạo sổ ghi chú mới");
   };
 
   const deleteNotePage = async () => {
@@ -3861,17 +3961,23 @@ export default function Home() {
 
   const deleteNotebook = async () => {
     const pageCount = activeNotebook.pages.length;
-    const lastNotebook = activeWorkspace.notebooks.length === 1;
+    const realNotebooks = activeWorkspace.notebooks.filter((item) => !isReaderPlaceholder(item));
+    const lastNotebook = realNotebooks.length === 1;
     const warning = lastNotebook
-      ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới cho tài liệu này.`
+      ? activeWorkspace.documents.length
+        ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? PDF vẫn được giữ để đọc, không tự tạo note mới.`
+        : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới.`
       : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Thao tác này không thể hoàn tác.`;
     if (!window.confirm(warning)) return;
     const deletedPageIds = new Set(activeNotebook.pages.map((page) => page.id));
     const assetIds = activeNotebook.pages.flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!));
     await Promise.allSettled(assetIds.map(deleteLocalAsset));
     if (lastNotebook) {
-      const replacement = createNotebook(`Ghi chú — ${activeWorkspace.name}`, sourcePage);
+      const replacement = activeWorkspace.documents.length
+        ? createReaderPlaceholder(activeWorkspace.id)
+        : createNotebook("Sổ ghi chú mới");
       updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: [replacement], activeNotebookId: replacement.id }));
+      if (activeWorkspace.documents.length) setWorkspaceMode("reader");
     } else {
       const index = activeWorkspace.notebooks.findIndex((notebook) => notebook.id === activeNotebook.id);
       const nextNotebooks = activeWorkspace.notebooks.filter((notebook) => notebook.id !== activeNotebook.id);
@@ -3881,7 +3987,9 @@ export default function Home() {
     setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
     setNotePanel(null);
     setActiveTool("text");
-    setToast(lastNotebook ? "Đã xóa sổ note và tạo sổ trống" : "Đã xóa sổ note");
+    setToast(lastNotebook
+      ? activeWorkspace.documents.length ? "Đã xóa note; PDF vẫn được giữ độc lập" : "Đã xóa sổ note và tạo sổ trống"
+      : "Đã xóa sổ note");
   };
 
   const beginWorkspaceRename = (workspace: WorkspaceItem) => {
@@ -3930,22 +4038,50 @@ export default function Home() {
   const deleteWorkspace = async (workspaceId: string) => {
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
     if (!target) return;
-    const pageCount = target.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
+    const keptNotebooks = target.notebooks.filter((notebook) => !isReaderPlaceholder(notebook));
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
-    if (!window.confirm(`Xóa ${targetLabel} “${target.name}” cùng ${target.notebooks.length} sổ và ${pageCount} trang note? Thao tác này không thể hoàn tác.`)) return;
-    const assetIds = target.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!)));
-    await Promise.allSettled([...target.documents.map((document) => deleteLocalPdf(document.id)), ...assetIds.map(deleteLocalAsset)]);
-    const deletedPageIds = new Set(target.notebooks.flatMap((notebook) => notebook.pages.map((page) => page.id)));
+    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${keptNotebooks.length ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    if (target.kind === "temporary") {
+      target.documents.forEach((document) => temporaryPdfBlobsRef.current.delete(document.id));
+    } else {
+      await Promise.allSettled(target.documents.map((document) => deleteLocalPdf(document.id)));
+    }
     const deletedDocumentIds = new Set(target.documents.map((document) => document.id));
+    const detachSources = (notebook: Notebook): Notebook => ({
+      ...notebook,
+      pages: notebook.pages.map((page) => {
+        return {
+          ...page,
+          citationPage: null,
+          excerpts: page.excerpts.map((excerpt) => excerpt.documentId && deletedDocumentIds.has(excerpt.documentId)
+            ? { ...excerpt, sourceKind: "manual", documentId: undefined, documentName: undefined, page: undefined, rect: undefined }
+            : excerpt),
+        };
+      }),
+    });
     const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
-    const remaining = workspaces.filter((workspace) => workspace.id !== workspaceId);
+    const detachedWorkspace: WorkspaceItem | null = keptNotebooks.length ? {
+      ...target,
+      kind: "empty",
+      name: keptNotebooks[0].title,
+      documents: [],
+      activeDocumentId: null,
+      notebooks: keptNotebooks.map(detachSources),
+      activeNotebookId: keptNotebooks.some((notebook) => notebook.id === target.activeNotebookId) ? target.activeNotebookId : keptNotebooks[0].id,
+      sourcePage: 1,
+    } : null;
+    const remaining = workspaces.flatMap((workspace) => workspace.id !== workspaceId
+      ? [workspace]
+      : detachedWorkspace ? [detachedWorkspace] : []);
     const nextWorkspaces = remaining.length ? remaining : [createEmptyWorkspace()];
     setWorkspaces(nextWorkspaces);
-    if (activeWorkspaceId === workspaceId) setActiveWorkspaceId(nextWorkspaces[Math.min(targetIndex, nextWorkspaces.length - 1)].id);
-    setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
+    if (activeWorkspaceId === workspaceId) {
+      setActiveWorkspaceId(detachedWorkspace?.id || nextWorkspaces[Math.min(targetIndex, nextWorkspaces.length - 1)].id);
+      setWorkspaceMode(detachedWorkspace ? "note" : "reader");
+    }
     setPdfHistory((history) => Object.fromEntries(Object.entries(history).filter(([documentId]) => !deletedDocumentIds.has(documentId))));
     setNotePanel(null);
-    setToast(`Đã xóa ${targetLabel} và note liên quan`);
+    setToast(detachedWorkspace ? `Đã xóa ${targetLabel}; note đã trở thành note độc lập` : `Đã xóa ${targetLabel}`);
   };
 
   const deleteActiveDocument = async () => {
@@ -3955,7 +4091,8 @@ export default function Home() {
       return;
     }
     if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
-    await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
+    if (activeWorkspace.kind === "temporary") temporaryPdfBlobsRef.current.delete(activeDocument.id);
+    else await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
     const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);
     const nextDocuments = activeWorkspace.documents.filter((document) => document.id !== activeDocument.id);
     const nextActiveDocument = nextDocuments[Math.min(index, nextDocuments.length - 1)];
@@ -3964,6 +4101,18 @@ export default function Home() {
       documents: nextDocuments,
       activeDocumentId: nextActiveDocument.id,
       sourcePage: nextActiveDocument.reader.page,
+      notebooks: workspace.notebooks.map((notebook) => ({
+        ...notebook,
+        pages: notebook.pages.map((page) => {
+          return {
+            ...page,
+            citationPage: null,
+            excerpts: page.excerpts.map((excerpt) => excerpt.documentId === activeDocument.id
+              ? { ...excerpt, sourceKind: "manual", documentId: undefined, documentName: undefined, page: undefined, rect: undefined }
+              : excerpt),
+          };
+        }),
+      })),
     }));
     setPdfHistory((history) => {
       const next = { ...history };
@@ -4037,6 +4186,12 @@ export default function Home() {
   };
 
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
+    if (mode !== "reader" && isReaderPlaceholder(activeNotebook)) {
+      setToast(activeWorkspace.kind === "temporary"
+        ? "PDF đang mở tạm. Hãy lưu vào thư viện trước nếu muốn tạo note gắn tài liệu."
+        : "PDF này chưa có note. Chọn “Tạo note” khi bạn muốn ghi chú.");
+      return;
+    }
     setWorkspaceMode(mode);
     if (mode === "note") {
       setPdfSelection(null);
@@ -4106,7 +4261,8 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <input ref={fileInputRef} className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files); event.currentTarget.value = ""; }} />
+      <input ref={previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, false); event.currentTarget.value = ""; }} />
+      <input ref={libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, true); event.currentTarget.value = ""; }} />
       <header className="topbar">
         <div className="brand-group">
           <button className="icon-button menu-button" aria-label="Mở thư viện" onClick={() => setLibraryOpen(true)}><Menu size={19} /></button>
@@ -4115,9 +4271,9 @@ export default function Home() {
         </div>
         <div className="top-actions">
           <nav className="workspace-mode-switcher" aria-label="Chế độ không gian làm việc">
-            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} title="Hiện Reader và Note" aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
+            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} disabled={isReaderPlaceholder(activeNotebook)} title={isReaderPlaceholder(activeNotebook) ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
             <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
-            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} title="Chỉ hiện Note" aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
+            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={isReaderPlaceholder(activeNotebook)} title={isReaderPlaceholder(activeNotebook) ? "PDF này chưa có note" : "Chỉ hiện Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
           </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button
@@ -4129,7 +4285,9 @@ export default function Home() {
             {driveStatus === "syncing" || driveStatus === "connecting" ? <RefreshCw size={16} /> : driveToken ? <Cloud size={16} /> : <CloudOff size={16} />}
             <span>{driveStatus === "syncing" ? "Đang đồng bộ" : driveToken ? "Drive" : "Kết nối Drive"}</span>
           </button>
-          <button className="primary-button" onClick={() => fileInputRef.current?.click()}><FolderOpen size={16} /> Thêm tài liệu</button>
+          {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
+          {activeWorkspace.kind !== "temporary" && activeWorkspace.documents.length > 0 && isReaderPlaceholder(activeNotebook) && <button className="save-session-button" onClick={addNotebook}><NotebookTabs size={15} /> Tạo note</button>}
+          <button className="primary-button" onClick={() => previewPdfInputRef.current?.click()}><FolderOpen size={16} /> Mở PDF</button>
         </div>
       </header>
 
@@ -4175,10 +4333,10 @@ export default function Home() {
       {libraryOpen && (
         <div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
           <aside className="library-panel" aria-label="Thư viện tài liệu" onPointerDown={(event) => event.stopPropagation()}>
-            <div className="library-header"><div><strong>Thư viện</strong><span>Mỗi mục có sổ ghi chú riêng</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
-            <button className="library-import" onClick={() => fileInputRef.current?.click()}><FolderOpen size={18} /><span><strong>Thêm PDF hoặc cụm tài liệu</strong><small>Chọn nhiều PDF cùng lúc để tạo một cụm</small></span></button>
+            <div className="library-header"><div><strong>Thư viện</strong><span>PDF và note được lưu độc lập; chỉ liên kết khi bạn chọn</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
+            <button className="library-import" onClick={() => libraryPdfInputRef.current?.click()}><FolderOpen size={18} /><span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>Chỉ thao tác này mới lưu tệp PDF trên thiết bị</small></span></button>
             <div className="library-list">
-              {workspaces.map((workspace) => {
+              {workspaces.filter((workspace) => workspace.kind !== "temporary").map((workspace) => {
                 const pageCount = workspace.notebooks.reduce((sum, notebook) => sum + notebook.pages.length, 0);
                 const isRenaming = renamingWorkspaceId === workspace.id;
                 return (
@@ -4191,12 +4349,12 @@ export default function Home() {
                     ) : (
                       <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
                         <span className="library-icon"><FileText size={19} /></span>
-                        <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Chưa có PDF" : "1 tài liệu"} · {workspace.notebooks.length} sổ · {pageCount} trang note</small></span>
+                        <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Note độc lập" : "1 tài liệu"} · {workspace.notebooks.filter((item) => !isReaderPlaceholder(item)).length} sổ · {isReaderPlaceholder(workspace.notebooks[0]) ? 0 : pageCount} trang note</small></span>
                       </button>
                     )}
                     {workspace.kind !== "empty" && (isRenaming
                       ? <><button className="library-action library-save" onClick={() => commitWorkspaceRename(workspace.id)} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" onClick={cancelWorkspaceRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
-                      : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${workspace.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa tài liệu và note liên quan"><Trash2 size={17} /></button></>)}
+                      : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${workspace.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa PDF; giữ note thành note độc lập"><Trash2 size={17} /></button></>)}
                   </div>
                 );
               })}
@@ -4371,9 +4529,9 @@ export default function Home() {
                 {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
               </div>
             ) : activeDocument ? (
-              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => fileInputRef.current?.click()}>Chọn lại PDF</button>}</div>
+              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" onClick={() => libraryPdfInputRef.current?.click()}>Chọn lại PDF</button>}</div>
             ) : activeWorkspace.kind === "demo" ? <><div className="demo-reader-hint"><BookOpen size={16} /><span>Đây là tài liệu minh họa. Thêm một PDF để dùng chọn chữ, chú thích và cắt hình.</span></div><DemoDocument page={sourcePage} /></> : (
-              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Thêm PDF để đọc và tạo ghi chú đi kèm.</span><button className="primary-button" onClick={() => fileInputRef.current?.click()}>Thêm tài liệu</button></div>
+              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Mở PDF để đọc tạm, hoặc lưu riêng vào thư viện khi cần.</span><button className="primary-button" onClick={() => previewPdfInputRef.current?.click()}>Mở PDF</button></div>
             )}
           </div>
         </section>

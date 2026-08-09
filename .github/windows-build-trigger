@@ -1,4 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-09T03:36:00+07:00
-Base app commit: ab3b8f8fe51ba13b926a50eaed2fdcc44f6b1629
-Reason: verify Windows PDF canvas LRU and 192 MB soft cache budget
+Requested: 2026-08-09T16:01:19+07:00
+Base app commit: the main commit containing this trigger
+Reason: rebuild desktop 1.2.7 with full web feature parity and independent PDF/note lifecycle fixes

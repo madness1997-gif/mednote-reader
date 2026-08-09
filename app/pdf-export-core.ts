@@ -145,7 +145,7 @@ function pdfPageSize(width: number, height: number) {
     { widthMm: candidate.widthMm, heightMm: candidate.heightMm, expectedWidth: candidate.naturalWidth },
     { widthMm: candidate.heightMm, heightMm: candidate.widthMm, expectedWidth: Math.min(920, candidate.naturalWidth * 1.32) },
   ]);
-  const best = candidates.reduce((current, candidate) => {
+  const best = candidates.reduce<(typeof candidates)[number] & { score: number }>((current, candidate) => {
     const candidateRatio = candidate.widthMm / candidate.heightMm;
     const score = Math.abs(Math.log(ratio / candidateRatio)) * 100 + Math.abs(width - candidate.expectedWidth) / 120;
     return score < current.score ? { ...candidate, score } : current;

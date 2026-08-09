@@ -53,6 +53,9 @@ body {
 .danger-icon { color: #b8575c; }
 .danger-icon:hover { background: #fff0f0; color: #a84449; }
 .primary-button { height: 34px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 8px; padding: 0 12px; background: var(--teal); color: white; font-weight: 650; cursor: pointer; }
+.save-session-button { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #82aeb1; border-radius: 8px; background: #f3fbfb; color: var(--teal); font-weight: 650; cursor: pointer; }
+.save-session-button:hover { background: var(--selected); }
+.workspace-mode-switcher button:disabled { opacity: .42; cursor: not-allowed; }
 .drive-button { height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #cbd9dc; border-radius: 8px; background: white; color: #60727b; font-size: 11px; font-weight: 700; cursor: pointer; }
 .drive-button.connected { border-color: #8ebfc1; background: var(--selected); color: var(--teal); }
 .drive-button.busy svg, .spin { animation: drive-spin .9s linear infinite; }

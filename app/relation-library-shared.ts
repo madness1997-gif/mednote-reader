@@ -245,7 +245,16 @@ export function writeStateAndLibrary(state: AppState, library: RelationLibrary, 
   const workspaces = state.workspaces.filter((workspace) => workspace.id !== META_WORKSPACE_ID);
   workspaces.push(hiddenWorkspace(nextLibrary));
   const nextState = { ...state, workspaces, savedAt: now() };
-  if (forceState) localStorage.setItem(APP_KEY, JSON.stringify(nextState));
+  if (forceState) {
+    localStorage.setItem(APP_KEY, JSON.stringify(nextState));
+    // Chained sidebar actions (for example: create Sheet, then open it) must
+    // immediately read the state they just wrote. Otherwise readAppState()
+    // still sees React's previous live snapshot and silently rolls the action back.
+    if (typeof window !== "undefined") {
+      (window as Window & { __MEDNOTE_LIVE_STATE__?: AppState }).__MEDNOTE_LIVE_STATE__ = clone(nextState);
+      window.dispatchEvent(new CustomEvent("mednote-live-state-changed"));
+    }
+  }
   return { state: nextState, library: nextLibrary };
 }
 
@@ -277,13 +286,14 @@ export function normalizeSections(record: NotebookRecord | undefined, notebook: 
   const pages = Array.isArray(notebook.pages) ? notebook.pages : [];
   const pageIds = new Set(pages.map((page: AnyObject) => String(page.id)));
   const seen = new Set<string>();
-  const sections = (record?.sections || []).map((section) => ({
+  const sections = (record?.sections || []).map((section, index, source) => ({
     ...section,
+    title: source.length === 1 && section.title === "Chưa phân loại" ? "Phần 1" : section.title,
     pageIds: section.pageIds.filter((id) => pageIds.has(id) && !seen.has(id) && Boolean(seen.add(id))),
   })).filter((section) => section.pageIds.length || section.title !== "Chưa phân loại");
   const missing = pages.map((page: AnyObject) => String(page.id)).filter((id: string) => !seen.has(id));
   if (!sections.length) {
-    sections.push({ id: uid("section"), title: "Chưa phân loại", pageIds: [], createdAt: now(), updatedAt: now() });
+    sections.push({ id: uid("section"), title: "Phần 1", pageIds: [], createdAt: now(), updatedAt: now() });
   }
   const preferred = sections.find((section) => section.id === record?.activeSectionId) || sections[0];
   preferred.pageIds.push(...missing);
