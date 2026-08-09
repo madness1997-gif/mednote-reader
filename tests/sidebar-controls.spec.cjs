@@ -11,6 +11,13 @@ test.use({
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
 test.beforeEach(async ({ page }) => {
+  const runtimeErrors = [];
+  page.__mednoteRuntimeErrors = runtimeErrors;
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.stack || error.message}`));
+
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -86,6 +93,10 @@ test.beforeEach(async ({ page }) => {
   expect(box.width).toBeGreaterThanOrEqual(190);
   expect(box.x + box.width).toBeLessThanOrEqual(981);
   expect(box.x).toBeGreaterThan(600);
+});
+
+test.afterEach(async ({ page }) => {
+  expect(page.__mednoteRuntimeErrors).toEqual([]);
 });
 
 test('all note sidebar topbar controls are live in desktop-site mode', async ({ page }) => {

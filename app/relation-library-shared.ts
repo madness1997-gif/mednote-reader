@@ -312,8 +312,13 @@ export function normalizeSections(record: NotebookRecord | undefined, notebook: 
     updatedAt: record?.updatedAt || now(),
   };
   if (record) {
-    const previousShape = JSON.stringify({ title: record.title, workspaceId: record.workspaceId, sections: record.sections, activeSectionId: record.activeSectionId, available: record.available });
-    const nextShape = JSON.stringify({ title: next.title, workspaceId: next.workspaceId, sections: next.sections, activeSectionId: next.activeSectionId, available: next.available });
+    // Reconciliation temporarily marks every record unavailable before it scans
+    // the live workspaces. Availability is therefore discovery state, not a
+    // content edit. Including it here refreshed updatedAt on every scan, which
+    // made syncFromApp write the same state back in a tight React/MutationObserver
+    // loop.
+    const previousShape = JSON.stringify({ title: record.title, workspaceId: record.workspaceId, sections: record.sections, activeSectionId: record.activeSectionId });
+    const nextShape = JSON.stringify({ title: next.title, workspaceId: next.workspaceId, sections: next.sections, activeSectionId: next.activeSectionId });
     if (previousShape !== nextShape) next.updatedAt = now();
   }
   return next;

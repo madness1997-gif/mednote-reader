@@ -2616,19 +2616,27 @@ export default function Home() {
     }
   };
 
-  const setActiveNoteId = (pageId: string) => {
-    updateActiveNotebook((notebook) => ({ ...notebook, activePageId: pageId }));
-  };
-
   useEffect(() => {
     const activateNotePage = (event: Event) => {
       const pageId = (event as CustomEvent<string>).detail;
-      if (!pageId || !activeNotebook.pages.some((item) => item.id === pageId)) return;
-      setActiveNoteId(pageId);
+      if (!pageId) return;
+      const workspaceId = activeWorkspaceIdRef.current;
+      setWorkspaces((items) => items.map((workspace) => {
+        if (workspace.id !== workspaceId) return workspace;
+        const notebookId = workspace.activeNotebookId;
+        const notebook = workspace.notebooks.find((item) => item.id === notebookId);
+        if (!notebook?.pages.some((item) => item.id === pageId) || notebook.activePageId === pageId) return workspace;
+        return {
+          ...workspace,
+          notebooks: workspace.notebooks.map((item) => item.id === notebookId
+            ? { ...item, activePageId: pageId }
+            : item),
+        };
+      }));
     };
     window.addEventListener("mednote:activate-note-page", activateNotePage);
     return () => window.removeEventListener("mednote:activate-note-page", activateNotePage);
-  }, [activeNotebook.id, activeNotebook.pages]);
+  }, []);
 
   const sourcePages = useMemo(() => {
     if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
@@ -5013,14 +5021,14 @@ export default function Home() {
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
-                <RichTextEditor editorId={`title:${activeNote.id}`} className="note-title-input" html={activeNote.titleHtml ?? plainTextToRichHtml(activeNote.title)} editable={activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer")} singleLine placeholder="Nhập tiêu đề" ariaLabel="Tiêu đề ghi chú" onChange={(titleHtml, title) => updateActiveNote({ titleHtml, title })} onActivate={(editorId, editor, range) => {
+                <RichTextEditor key={`title:${activeNote.id}`} editorId={`title:${activeNote.id}`} className="note-title-input" html={activeNote.titleHtml ?? plainTextToRichHtml(activeNote.title)} editable={activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer")} singleLine placeholder="Nhập tiêu đề" ariaLabel="Tiêu đề ghi chú" onChange={(titleHtml, title) => updateActiveNote({ titleHtml, title })} onActivate={(editorId, editor, range) => {
                   if (activeNote.paper.template === "first-aid" && activeTool === "pointer") {
                     setActiveTool("text");
                     setNotePanel("text");
                   }
                   activateTextEditor(editorId, editor, range);
                 }} onNormalizeInput={normalizeTextEditorInput} />
-                <RichTextEditor editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
+                <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;

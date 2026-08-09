@@ -88,11 +88,13 @@ test('OneNote sidebar survives an IndexedDB-only reload like the real phone sess
 
   // Force the exact persisted shape observed on the user's phone: IndexedDB owns
   // the full state and localStorage contains only the tiny marker.
-  await page.evaluate(() => {
-    localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v3', savedAt: Date.now() }));
-  });
-
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.evaluate(() => {
+      localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v4', savedAt: Date.now() }));
+      window.location.reload();
+    }),
+  ]);
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 12_000 });
   await expect(page.locator('.notes-pane')).toBeVisible({ timeout: 12_000 });
   await expect(nav).toBeVisible({ timeout: 12_000 });
@@ -108,4 +110,111 @@ test('OneNote sidebar survives an IndexedDB-only reload like the real phone sess
   expect(box.width).toBeGreaterThanOrEqual(190);
   expect(box.x).toBeGreaterThan(600);
   expect(box.x + box.width).toBeLessThanOrEqual(981);
+});
+
+test('opening a lazy page renders its hydrated body without a React update loop', async ({ page }) => {
+  const browserErrors = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push({ text: message.text(), location: message.location() });
+  });
+  page.on('pageerror', (error) => browserErrors.push({ text: error.message, stack: error.stack }));
+
+  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.evaluate(async () => {
+      const now = Date.now();
+      const paper = { size: 'a4', orientation: 'portrait', template: 'blank', color: 'white' };
+      const text = { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' };
+      const notePage = {
+        id: 'lazy-render-page-1', title: 'Trang đang mở', titleHtml: 'Trang đang mở',
+        body: 'ACTIVE_RENDER_CONTENT', bodyHtml: '<p>ACTIVE_RENDER_CONTENT</p>',
+        citationPage: null, strokes: [], excerpts: [], paper, text,
+      };
+      const lazyPage = {
+        id: 'lazy-render-page-2', title: 'Trang lazy', titleHtml: 'Trang lazy',
+        body: 'LAZY_RENDER_CONTENT', bodyHtml: '<p>LAZY_RENDER_CONTENT</p>',
+        citationPage: null, strokes: [], excerpts: [], paper, text,
+      };
+      const summary = (item) => {
+        const { body, bodyHtml, strokes, excerpts, ...rest } = item;
+        return rest;
+      };
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('mednote-local', 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction('documents', 'readwrite');
+        const store = transaction.objectStore('documents');
+        store.clear();
+        store.put({
+          version: 4, workspaceIds: ['lazy-render-workspace'],
+          activeWorkspaceId: 'lazy-render-workspace', readerShare: 50,
+          workspaceMode: 'note', noteZoom: 1, savedAt: now,
+        }, 'library:v3:meta');
+        store.put({
+          id: 'lazy-render-workspace', kind: 'empty', name: 'Sổ lazy render',
+          documents: [], activeDocumentId: null, activeNotebookId: 'lazy-render-notebook',
+          sourcePage: 1, notebookIds: ['lazy-render-notebook'],
+        }, 'library:v3:workspace:lazy-render-workspace');
+        store.put({
+          id: 'lazy-render-notebook', title: 'Sổ lazy render',
+          activePageId: 'lazy-render-page-1', createdAt: now,
+          pageIds: ['lazy-render-page-1', 'lazy-render-page-2'],
+          pages: [summary(notePage), summary(lazyPage)],
+        }, 'library:v3:notebook:lazy-render-notebook');
+        store.put(notePage, 'library:v3:page:lazy-render-page-1');
+        store.put(lazyPage, 'library:v3:page:lazy-render-page-2');
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      db.close();
+      localStorage.setItem('mednote-library-v2', JSON.stringify({ storage: 'indexeddb-v4', savedAt: now }));
+      window.setTimeout(() => window.location.reload(), 0);
+    }),
+  ]);
+
+  await expect.poll(() => page.evaluate(() => {
+    const state = window.__MEDNOTE_LIVE_STATE__;
+    const notebook = state?.workspaces?.find((item) => item.id === 'lazy-render-workspace')
+      ?.notebooks?.find((item) => item.id === 'lazy-render-notebook');
+    const page2 = notebook?.pages?.find((item) => item.id === 'lazy-render-page-2');
+    return { activePageId: notebook?.activePageId, page2Lazy: page2?.__mednoteLazyPage === true, page2Body: page2?.body };
+  }), { timeout: 12_000 }).toEqual({
+    activePageId: 'lazy-render-page-1',
+    page2Lazy: true,
+    page2Body: '',
+  });
+
+  await page.evaluate(() => {
+    const next = structuredClone(window.__MEDNOTE_LIVE_STATE__);
+    const target = next.workspaces.find((item) => item.id === 'lazy-render-workspace')
+      ?.notebooks?.find((item) => item.id === 'lazy-render-notebook');
+    target.activePageId = 'lazy-render-page-2';
+    window.__MEDNOTE_LIVE_STATE__ = next;
+    window.dispatchEvent(new CustomEvent('mednote-live-state-changed', { detail: { origin: 'navigation' } }));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const state = window.__MEDNOTE_LIVE_STATE__;
+    const notebook = state?.workspaces?.find((item) => item.id === 'lazy-render-workspace')
+      ?.notebooks?.find((item) => item.id === 'lazy-render-notebook');
+    const active = notebook?.pages?.find((item) => item.id === 'lazy-render-page-2');
+    return {
+      activePageId: notebook?.activePageId,
+      lazy: active?.__mednoteLazyPage === true,
+      body: active?.body,
+      bodyHtml: active?.bodyHtml,
+    };
+  }), { timeout: 12_000 }).toEqual({
+    activePageId: 'lazy-render-page-2',
+    lazy: false,
+    body: 'LAZY_RENDER_CONTENT',
+    bodyHtml: '<p>LAZY_RENDER_CONTENT</p>',
+  });
+  await expect(page.locator('[data-note-page-id="lazy-render-page-2"] .note-editor')).toContainText('LAZY_RENDER_CONTENT');
+  await page.waitForTimeout(2_000);
+  expect(browserErrors).toEqual([]);
 });

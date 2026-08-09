@@ -1,4 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-09T20:00:00+07:00
+Requested: 2026-08-09T21:36:35+07:00
 Base app commit: the main commit containing this trigger
-Reason: release desktop 1.2.8 with Electron-safe note hierarchy actions, live sidebar synchronization, and selectable PDF-to-note destinations
+Reason: release desktop 1.2.9 with stable lazy-note hydration and relation-library synchronization
