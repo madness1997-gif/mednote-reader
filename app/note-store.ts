@@ -73,6 +73,7 @@ export class NoteStore {
   private readonly listeners = new Set<() => void>();
   private readonly commands: NoteCommands;
   private initialized: Promise<void> | null = null;
+  private legacyRelation: LegacyRelationV2 | undefined;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
 
@@ -101,6 +102,7 @@ export class NoteStore {
 
   initialize(options: NoteStoreInitializeOptions = {}) {
     if (this.initialized) return this.initialized;
+    this.legacyRelation = options.relation;
     this.initialized = this.serialize(async () => {
       this.publish({ status: "loading", busy: true, error: null });
       try {
@@ -501,7 +503,7 @@ export class NoteStore {
     });
   }
 
-  replaceFromLegacySnapshot(snapshot: LegacySnapshot, relation?: LegacyRelationV2) {
+  replaceFromLegacySnapshot(snapshot: LegacySnapshot, relation: LegacyRelationV2 | undefined = this.legacyRelation) {
     return this.serialize(async () => {
       await this.flushDraft();
       this.publish({ busy: true, error: null });
@@ -532,15 +534,4 @@ export const noteStore = new NoteStore(noteRepository);
 
 export function useNoteStoreSnapshot(store: NoteStore = noteStore) {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
-}
-
-export function readLegacyRelationV2(): LegacyRelationV2 | undefined {
-  try {
-    const raw = localStorage.getItem("mednote-relations-v2");
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw) as LegacyRelationV2;
-    return parsed && typeof parsed === "object" ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }

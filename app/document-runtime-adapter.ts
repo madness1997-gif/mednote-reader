@@ -175,7 +175,7 @@ export function notebookIdForDocumentContext(graph: DocumentGraph, structure: No
 
 export function workspacesFromDocumentGraph(graph: DocumentGraph, structure: NoteStructure): WorkspaceItem[] {
   const documents = new Map(graph.documents.map((document) => [document.id, document]));
-  return graph.contexts.flatMap((context) => {
+  return graph.contexts.filter((context) => context.kind !== "temporary").flatMap((context) => {
     const contextDocuments = context.documentIds.flatMap((id) => {
       const document = documents.get(id);
       if (!document) return [];

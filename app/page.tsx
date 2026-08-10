@@ -117,16 +117,17 @@ import {
 import { loadPdfDocument } from "./pdf-document-loader";
 import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
+import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
+import { persistentDocumentWorkspaces, saveDocumentRuntimeSnapshot } from "./document-runtime-storage";
 import { requestNoteDestination, type NoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
 import PageTitleEditor from "./page-title-editor";
-import { loadIncrementalLibrary } from "./incremental-library-store";
-import { noteStore, readLegacyRelationV2, useNoteStoreSnapshot } from "./note-store";
+import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
 import {
   DEFAULT_CALLOUT_APPEARANCE, DEFAULT_NEW_NOTE_PAPER, DEFAULT_PAPER, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
   FIRST_AID_TEMPLATE_HTML, FIRST_AID_TEMPLATE_TEXT, createBlankPage, defaultExcerptLayout, escapeHtml,
-  normalizeCalloutSettings, normalizeExcerptAppearance, normalizeExcerptLayout, normalizePage, normalizePaper, normalizeText,
+  normalizeCalloutSettings, normalizeExcerptAppearance, normalizeExcerptLayout, normalizePaper, normalizeText,
   notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml, sanitizeRichTextHtml,
   type CalloutSettings, type ExcerptAppearance, type ExcerptLayout, type InkTool, type NoteExcerpt, type Notebook,
   type NotePage, type NotePageContentPatch, type PaperColor, type PaperOrientation, type PaperSettings, type PaperSize,
@@ -135,7 +136,7 @@ import {
 } from "./note-runtime-adapter";
 import {
   DEFAULT_READER, createDemoWorkspace, createEmptyWorkspace, createReaderPlaceholder, documentRuntimeWorkspace,
-  documentWorkspaceInput, isReaderPlaceholder, normalizeReader, normalizeWorkspace, workspacesFromDocumentGraph,
+  documentWorkspaceInput, isReaderPlaceholder, normalizeReader, normalizeWorkspace,
   workspacesFromLibraryV6, type LibraryDocument, type LinkedNoteTarget, type PersistedLibrary, type ReaderState,
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
@@ -175,19 +176,9 @@ type DictionaryLookupState = {
   error: string | null;
 };
 
-type LegacyNotebookState = {
-  pages?: NotePage[];
-  activeNoteId?: string;
-  readerShare?: number;
-};
-
 type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
 type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;
 
-const STORAGE_KEY = "mednote-library-v2";
-const DOCUMENT_RUNTIME_KEY = "mednote-document-runtime-v1";
-const RELATION_META_WORKSPACE_ID = "__mednote_relations_v2__";
-const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
 const DRIVE_MANIFEST_ID = "manifest:v2";
 const DRIVE_LEGACY_MANIFEST_ID = "manifest:v1";
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
@@ -2265,135 +2256,25 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    const restore = async () => {
-      let legacySnapshot: PersistedLibrary | null = null;
-      let documentSnapshot: PersistedLibrary | null = null;
-      let indexedSnapshot: PersistedLibrary | null = null;
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as PersistedLibrary;
-          if (parsed?.workspaces?.length) legacySnapshot = parsed;
-        }
-      } catch { /* v5 remains the preferred migration source. */ }
-      try {
-        const raw = localStorage.getItem(DOCUMENT_RUNTIME_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as PersistedLibrary;
-          if (parsed?.workspaces?.length) documentSnapshot = parsed;
-        }
-      } catch { /* fall back to the last v5 document contexts. */ }
-      try {
-        indexedSnapshot = await loadIncrementalLibrary() as PersistedLibrary | null;
-      } catch { /* A fresh install has no v5 records. */ }
-
-      const fallbackWorkspace = createEmptyWorkspace();
-      const fallbackSnapshot: PersistedLibrary = {
-        workspaces: [fallbackWorkspace],
-        activeWorkspaceId: fallbackWorkspace.id,
-        readerShare: 50,
-        workspaceMode: "note",
-        noteZoom: 1,
-        savedAt: Date.now(),
-      };
-      try {
-        await noteStore.initialize({
-          relation: readLegacyRelationV2(),
-          localSnapshot: (indexedSnapshot || legacySnapshot || undefined) as PersistedLibrary | undefined,
-          fallbackSnapshot,
-        });
-      } catch (error) {
-        if (!cancelled) setToast(error instanceof Error ? error.message : "Không thể mở kho note v6");
-      }
-
-      const preferred = documentSnapshot || indexedSnapshot || legacySnapshot;
-      const v6State = noteStore.getSnapshot();
-      const v6DocumentWorkspaces = v6State.structure
-        ? workspacesFromDocumentGraph(v6State.documents, v6State.structure)
-        : [];
-      if (v6DocumentWorkspaces.length && !cancelled) {
-        const preferredActiveId = preferred?.activeWorkspaceId;
-        const nextActiveId = preferredActiveId && v6DocumentWorkspaces.some((workspace) => workspace.id === preferredActiveId)
-          ? preferredActiveId
-          : v6DocumentWorkspaces[0].id;
-        setWorkspaces(v6DocumentWorkspaces);
-        setActiveWorkspaceId(nextActiveId);
-        setReaderShare(preferred?.readerShare || 50);
-        setWorkspaceMode(preferred?.workspaceMode === "reader" || preferred?.workspaceMode === "note" ? preferred.workspaceMode : "split");
-        setNoteZoom(Math.max(.5, Math.min(2, preferred?.noteZoom || 1)));
-        localSavedAtRef.current = preferred?.savedAt || Date.now();
-        setReady(true);
-        return;
-      }
-      if (preferred?.workspaces?.length && !cancelled) {
-        const normalized = preferred.workspaces
-          .filter((workspace) => workspace.id !== RELATION_META_WORKSPACE_ID && workspace.kind !== "temporary")
-          .map((workspace) => documentRuntimeWorkspace(normalizeWorkspace(workspace)));
-        if (normalized.length) {
-          const nextActiveId = normalized.some((workspace) => workspace.id === preferred.activeWorkspaceId)
-            ? preferred.activeWorkspaceId
-            : normalized[0].id;
-          setWorkspaces(normalized);
-          setActiveWorkspaceId(nextActiveId);
-          setReaderShare(preferred.readerShare || 50);
-          setWorkspaceMode(preferred.workspaceMode === "reader" || preferred.workspaceMode === "note" ? preferred.workspaceMode : "split");
-          setNoteZoom(Math.max(.5, Math.min(2, preferred.noteZoom || 1)));
-          localSavedAtRef.current = preferred.savedAt || Date.now();
-          setReady(true);
-          return;
-        }
-      }
-
-      let legacy: LegacyNotebookState | null = null;
-      try {
-        const stored = localStorage.getItem(LEGACY_STORAGE_KEY);
-        if (stored) legacy = JSON.parse(stored) as LegacyNotebookState;
-      } catch { /* keep demo data */ }
-
-      const legacyPages = (legacy?.pages?.length ? legacy.pages : [createBlankPage()]).map(normalizePage);
-      let restoredWorkspace = createEmptyWorkspace();
-
-      try {
-        const storedPdf = await localBinaryStorage.readLegacyCurrentPdf();
-        if (storedPdf) {
-          const document: LibraryDocument = {
-            id: `doc-${stableId(`${storedPdf.name}:${storedPdf.blob.size}:legacy`)}`,
-            name: storedPdf.name,
-            size: storedPdf.blob.size,
-            lastModified: 0,
-            reader: { ...DEFAULT_READER },
-          };
-          await localBinaryStorage.savePdf(document.id, document.name, storedPdf.blob);
-          const notebook: Notebook = {
-            id: uid("notebook"),
-            title: `Ghi chú — ${storedPdf.name.replace(/\.pdf$/i, "")}`,
-            pages: legacyPages,
-            activePageId: restoredWorkspace.notebooks[0].activePageId,
-            createdAt: Date.now(),
-          };
-          restoredWorkspace = {
-            id: `workspace-${document.id}`,
-            kind: "document",
-            name: storedPdf.name.replace(/\.pdf$/i, ""),
-            documents: [document],
-            activeDocumentId: document.id,
-            notebooks: [notebook],
-            activeNotebookId: notebook.id,
-            sourcePage: 1,
-          };
-        }
-      } catch { /* IndexedDB may be unavailable */ }
-
-      if (!cancelled) {
-        setWorkspaces([documentRuntimeWorkspace(restoredWorkspace)]);
-        setActiveWorkspaceId(restoredWorkspace.id);
-        setReaderShare(legacy?.readerShare || 50);
-        setWorkspaceMode(restoredWorkspace.documents.length ? "split" : "note");
-        setNoteZoom(1);
-        setReady(true);
-      }
+    const applyBootstrapResult = (result: BootstrapResult) => {
+      setWorkspaces(result.workspaces);
+      setActiveWorkspaceId(result.activeWorkspaceId);
+      setReaderShare(result.readerShare);
+      setWorkspaceMode(result.workspaceMode);
+      setNoteZoom(result.noteZoom);
+      localSavedAtRef.current = result.savedAt;
+      if (result.warnings?.length) setToast(result.warnings.join(" "));
+      setReady(true);
     };
-    void restore();
+    void bootstrapMedNote()
+      .then((result) => {
+        if (!cancelled) applyBootstrapResult(result);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setToast(error instanceof Error ? error.message : "Không thể khởi động MedNote");
+        setReady(true);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -2407,7 +2288,7 @@ export default function Home() {
     try {
       const savedAt = Date.now();
       localSavedAtRef.current = savedAt;
-      const persistentWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID);
+      const persistentWorkspaces = persistentDocumentWorkspaces(workspaces);
       const activeTemporary = workspaces.find((workspace) => workspace.id === activeWorkspaceId && workspace.kind === "temporary");
       const linkedPersistentWorkspace = activeTemporary?.noteNotebookId
         ? persistentWorkspaces.find((workspace) => workspace.noteNotebookId === activeTemporary.noteNotebookId)
@@ -2417,14 +2298,14 @@ export default function Home() {
         : linkedPersistentWorkspace?.id || persistentWorkspaces[0]?.id
           || "";
       const snapshot = {
-        workspaces: persistentWorkspaces.map(documentRuntimeWorkspace),
+        workspaces: persistentWorkspaces,
         activeWorkspaceId: persistentActiveWorkspaceId,
         readerShare,
         workspaceMode: activeTemporary?.noteNotebookId ? "note" : workspaceMode,
         noteZoom,
         savedAt,
       } satisfies PersistedLibrary;
-      localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify(snapshot));
+      saveDocumentRuntimeSnapshot(snapshot);
     } catch { /* storage may be unavailable in private browsing */ }
   }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);
   // MEDNOTE_AUTOSAVE_EFFECT_END
@@ -3231,7 +3112,7 @@ export default function Home() {
       const parsed = JSON.parse(await manifestBlob.text()) as PersistedLibrary;
       if (!Array.isArray(parsed.workspaces) || !parsed.workspaces.length) throw new Error("Bản lưu Drive không hợp lệ");
       const normalized = parsed.workspaces.map(normalizeWorkspace);
-      await noteStore.replaceFromLegacySnapshot(parsed, readLegacyRelationV2());
+      await noteStore.replaceFromLegacySnapshot(parsed);
       let missingFiles = 0;
 
       for (const workspace of normalized) {
@@ -3814,7 +3695,7 @@ export default function Home() {
     setWorkspaceMode(nextMode);
     setLibraryOpen(false);
 
-    const persistent = nextWorkspaces.filter((item) => item.kind !== "temporary" && item.id !== RELATION_META_WORKSPACE_ID);
+    const persistent = persistentDocumentWorkspaces(nextWorkspaces);
     const linkedPersistentWorkspace = selectedNotebookId
       ? persistent.find((item) => item.noteNotebookId === selectedNotebookId)
       : undefined;
@@ -3829,7 +3710,7 @@ export default function Home() {
       noteZoom,
       savedAt,
     } satisfies PersistedLibrary;
-    localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) }));
+    saveDocumentRuntimeSnapshot(snapshot);
 
     setToast(destination.mode === "none"
       ? saveToLibrary
@@ -3922,14 +3803,14 @@ export default function Home() {
     setWorkspaceMode(workspaceModeRef.current);
     const savedAt = Date.now();
     const snapshot = {
-      workspaces: nextWorkspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID),
+      workspaces: persistentDocumentWorkspaces(nextWorkspaces),
       activeWorkspaceId: savedWorkspaceId,
       readerShare,
       workspaceMode: hasActiveNote ? "split" as const : "reader" as const,
       noteZoom,
       savedAt,
     } satisfies PersistedLibrary;
-    try { localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) })); } catch { /* IndexedDB remains the durable source. */ }
+    try { saveDocumentRuntimeSnapshot(snapshot); } catch { /* IndexedDB remains the durable source. */ }
     temporaryPdfBlobsRef.current.clear();
     setToast(hasActiveNote ? "Đã lưu PDF; nguồn trong note đã được cập nhật" : "Đã lưu PDF đang xem vào thư viện — chưa tạo note");
   };
