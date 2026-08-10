@@ -85,7 +85,6 @@ import {
 } from "lucide-react";
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   LazyPdfPageView,
   PdfPageView,
@@ -115,8 +114,9 @@ import {
   oxfordLookupUrl,
   type EnglishVietnameseLookup,
 } from "./dictionary";
-import { pdfDocumentOptions } from "./pdf-config";
+import { loadPdfDocument } from "./pdf-document-loader";
 import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
+import { localBinaryStorage } from "./local-binary-storage";
 import { requestNoteDestination, type NoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
 import PageTitleEditor from "./page-title-editor";
@@ -188,8 +188,6 @@ const STORAGE_KEY = "mednote-library-v2";
 const DOCUMENT_RUNTIME_KEY = "mednote-document-runtime-v1";
 const RELATION_META_WORKSPACE_ID = "__mednote_relations_v2__";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
-const DB_NAME = "mednote-local";
-const DB_STORE = "documents";
 const DRIVE_MANIFEST_ID = "manifest:v2";
 const DRIVE_LEGACY_MANIFEST_ID = "manifest:v1";
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
@@ -584,83 +582,6 @@ function notePagePresentation(page: NotePage, zoom: number) {
   };
 }
 
-function openLocalDb() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(DB_STORE)) {
-        request.result.createObjectStore(DB_STORE);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function saveLocalPdf(blob: Blob, document: LibraryDocument) {
-  const db = await openLocalDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readwrite");
-    transaction.objectStore(DB_STORE).put({ blob, name: document.name }, `pdf:${document.id}`);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-}
-
-async function readLocalPdf(documentId: string) {
-  const db = await openLocalDb();
-  const result = await new Promise<{ blob: Blob; name: string } | undefined>((resolve, reject) => {
-    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(`pdf:${documentId}`);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return result;
-}
-
-async function deleteLocalPdf(documentId: string) {
-  const db = await openLocalDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readwrite");
-    transaction.objectStore(DB_STORE).delete(`pdf:${documentId}`);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-}
-
-async function saveLocalAsset(assetId: string, blob: Blob) {
-  const db = await openLocalDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readwrite");
-    transaction.objectStore(DB_STORE).put({ blob }, `asset:${assetId}`);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-}
-
-async function readLocalAsset(assetId: string) {
-  const db = await openLocalDb();
-  const result = await new Promise<{ blob: Blob } | undefined>((resolve, reject) => {
-    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(`asset:${assetId}`);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return result?.blob;
-}
-
-async function loadStoredPdfDocument(documentId: string) {
-  const stored = await readLocalPdf(documentId);
-  if (!stored) return null;
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-  const buffer = await stored.blob.arrayBuffer();
-  return pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(buffer))).promise;
-}
-
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -775,7 +696,7 @@ function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
   useEffect(() => {
     let disposed = false;
     let objectUrl: string | null = null;
-    void readLocalAsset(assetId).then((blob) => {
+    void localBinaryStorage.readAsset(assetId).then((blob) => {
       if (!blob || disposed) return;
       objectUrl = URL.createObjectURL(blob);
       setSource(objectUrl);
@@ -1111,17 +1032,6 @@ function DraggableExcerpt({ excerpt, source, index, selected, selectable, movabl
       ><Maximize2 size={11} /></button>}
     </article>
   );
-}
-
-async function readLegacyPdf() {
-  const db = await openLocalDb();
-  const result = await new Promise<{ blob: Blob; name: string } | undefined>((resolve, reject) => {
-    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("current-pdf");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return result;
 }
 
 function DemoDocument({ page }: { page: number }) {
@@ -2444,7 +2354,7 @@ export default function Home() {
       let restoredWorkspace = createEmptyWorkspace();
 
       try {
-        const storedPdf = await readLegacyPdf();
+        const storedPdf = await localBinaryStorage.readLegacyCurrentPdf();
         if (storedPdf) {
           const document: LibraryDocument = {
             id: `doc-${stableId(`${storedPdf.name}:${storedPdf.blob.size}:legacy`)}`,
@@ -2453,7 +2363,7 @@ export default function Home() {
             lastModified: 0,
             reader: { ...DEFAULT_READER },
           };
-          await saveLocalPdf(storedPdf.blob, document);
+          await localBinaryStorage.savePdf(document.id, document.name, storedPdf.blob);
           const notebook: Notebook = {
             id: uid("notebook"),
             title: `Ghi chú — ${storedPdf.name.replace(/\.pdf$/i, "")}`,
@@ -2536,7 +2446,7 @@ export default function Home() {
       setPdfSource({ blob: temporaryBlob, documentId: activeDocument.id });
       return () => { cancelled = true; };
     }
-    void readLocalPdf(activeDocument.id).then((stored) => {
+    void localBinaryStorage.readPdf(activeDocument.id).then((stored) => {
       if (cancelled) return;
       if (!stored) {
         setPdfStatus("error");
@@ -2553,13 +2463,10 @@ export default function Home() {
     let document: PDFDocumentProxy | null = null;
     let highFidelityDocument: PDFiumDocument | null = null;
     void pdfSource.blob.arrayBuffer().then(async (buffer) => {
-      const pdfjs = await import("pdfjs-dist");
-      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const bytes = new Uint8Array(buffer);
-      const task = pdfjs.getDocument(pdfDocumentOptions(bytes.slice()));
       // Open with PDF.js first. PDFium is only a later quality upgrade: a
       // blocked blob/module worker must never hold the document loading state.
-      document = await task.promise;
+      document = await loadPdfDocument(bytes.slice());
       if (disposed) {
         void document.destroy();
       } else {
@@ -2927,7 +2834,7 @@ export default function Home() {
     const assetId = uid("crop");
     const cropTarget = firstAidCropTarget?.noteId === activeNote.id ? firstAidCropTarget : null;
     try {
-      await saveLocalAsset(assetId, result.blob);
+      await localBinaryStorage.saveAsset(assetId, result.blob);
       const fallbackWidth = Math.max(1, Math.abs(result.rect.x2 - result.rect.x1));
       const fallbackHeight = Math.max(1, Math.abs(result.rect.y2 - result.rect.y1));
       let aspectRatio = fallbackWidth / fallbackHeight;
@@ -2997,7 +2904,7 @@ export default function Home() {
   const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => {
     const assetId = uid("note-image");
     try {
-      await saveLocalAsset(assetId, blob);
+      await localBinaryStorage.saveAsset(assetId, blob);
       const paper = PAPER_SIZES[activeNote.paper.size];
       const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
       const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
@@ -3199,7 +3106,7 @@ export default function Home() {
       for (const document of documents.values()) {
         const mednoteId = `pdf:${document.id}`;
         if (remoteByMednoteId.has(mednoteId)) continue;
-        const stored = await readLocalPdf(document.id);
+        const stored = await localBinaryStorage.readPdf(document.id);
         if (!stored) continue;
         const uploaded = await upsertDriveFile(token, {
           name: `${document.id}__${document.name}`,
@@ -3214,7 +3121,7 @@ export default function Home() {
       for (const assetId of assetIds) {
         const mednoteId = `asset:${assetId}`;
         if (remoteByMednoteId.has(mednoteId)) continue;
-        const blob = await readLocalAsset(assetId);
+        const blob = await localBinaryStorage.readAsset(assetId);
         if (!blob) continue;
         const uploaded = await upsertDriveFile(token, {
           name: `${assetId}.png`,
@@ -3279,7 +3186,7 @@ export default function Home() {
             lastModified: record.lastModified,
             reader: normalizeReader(record.payload.reader as Partial<ReaderState> | undefined),
           };
-          await saveLocalPdf(await downloadDriveFile(token, remote.id), document);
+          await localBinaryStorage.savePdf(document.id, document.name, await downloadDriveFile(token, remote.id));
         }
         const assetIds = new Set(Object.values(staged.sheetContents).flatMap((content) => {
           const excerpts = Array.isArray(content.excerpts) ? content.excerpts as NoteExcerpt[] : [];
@@ -3291,7 +3198,7 @@ export default function Home() {
             missingFiles += 1;
             continue;
           }
-          await saveLocalAsset(assetId, await downloadDriveFile(token, remote.id));
+          await localBinaryStorage.saveAsset(assetId, await downloadDriveFile(token, remote.id));
         }
 
         await noteStore.replaceFromLibrary(staged);
@@ -3334,7 +3241,7 @@ export default function Home() {
             missingFiles += 1;
             continue;
           }
-          await saveLocalPdf(await downloadDriveFile(token, remote.id), document);
+          await localBinaryStorage.savePdf(document.id, document.name, await downloadDriveFile(token, remote.id));
         }
       }
 
@@ -3345,7 +3252,7 @@ export default function Home() {
           missingFiles += 1;
           continue;
         }
-        await saveLocalAsset(assetId, await downloadDriveFile(token, remote.id));
+        await localBinaryStorage.saveAsset(assetId, await downloadDriveFile(token, remote.id));
       }
 
       const savedAt = parsed.savedAt || (manifestFile.modifiedTime ? Date.parse(manifestFile.modifiedTime) : Date.now());
@@ -3465,11 +3372,10 @@ export default function Home() {
         if (!proxy) {
           const temporaryBlob = temporaryPdfBlobsRef.current.get(target.id);
           if (temporaryBlob) {
-            const pdfjs = await import("pdfjs-dist");
-            pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-            proxy = await pdfjs.getDocument(pdfDocumentOptions(new Uint8Array(await temporaryBlob.arrayBuffer()))).promise;
+            proxy = await loadPdfDocument(temporaryBlob);
           } else {
-            proxy = await loadStoredPdfDocument(target.id);
+            const stored = await localBinaryStorage.readPdf(target.id);
+            proxy = stored ? await loadPdfDocument(stored.blob) : null;
           }
         }
         if (!proxy) continue;
@@ -3520,7 +3426,7 @@ export default function Home() {
     setToast(mode === "print" ? "Đang chuẩn bị bản in…" : "Đang tạo PDF có chú thích…");
     try {
       const temporaryBlob = temporaryPdfBlobsRef.current.get(activeDocument.id);
-      const stored = temporaryBlob ? { blob: temporaryBlob, name: activeDocument.name } : await readLocalPdf(activeDocument.id);
+      const stored = temporaryBlob ? { blob: temporaryBlob, name: activeDocument.name } : await localBinaryStorage.readPdf(activeDocument.id);
       if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");
       const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
       const output = await PDFDocument.load(await stored.blob.arrayBuffer(), { ignoreEncryption: true });
@@ -3682,7 +3588,7 @@ export default function Home() {
       for (const excerpt of page.excerpts) {
         let content = excerpt.kind === "text" ? `<blockquote>${excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}</blockquote>` : "";
         if (excerpt.kind === "image" && excerpt.assetId) {
-          const blob = await readLocalAsset(excerpt.assetId);
+          const blob = await localBinaryStorage.readAsset(excerpt.assetId);
           if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
         }
         const source = resolveExcerptSource(excerpt);
@@ -3830,7 +3736,7 @@ export default function Home() {
 
     if (saveToLibrary) {
       try {
-        await Promise.all(files.map((file, index) => saveLocalPdf(file, documents[index])));
+        await Promise.all(files.map((file, index) => localBinaryStorage.savePdf(documents[index].id, documents[index].name, file)));
       } catch {
         setToast("PDF mở được nhưng chưa lưu trên thiết bị");
       }
@@ -3966,7 +3872,7 @@ export default function Home() {
       await Promise.all(activeWorkspace.documents.map(async (document, index) => {
         const blob = temporaryPdfBlobsRef.current.get(document.id);
         if (!blob) throw new Error("missing temporary PDF");
-        await saveLocalPdf(blob, savedDocuments[index]);
+        await localBinaryStorage.savePdf(savedDocuments[index].id, savedDocuments[index].name, blob);
       }));
     } catch {
       setToast("Không thể lưu PDF đang xem vào thư viện");
@@ -4002,7 +3908,7 @@ export default function Home() {
       await noteStore.remapDocumentReferences(idMap);
     } catch (error) {
       if (graphSaved) await noteStore.deleteDocumentWorkspace(savedWorkspaceId).catch(() => undefined);
-      await Promise.allSettled(savedDocuments.map((document) => deleteLocalPdf(document.id)));
+      await Promise.allSettled(savedDocuments.map((document) => localBinaryStorage.deletePdf(document.id)));
       setToast(error instanceof Error ? `Không thể hoàn tất lưu PDF: ${error.message}` : "Không thể hoàn tất lưu PDF");
       return;
     }
@@ -4085,7 +3991,9 @@ export default function Home() {
         await noteStore.saveDocumentWorkspace(documentWorkspaceInput(updatedWorkspace, null, { workspaceMode, readerShare, noteZoom }));
       }
       if (renamedDocument) {
-        void readLocalPdf(renamedDocument.id).then((stored) => stored ? saveLocalPdf(stored.blob, renamedDocument) : undefined).catch(() => undefined);
+        void localBinaryStorage.readPdf(renamedDocument.id)
+          .then((stored) => stored ? localBinaryStorage.savePdf(renamedDocument.id, renamedDocument.name, stored.blob) : undefined)
+          .catch(() => undefined);
       }
       const nextWorkspaces = workspaces.map((workspace) => workspace.id === workspaceId ? updatedWorkspace : workspace);
       workspacesRef.current = nextWorkspaces;
@@ -4120,7 +4028,7 @@ export default function Home() {
       // A PDF blob is removed only when no remaining DocumentContext/Group owns
       // the same DocumentRecord identity.
       const unreferenced = target.documents.filter((document) => !remainingDocumentIds.has(document.id));
-      deletePersistedPdfs = Promise.allSettled(unreferenced.map((document) => deleteLocalPdf(document.id)));
+      deletePersistedPdfs = Promise.allSettled(unreferenced.map((document) => localBinaryStorage.deletePdf(document.id)));
     }
     const deletedDocumentIds = new Set(target.documents.map((document) => document.id));
     const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
@@ -4176,7 +4084,7 @@ export default function Home() {
     if (activeWorkspace.kind === "temporary") {
       temporaryPdfBlobsRef.current.delete(activeDocument.id);
     } else if (!documents.documents.some((document) => document.id === activeDocument.id)) {
-      await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
+      await Promise.allSettled([localBinaryStorage.deletePdf(activeDocument.id)]);
     }
     const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);
     const nextDocuments = activeWorkspace.documents.filter((document) => document.id !== activeDocument.id);

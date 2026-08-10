@@ -12,6 +12,7 @@
     "test:wave2": "node --import tsx --test tests-unit/wave2.test.ts",
     "test:wave3": "node --import tsx --test tests-unit/wave3.test.ts",
     "test:wave4": "node --import tsx --test tests-unit/wave4.test.ts",
+    "test:p3": "node --import tsx --test tests-unit/local-binary-storage.test.ts",
     "test:all": "playwright test",
     "build:pages": "vite build --config vite.github.config.ts",
     "build:desktop": "vite build --config vite.desktop.config.ts",
