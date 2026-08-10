@@ -246,10 +246,9 @@ test("structure reads and hierarchy mutations never hydrate SheetContent", async
   }
 });
 
-test("Wave 1.5 repository remains disconnected from production runtime", () => {
+test("production UI stays behind the v6 Store boundary", () => {
   for (const file of [
     "app/page.tsx",
-    "vite.incremental-library-persistence.ts",
     "vite.github.config.ts",
     "vite.desktop.config.ts",
   ]) {

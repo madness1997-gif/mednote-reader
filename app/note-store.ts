@@ -26,7 +26,10 @@ export type NoteStoreSnapshot = {
   structure: NoteStructure | null;
   documents: DocumentGraph;
   activeSheetContent: SheetContent | null;
+  /** Bounded content cache for the Page currently shown in continuous mode. */
+  pageSheetContents: SheetContentMap;
   hydratingSheetId: string | null;
+  hydratingPageId: string | null;
   dirty: boolean;
   busy: boolean;
   revision: number;
@@ -46,7 +49,9 @@ const EMPTY_SNAPSHOT: NoteStoreSnapshot = {
   structure: null,
   documents: { documents: [], contexts: [], groups: [], links: [], linkRelations: [] },
   activeSheetContent: null,
+  pageSheetContents: {},
   hydratingSheetId: null,
+  hydratingPageId: null,
   dirty: false,
   busy: false,
   revision: 0,
@@ -117,9 +122,22 @@ export class NoteStore {
           structure.active.activeSheetId ? this.repository.loadSheetContent(structure.active.activeSheetId) : Promise.resolve(null),
           this.repository.loadDocumentGraph(),
         ]);
-        this.publish({ status: "ready", structure, documents: documents || EMPTY_SNAPSHOT.documents, activeSheetContent, hydratingSheetId: null, dirty: false, busy: false, error: null });
+        this.publish({
+          status: "ready",
+          structure,
+          documents: documents || EMPTY_SNAPSHOT.documents,
+          activeSheetContent,
+          pageSheetContents: structure.active.activeSheetId && activeSheetContent
+            ? { [structure.active.activeSheetId]: clone(activeSheetContent) }
+            : {},
+          hydratingSheetId: null,
+          hydratingPageId: null,
+          dirty: false,
+          busy: false,
+          error: null,
+        });
       } catch (error) {
-        this.publish({ status: "error", busy: false, hydratingSheetId: null, error: errorMessage(error) });
+        this.publish({ status: "error", busy: false, hydratingSheetId: null, hydratingPageId: null, error: errorMessage(error) });
         throw error;
       }
     });
@@ -127,8 +145,15 @@ export class NoteStore {
   }
 
   updateActiveSheetContent(content: SheetContent) {
-    if (this.snapshot.status !== "ready" || !this.snapshot.structure?.active.activeSheetId) return;
-    this.publish({ activeSheetContent: clone(content), dirty: true, error: null });
+    const sheetId = this.snapshot.structure?.active.activeSheetId;
+    if (this.snapshot.status !== "ready" || !sheetId) return;
+    const nextContent = clone(content);
+    this.publish({
+      activeSheetContent: nextContent,
+      pageSheetContents: { ...this.snapshot.pageSheetContents, [sheetId]: clone(nextContent) },
+      dirty: true,
+      error: null,
+    });
     if (this.draftTimer) clearTimeout(this.draftTimer);
     this.draftTimer = setTimeout(() => { void this.flushDraft(); }, 260);
   }
@@ -163,17 +188,39 @@ export class NoteStore {
     const nextSheetId = result.active.activeSheetId;
     const currentSheetId = this.snapshot.structure?.active.activeSheetId;
     if (!nextSheetId) {
-      this.publish({ structure: result.structure, documents, activeSheetContent: null, hydratingSheetId: null, dirty: false, busy: false });
+      this.publish({ structure: result.structure, documents, activeSheetContent: null, pageSheetContents: {}, hydratingSheetId: null, hydratingPageId: null, dirty: false, busy: false });
       return;
     }
+    const nextPageId = result.active.activePageId;
+    const currentPageId = this.snapshot.structure?.active.activePageId;
+    const validSheetIds = new Set(result.structure.sheets.map((sheet) => sheet.id));
+    const retainedContents = nextPageId === currentPageId
+      ? Object.fromEntries(Object.entries(this.snapshot.pageSheetContents).filter(([id]) => validSheetIds.has(id)))
+      : {};
     if (!force && nextSheetId === currentSheetId && this.snapshot.activeSheetContent) {
-      this.publish({ structure: result.structure, documents, hydratingSheetId: null, busy: false });
+      this.publish({
+        structure: result.structure,
+        documents,
+        pageSheetContents: { ...retainedContents, [nextSheetId]: clone(this.snapshot.activeSheetContent) },
+        hydratingSheetId: null,
+        hydratingPageId: null,
+        busy: false,
+      });
       return;
     }
-    this.publish({ structure: result.structure, documents, activeSheetContent: null, hydratingSheetId: nextSheetId, dirty: false });
+    this.publish({ structure: result.structure, documents, activeSheetContent: null, pageSheetContents: retainedContents, hydratingSheetId: nextSheetId, hydratingPageId: null, dirty: false });
     const content = await this.repository.loadSheetContent(nextSheetId);
     const stillActive = this.snapshot.structure?.active.activeSheetId === nextSheetId;
-    if (stillActive) this.publish({ activeSheetContent: content || {}, hydratingSheetId: null, dirty: false, busy: false });
+    if (stillActive) {
+      const resolved = content || {};
+      this.publish({
+        activeSheetContent: resolved,
+        pageSheetContents: { ...this.snapshot.pageSheetContents, [nextSheetId]: clone(resolved) },
+        hydratingSheetId: null,
+        dirty: false,
+        busy: false,
+      });
+    }
   }
 
   private mutation<T extends NoteCommandResult>(operation: () => Promise<T>, forceHydrate = false) {
@@ -199,7 +246,7 @@ export class NoteStore {
       const active = noteContextForSheet(structure, sheetId);
       if (!active) throw new Error(`Không tìm thấy Sheet ${sheetId}`);
       if (active.activeSheetId === structure.active.activeSheetId && this.snapshot.activeSheetContent) return;
-      this.publish({ busy: true, hydratingSheetId: sheetId, activeSheetContent: null, dirty: false, error: null });
+      this.publish({ busy: true, hydratingSheetId: sheetId, hydratingPageId: null, activeSheetContent: null, dirty: false, error: null });
       try {
         const result = await this.commands.setActive(active);
         await this.hydrateCommitted(result, true);
@@ -217,6 +264,52 @@ export class NoteStore {
     const sheet = sheets.find((record) => record.id === preferredSheetId) || sheets[0];
     if (!sheet) return Promise.reject(new Error(`Page ${pageId} chưa có Sheet`));
     return this.openSheet(sheet.id);
+  }
+
+  /**
+   * Hydrates only the Sheets belonging to one logical Page. This is the read
+   * boundary used by continuous view; it never expands to sibling Pages.
+   */
+  loadPageSheetContents(pageId: string) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      const structure = this.snapshot.structure;
+      if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
+      const sheets = ordered(structure.sheets.filter((sheet) => sheet.pageId === pageId));
+      if (!sheets.length) throw new Error(`Page ${pageId} chưa có Sheet`);
+      this.publish({ hydratingPageId: pageId, error: null });
+      try {
+        const entries = await Promise.all(sheets.map(async (sheet) => [
+          sheet.id,
+          await this.repository.loadSheetContent(sheet.id) || {},
+        ] as const));
+        if (this.snapshot.structure?.active.activePageId !== pageId) {
+          this.publish({ hydratingPageId: null });
+          return;
+        }
+        const contents = Object.fromEntries(entries);
+        const activeSheetId = this.snapshot.structure.active.activeSheetId;
+        if (activeSheetId && this.snapshot.activeSheetContent) {
+          contents[activeSheetId] = clone(this.snapshot.activeSheetContent);
+        }
+        this.publish({ pageSheetContents: contents, hydratingPageId: null });
+      } catch (error) {
+        this.publish({ hydratingPageId: null, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  /** Releases continuous-view previews while retaining the sole editable Sheet. */
+  releaseInactiveSheetContents() {
+    const activeSheetId = this.snapshot.structure?.active.activeSheetId;
+    const activeContent = this.snapshot.activeSheetContent;
+    this.publish({
+      pageSheetContents: activeSheetId && activeContent
+        ? { [activeSheetId]: clone(activeContent) }
+        : {},
+      hydratingPageId: null,
+    });
   }
 
   openSection(sectionId: string) {

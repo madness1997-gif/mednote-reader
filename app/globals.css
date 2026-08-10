@@ -232,6 +232,10 @@ body {
 .note-view-control button:hover:not(:disabled) { background: var(--selected); color: var(--teal); }
 .note-view-control button:disabled { color: #b8c2c6; cursor: default; }
 .note-view-control select { width: 61px; height: 100%; padding: 0 3px; border: 0; border-left: 1px solid #edf1f2; outline: 0; background: white; color: #53646e; font-size: 10px; text-align: center; cursor: pointer; }
+.note-sheet-view-control { height: 31px; flex: 0 0 auto; display: inline-flex; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: white; }
+.note-sheet-view-control button { height: 100%; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; border-left: 1px solid #edf1f2; background: transparent; color: #64747c; font-size: 9px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.note-sheet-view-control button:first-child { border-left: 0; }
+.note-sheet-view-control button:hover, .note-sheet-view-control button.selected { background: var(--selected); color: var(--teal); }
 .page-control { gap: 3px; padding: 0 4px; }
 .page-control button { width: 22px; height: 100%; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; color: inherit; }
 .page-control button:disabled { color: #b9c2c6; cursor: default; }
@@ -587,6 +591,20 @@ body {
 .paper-color-row button.selected { border: 2px solid var(--teal); }
 .paper-color-row svg { position: absolute; color: var(--teal); filter: drop-shadow(0 0 2px white); }
 .note-stage { position: relative; padding: 24px 28px 18px; }
+.note-stage-continuous { padding-top: 14px; padding-bottom: 40px; }
+.note-sheet-frame { width: max-content; min-width: 100%; margin: 0 auto 22px; }
+.note-sheet-frame-header, .note-sheet-active-label { width: var(--paper-max-width, 720px); max-width: none; min-height: 29px; margin: 0 auto 7px; padding: 0 3px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #63747c; font-size: 10px; zoom: var(--note-view-zoom, 1); }
+.note-sheet-frame-header span, .note-sheet-active-label span { font-weight: 800; }
+.note-sheet-frame-header button { height: 25px; padding: 0 9px; border: 1px solid #a9c9cb; border-radius: 7px; background: #eff8f7; color: var(--teal); font-size: 9px; font-weight: 750; cursor: pointer; }
+.note-sheet-frame-header button:hover { border-color: var(--teal); background: #e1f1f0; }
+.note-sheet-active-label { margin-top: 0; color: var(--teal); }
+.note-sheet-active-label b { padding: 4px 8px; border-radius: 999px; background: var(--selected); font-size: 9px; }
+.note-sheet-frame .note-paper { margin: 0 auto; }
+.note-paper-preview { pointer-events: none; }
+.note-paper-preview .typed-layer { pointer-events: none; }
+.note-paper-preview .note-editor { overflow: hidden; }
+.note-sheet-preview-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(247,250,250,.9); color: #71838b; font-size: 11px; font-weight: 700; }
+.note-stage-continuous > .note-paper + .paper-size { margin-bottom: 22px; }
 .note-paper { --paper-bg: #fff; --paper-line: #e1eaed; --paper-dot: #b7c6ca; --paper-ink: #26343a; --paper-accent: var(--teal); position: relative; width: var(--paper-max-width, 720px); max-width: none; aspect-ratio: var(--paper-ratio, 210 / 297); min-height: 0; margin: 0 auto; overflow: hidden; zoom: var(--note-view-zoom, 1); background: var(--paper-bg); border: 1px solid #d6dcdf; box-shadow: 0 8px 20px rgba(24,50,74,.13); }
 .note-paper.paper-ivory { --paper-bg: #fffaf0; --paper-line: #e9dfcd; }
 .note-paper.paper-yellow { --paper-bg: #fff8cf; --paper-line: #e8db9d; }

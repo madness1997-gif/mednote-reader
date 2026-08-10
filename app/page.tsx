@@ -271,6 +271,7 @@ type ReaderState = {
 type PdfOutlineEntry = { title: string; page: number | null; depth: number };
 type PdfRailTab = "pages" | "outline" | "search" | "marks";
 type WorkspaceMode = "split" | "reader" | "note";
+type NoteSheetViewMode = "single" | "continuous";
 type NotePanel = "ink" | "shape" | "text" | "paper" | null;
 type PdfPanel = "view" | "ink" | null;
 type SearchResult = { documentId: string | null; documentName: string; page: number; snippet: string; occurrences: number };
@@ -328,6 +329,7 @@ const DEFAULT_PAPER: PaperSettings = { size: "a4", orientation: "portrait", temp
 const DEFAULT_TEXT: TextSettings = { font: "times", size: 15, color: "auto", bold: false, italic: false, underline: false, align: "left" };
 const DEFAULT_NEW_NOTE_PAPER: PaperSettings = { size: "a4", orientation: "portrait", template: "first-aid", color: "white" };
 const DEFAULT_NEW_NOTE_TEXT: TextSettings = { ...DEFAULT_TEXT, size: 12 };
+const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 const DEFAULT_TEXT_BOX_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 1, borderColor: "#60737d", backgroundColor: "transparent" };
 const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "transparent" };
@@ -854,6 +856,39 @@ function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetCo
   return page;
 }
 
+function notePagePresentation(page: NotePage, zoom: number) {
+  const selectedSize = PAPER_SIZES[page.paper.size];
+  const width = page.paper.orientation === "portrait" ? selectedSize.width : selectedSize.height;
+  const height = page.paper.orientation === "portrait" ? selectedSize.height : selectedSize.width;
+  const maxWidth = page.paper.orientation === "portrait" ? selectedSize.maxWidth : Math.min(920, selectedSize.maxWidth * 1.32);
+  const lineStep = page.paper.template === "ruled-dense" ? 5 : 8;
+  const font = TEXT_FONTS.find((option) => option.id === page.text.font) ?? TEXT_FONTS[0];
+  return {
+    selectedSize,
+    width,
+    height,
+    maxWidth,
+    paperStyle: {
+      "--paper-ratio": `${width} / ${height}`,
+      "--paper-max-width": `${maxWidth}px`,
+      "--note-view-zoom": zoom,
+      "--paper-line-step": `${(lineStep / height) * 100}%`,
+      "--paper-cell-x": `${(8 / width) * 100}%`,
+      "--paper-cell-y": `${(8 / height) * 100}%`,
+      "--cornell-header": `${(40 / height) * 100}%`,
+    } as React.CSSProperties,
+    textLayerStyle: {
+      "--text-font": font.family,
+      "--text-size": `${page.text.size}px`,
+      "--text-color": page.text.color === "auto" ? "var(--paper-ink)" : page.text.color,
+      "--text-weight": page.text.bold ? 700 : 400,
+      "--text-style": page.text.italic ? "italic" : "normal",
+      "--text-decoration": page.text.underline ? "underline" : "none",
+      "--text-align": page.text.align,
+    } as React.CSSProperties,
+  };
+}
+
 function notebookFromStructure(
   structure: NoteStructure,
   notebookId: string,
@@ -1119,17 +1154,6 @@ async function deleteLocalPdf(documentId: string) {
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(DB_STORE, "readwrite");
     transaction.objectStore(DB_STORE).delete(`pdf:${documentId}`);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-}
-
-async function deleteLocalAsset(assetId: string) {
-  const db = await openLocalDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readwrite");
-    transaction.objectStore(DB_STORE).delete(`asset:${assetId}`);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -2292,6 +2316,64 @@ function InkCanvas({ tool, color, width, penStyle, shape, strokes, onCommit }: I
   );
 }
 
+function NoteSheetPreview({
+  note,
+  sheetNumber,
+  zoom,
+  loaded,
+  onActivate,
+}: {
+  note: NotePage;
+  sheetNumber: number;
+  zoom: number;
+  loaded: boolean;
+  onActivate: () => void;
+}) {
+  const presentation = notePagePresentation(note, zoom);
+  return (
+    <section className="note-sheet-frame note-sheet-frame-inactive" data-note-sheet-frame={note.id} style={presentation.paperStyle}>
+      <header className="note-sheet-frame-header">
+        <span>Tờ {sheetNumber}</span>
+        <button type="button" onClick={onActivate} aria-label={`Chỉnh sửa tờ ${sheetNumber}`}>Chỉnh sửa tờ này</button>
+      </header>
+      <article
+        data-note-page-id={note.id}
+        className={`note-paper note-paper-preview paper-${note.paper.color} template-${note.paper.template}`}
+        style={presentation.paperStyle}
+        aria-label={`Bản xem trước tờ ${sheetNumber}`}
+      >
+        <div className="paper-background" />
+        {loaded ? <>
+          <div className={`typed-layer ${note.excerpts.length ? "has-excerpts" : ""}`} style={presentation.textLayerStyle}>
+            <div className="note-title-input" dangerouslySetInnerHTML={{ __html: note.titleHtml ?? plainTextToRichHtml(note.title) }} />
+            <div className="note-editor rich-text-editor" dangerouslySetInnerHTML={{ __html: note.bodyHtml ?? plainTextToRichHtml(note.body) }} />
+            <div className="note-excerpts" aria-hidden="true">
+              {note.excerpts.map((excerpt, index) => <DraggableExcerpt
+                key={excerpt.id}
+                excerpt={excerpt}
+                index={index}
+                selected={false}
+                selectable={false}
+                movable={false}
+                editable={false}
+                onSelect={() => undefined}
+                onMove={() => undefined}
+                onEdit={() => undefined}
+                onTextActivate={() => undefined}
+                onNormalizeTextInput={() => undefined}
+                onOpenSource={() => undefined}
+                onDelete={() => undefined}
+              />)}
+            </div>
+          </div>
+          <InkCanvas tool="pointer" color="#2465a8" width={2} penStyle="ballpoint" shape="rectangle" strokes={note.strokes} onCommit={() => undefined} />
+        </> : <div className="note-sheet-preview-loading" role="status">Đang tải nội dung tờ…</div>}
+      </article>
+      <div className="paper-size">{presentation.selectedSize.label} ({presentation.selectedSize.dimensions}) · {note.paper.orientation === "portrait" ? "Dọc" : "Ngang"}</div>
+    </section>
+  );
+}
+
 export default function Home() {
   const noteState = useNoteStoreSnapshot();
   const previewPdfInputRef = useRef<HTMLInputElement>(null);
@@ -2342,6 +2424,10 @@ export default function Home() {
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
   const [readerShare, setReaderShare] = useState(50);
   const [noteZoom, setNoteZoom] = useState(1);
+  const [noteSheetViewMode, setNoteSheetViewMode] = useState<NoteSheetViewMode>(() => {
+    try { return localStorage.getItem(NOTE_SHEET_VIEW_KEY) === "continuous" ? "continuous" : "single"; } catch { return "single"; }
+  });
+  const pendingNoteScrollRef = useRef<{ sheetId: string; scrollTop: number } | null>(null);
   const [toast, setToast] = useState("Đã tự lưu");
   const [ready, setReady] = useState(false);
   const readyRef = useRef(ready);
@@ -2415,12 +2501,20 @@ export default function Home() {
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const legacyActiveNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
   const storeActiveNotebook = noteState.structure
-    ? notebookFromStructure(noteState.structure, noteState.structure.active.activeNotebookId, {}, noteState.activeSheetContent)
+    ? notebookFromStructure(noteState.structure, noteState.structure.active.activeNotebookId, noteState.pageSheetContents, noteState.activeSheetContent)
     : null;
   const activeNotebook = storeActiveNotebook || legacyActiveNotebook;
   const notePages = activeNotebook.pages;
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
   const activeNoteHydrating = noteState.hydratingSheetId === activeNote.id || activeNote.__mednoteLazyPage === true;
+  const activeLogicalPage = noteState.structure?.pages.find((page) => page.id === noteState.structure?.active.activePageId);
+  const activePageSheets = noteState.structure
+    ? ordered(noteState.structure.sheets.filter((sheet) => sheet.pageId === noteState.structure?.active.activePageId))
+    : [];
+  const activePageSheetKey = activePageSheets.map((sheet) => sheet.id).join("|");
+  const activeSheetIndex = Math.max(0, activePageSheets.findIndex((sheet) => sheet.id === activeNote.id));
+  const continuousNotes = activePageSheets.map((sheet) => notePages.find((page) => page.id === sheet.id)
+    || notePageFromSheet(sheet.id, activeLogicalPage?.title || "Page mới", noteState.pageSheetContents[sheet.id], !noteState.pageSheetContents[sheet.id]));
   const hasActiveNote = Boolean(noteState.structure?.active.activeSheetId)
     && (activeWorkspace.kind === "empty" || activeWorkspace.kind === "demo"
       || Boolean(activeWorkspace.noteNotebookId && noteState.structure?.notebooks.some((notebook) => notebook.id === activeWorkspace.noteNotebookId)));
@@ -3107,6 +3201,42 @@ export default function Home() {
   }, [toast]);
 
   useEffect(() => {
+    try { localStorage.setItem(NOTE_SHEET_VIEW_KEY, noteSheetViewMode); } catch { /* Local preference is optional. */ }
+  }, [noteSheetViewMode]);
+
+  useEffect(() => {
+    const pageId = noteState.structure?.active.activePageId;
+    if (noteState.status !== "ready" || !pageId) return;
+    if (noteSheetViewMode !== "continuous") {
+      noteStore.releaseInactiveSheetContents();
+      return;
+    }
+    void noteStore.loadPageSheetContents(pageId).catch((error) => {
+      setToast(error instanceof Error ? error.message : "Không thể tải các tờ trong Page");
+    });
+  }, [activePageSheetKey, noteSheetViewMode, noteState.status, noteState.structure?.active.activePageId]);
+
+  useEffect(() => {
+    const pending = pendingNoteScrollRef.current;
+    if (!pending || pending.sheetId !== activeNote.id) return;
+    const restore = () => {
+      if (noteStageRef.current) noteStageRef.current.scrollTop = pending.scrollTop;
+    };
+    restore();
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      restore();
+      attempts += 1;
+      if (attempts < 6) return;
+      window.clearInterval(timer);
+      if (pendingNoteScrollRef.current === pending) pendingNoteScrollRef.current = null;
+    }, 50);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeNote.id, activeNoteHydrating]);
+
+  useEffect(() => {
     setSelectedExcerptId(null);
     activeTextEditorRef.current = null;
     savedTextRangeRef.current = null;
@@ -3123,6 +3253,18 @@ export default function Home() {
       ...notebook,
       pages: notebook.pages.map((page) => page.id === notebook.activePageId ? { ...page, ...changes } : page),
     }));
+  };
+
+  const activateContinuousSheet = async (sheetId: string) => {
+    if (sheetId === activeNote.id) return;
+    pendingNoteScrollRef.current = { sheetId, scrollTop: noteStageRef.current?.scrollTop ?? 0 };
+    try {
+      await noteStore.openSheet(sheetId);
+      setToast("Đã chuyển tờ; nội dung tờ trước đã được lưu");
+    } catch (error) {
+      pendingNoteScrollRef.current = null;
+      setToast(error instanceof Error ? error.message : "Không thể mở tờ note");
+    }
   };
 
   const chooseNoteTool = (tool: Tool) => {
@@ -4397,19 +4539,6 @@ export default function Home() {
     }
   };
 
-  const addNotePage = async () => {
-    const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1);
-    const sectionId = noteState.structure?.active.activeSectionId;
-    if (!sectionId) return;
-    try {
-      await noteStore.createPage(sectionId, next.title, notePageToSheetContent(next));
-      setActiveTool("text");
-      setToast(`Đã thêm Page ${PAPER_SIZES[next.paper.size].label}`);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể thêm Page");
-    }
-  };
-
   const addNotebook = async () => {
     const existingNotebooks = noteState.structure?.notebooks || [];
     const title = (
@@ -4435,61 +4564,6 @@ export default function Home() {
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể tạo Notebook");
     }
-  };
-
-  const deleteNotePage = async () => {
-    if (!window.confirm(`Xóa trang note “${activeNote.title}”? Thao tác này không thể hoàn tác.`)) return;
-    const deletedPageId = activeNote.id;
-    const assetIds = activeNote.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!);
-    await Promise.allSettled(assetIds.map(deleteLocalAsset));
-    const structure = noteState.structure;
-    const pageId = structure?.active.activePageId;
-    if (!structure || !pageId) return;
-    const pageSheets = structure.sheets.filter((sheet) => sheet.pageId === pageId);
-    try {
-      if (pageSheets.length > 1) {
-        await noteStore.deleteSheet(activeNote.id);
-        setToast("Đã xóa tờ note");
-      } else {
-        const replacement = createBlankPage(sourcePage, 1);
-        await noteStore.deletePage(pageId, notePageToSheetContent(replacement));
-        setToast("Đã xóa Page; Section vẫn giữ một Page trống khi cần");
-      }
-      setStrokeHistory((history) => {
-        const next = { ...history };
-        delete next[deletedPageId];
-        return next;
-      });
-      setActiveTool("text");
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể xóa trang note");
-    }
-  };
-
-  const deleteNotebook = async () => {
-    const pageCount = activeNotebook.pages.length;
-    const lastNotebook = (noteState.structure?.notebooks.length || 0) === 1;
-    const warning = lastNotebook
-      ? activeWorkspace.documents.length
-        ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? PDF vẫn được giữ để đọc, không tự tạo note mới.`
-        : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới.`
-      : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Thao tác này không thể hoàn tác.`;
-    if (!window.confirm(warning)) return;
-    const contents = await noteStore.loadNotebookContents(activeNotebook.id);
-    const materialized = noteState.structure ? notebookFromStructure(noteState.structure, activeNotebook.id, contents) : activeNotebook;
-    const deletedPageIds = new Set(materialized?.pages.map((page) => page.id) || []);
-    const assetIds = (materialized?.pages || []).flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!));
-    await Promise.allSettled(assetIds.map(deleteLocalAsset));
-    try {
-      await noteStore.deleteNotebook(activeNotebook.id, notePageToSheetContent(createBlankPage()));
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể xóa Notebook");
-      return;
-    }
-    setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
-    setNotePanel(null);
-    setActiveTool("text");
-    setToast(lastNotebook ? "Đã xóa sổ note và tạo sổ trống" : "Đã xóa sổ note; PDF vẫn được giữ độc lập");
   };
 
   const beginWorkspaceRename = (workspace: WorkspaceItem) => {
@@ -5082,12 +5156,13 @@ export default function Home() {
           <div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
-                <button className="note-create-button primary icon-only" onClick={addNotePage} aria-label="Thêm trang" title="Thêm trang"><Plus size={18} /></button>
-                <button className="note-create-button" onClick={addNotebook}><FileText size={16} /><span>Sổ mới</span></button>
-                <button className="note-create-button danger" onClick={() => { void deleteNotebook(); }}><Trash2 size={15} /><span>Xóa sổ</span></button>
                 <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
               </div>
               <span className="toolbar-spacer" />
+              <div className="note-sheet-view-control" role="group" aria-label="Cách xem các tờ trong Page">
+                <button className={noteSheetViewMode === "single" ? "selected" : ""} onClick={() => setNoteSheetViewMode("single")} aria-pressed={noteSheetViewMode === "single"} title="Chỉ hiện tờ đang mở"><Square size={14} /><span>Từng trang</span></button>
+                <button className={noteSheetViewMode === "continuous" ? "selected" : ""} onClick={() => setNoteSheetViewMode("continuous")} aria-pressed={noteSheetViewMode === "continuous"} title="Cuộn tất cả tờ trong Page"><Rows3 size={14} /><span>Liên tục</span></button>
+              </div>
               <div className="note-view-control" aria-label="Tỷ lệ xem trang note">
                 <button onClick={() => setNoteViewZoom(noteZoom - .1)} disabled={noteZoom <= .5} aria-label="Thu nhỏ trang note" title="Thu nhỏ trang note"><Minus size={14} /></button>
                 <select value={noteZoomPercent} onChange={(event) => setNoteViewZoom(Number(event.target.value) / 100)} aria-label="Chọn tỷ lệ xem trang note" title="Tỷ lệ xem trang note">
@@ -5100,7 +5175,6 @@ export default function Home() {
               <div className="toolbar-cluster history-cluster">
                 <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
                 <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
-                <button className="icon-button compact delete-tool" aria-label="Xóa trang note" title="Xóa trang" onClick={() => { void deleteNotePage(); }}><Trash2 size={18} /></button>
               </div>
               <button className={`paper-button ${notePanel === "paper" ? "active" : ""}`} onClick={() => setNotePanel((panel) => panel === "paper" ? null : "paper")} aria-expanded={notePanel === "paper"}><NotebookTabs size={17} /><span>Giấy</span><ChevronDown size={11} /></button>
             </div>
@@ -5290,8 +5364,17 @@ export default function Home() {
             </div>
           )}
 
-          <div className={`note-stage workspace-frame ${activeNoteHydrating ? "note-stage-hydrating" : ""}`} ref={noteStageRef} aria-busy={activeNoteHydrating}>
+          <div className={`note-stage workspace-frame note-stage-${noteSheetViewMode} ${activeNoteHydrating ? "note-stage-hydrating" : ""}`} ref={noteStageRef} aria-busy={activeNoteHydrating || noteState.hydratingPageId === noteState.structure?.active.activePageId}>
             {activeNoteHydrating && <div className="note-hydration-status" role="status" aria-live="polite">Đang mở nội dung tờ…</div>}
+            {noteSheetViewMode === "continuous" && continuousNotes.slice(0, activeSheetIndex).map((note, index) => <NoteSheetPreview
+              key={note.id}
+              note={note}
+              sheetNumber={index + 1}
+              zoom={noteZoom}
+              loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
+              onActivate={() => { void activateContinuousSheet(note.id); }}
+            />)}
+            {noteSheetViewMode === "continuous" && <div className="note-sheet-active-label" data-note-sheet-frame={activeNote.id} style={{ "--paper-max-width": `${basePaperMaxWidth}px`, "--note-view-zoom": noteZoom } as React.CSSProperties}><span>Tờ {activeSheetIndex + 1}</span><b>Đang chỉnh sửa</b></div>}
             <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={{ ...paperStyle, pointerEvents: activeNoteHydrating ? "none" : undefined, opacity: activeNoteHydrating ? .72 : 1 }} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
@@ -5328,6 +5411,14 @@ export default function Home() {
               {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo đối tượng · kéo góc đổi cỡ · callout: kéo đầu mũi tên</div>}
             </article>
             <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Chọn đối tượng để di chuyển, đổi cỡ hoặc sắp xếp lớp" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "callout" ? "Bấm vị trí cần chú thích để tạo hộp callout có mũi tên" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
+            {noteSheetViewMode === "continuous" && continuousNotes.slice(activeSheetIndex + 1).map((note, offset) => <NoteSheetPreview
+              key={note.id}
+              note={note}
+              sheetNumber={activeSheetIndex + offset + 2}
+              zoom={noteZoom}
+              loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
+              onActivate={() => { void activateContinuousSheet(note.id); }}
+            />)}
           </div>
         </section>
         <aside className="note-navigation-host" aria-label="Điều hướng ghi chú"><NoteSidebar /></aside>

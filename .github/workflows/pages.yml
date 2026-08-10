@@ -29,6 +29,7 @@ jobs:
           npm run test:wave1
           npm run test:wave2
           npm run test:wave3
+          npm run test:wave4
       - name: Run browser regression suite
         run: |
           npx playwright install --with-deps chromium
