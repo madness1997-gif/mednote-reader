@@ -9,10 +9,10 @@ const POPOVER_TYPE_ANCHOR = 'type TextInsertPopover = "symbols" | "equation" | "
 const POPOVER_TYPE_REPLACEMENT = 'type StickerPresetId = "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";\ntype TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | "stickers" | null;';
 
 const EXCERPT_FIELD_ANCHOR = '  appearance?: Partial<ExcerptAppearance>;\n};';
-const EXCERPT_FIELD_REPLACEMENT = '  appearance?: Partial<ExcerptAppearance>;\n  stickerStyle?: StickerPresetId;\n};';
+const EXCERPT_FIELD_REPLACEMENT = '  appearance?: Partial<ExcerptAppearance>;\n  stickerStyle?: "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";\n};';
 
-const PRESET_ANCHOR = 'const DEFAULT_CALLOUT_APPEARANCE: ExcerptAppearance = { borderStyle: "solid", borderWidth: 2, borderColor: "#1b7184", backgroundColor: "transparent" };';
-const PRESET_REPLACEMENT = `${PRESET_ANCHOR}\nconst STICKER_PRESETS: { id: StickerPresetId; label: string; description: string; width: number; height: number; rotation: number }[] = [\n  { id: "classic-yellow", label: "Sticky vàng", description: "Giấy note cổ điển, góc gấp", width: .30, height: .17, rotation: -1 },\n  { id: "tape-pink", label: "Tape hồng", description: "Note pastel có băng dính phía trên", width: .31, height: .17, rotation: 1 },\n  { id: "pin-mint", label: "Ghim xanh", description: "Thẻ xanh bạc hà có ghim tròn", width: .29, height: .16, rotation: -.5 },\n  { id: "tab-blue", label: "Tab xanh", description: "Thẻ xanh có nhãn tab nổi", width: .31, height: .16, rotation: 0 },\n  { id: "clinical-card", label: "Clinical card", description: "Thẻ trắng viền teal cho ý chính", width: .33, height: .17, rotation: 0 },\n  { id: "high-yield", label: "High-yield", description: "Sticker vàng nhấn mạnh điểm cần nhớ", width: .32, height: .16, rotation: 0 },\n];`;
+const PRESET_ANCHOR = 'const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [';
+const PRESET_REPLACEMENT = `const STICKER_PRESETS: { id: StickerPresetId; label: string; description: string; width: number; height: number; rotation: number }[] = [\n  { id: "classic-yellow", label: "Sticky vàng", description: "Giấy note cổ điển, góc gấp", width: .30, height: .17, rotation: -1 },\n  { id: "tape-pink", label: "Tape hồng", description: "Note pastel có băng dính phía trên", width: .31, height: .17, rotation: 1 },\n  { id: "pin-mint", label: "Ghim xanh", description: "Thẻ xanh bạc hà có ghim tròn", width: .29, height: .16, rotation: -.5 },\n  { id: "tab-blue", label: "Tab xanh", description: "Thẻ xanh có nhãn tab nổi", width: .31, height: .16, rotation: 0 },\n  { id: "clinical-card", label: "Clinical card", description: "Thẻ trắng viền teal cho ý chính", width: .33, height: .17, rotation: 0 },\n  { id: "high-yield", label: "High-yield", description: "Sticker vàng nhấn mạnh điểm cần nhớ", width: .32, height: .16, rotation: 0 },\n];\n\n${PRESET_ANCHOR}`;
 
 const ADD_STICKER_ANCHOR = '  const addCalloutAt = (event: React.PointerEvent<HTMLElement>) => {';
 const ADD_STICKER_REPLACEMENT = `  const addSticker = (presetId: StickerPresetId) => {\n    const preset = STICKER_PRESETS.find((item) => item.id === presetId);\n    if (!preset) return;\n    const slot = activeNote.excerpts.length % 6;\n    const x = Math.min(1 - preset.width - .03, .13 + (slot % 3) * .045);\n    const y = Math.min(1 - preset.height - .04, .16 + (slot % 4) * .055);\n    const excerpt: NoteExcerpt = {\n      id: uid("sticker"),\n      kind: "text",\n      sourceKind: "manual",\n      text: "",\n      richText: "",\n      stickerStyle: preset.id,\n      createdAt: Date.now(),\n      layout: { x, y, width: preset.width, height: preset.height, contentScale: 1, rotation: preset.rotation, opacity: 1, autoFit: false },\n      appearance: { borderStyle: "solid", borderWidth: 0, borderColor: "transparent", backgroundColor: "transparent" },\n    };\n    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });\n    setSelectedExcerptId(excerpt.id);\n    setActiveTool("text");\n    setNotePanel("text");\n    setTextInsertPopover(null);\n    setToast(\`Đã chèn \${preset.label} — nhập chữ trực tiếp, dùng Chọn để kéo và đổi kích thước\`);\n  };\n\n${ADD_STICKER_ANCHOR}`;
@@ -47,11 +47,14 @@ export function noteStickersPlugin(): Plugin {
     enforce: "pre",
     transform(code, id) {
       const normalizedId = id.replaceAll("\\", "/").split("?")[0];
+      if (normalizedId.endsWith("/app/note-runtime-adapter.ts")) {
+        const next = replaceRequired(code, EXCERPT_FIELD_ANCHOR, EXCERPT_FIELD_REPLACEMENT, "dữ liệu textbox");
+        return { code: next, map: null };
+      }
       if (!normalizedId.endsWith("/app/page.tsx")) return null;
 
       let next = code;
       next = replaceRequired(next, POPOVER_TYPE_ANCHOR, POPOVER_TYPE_REPLACEMENT, "kiểu popover Type");
-      next = replaceRequired(next, EXCERPT_FIELD_ANCHOR, EXCERPT_FIELD_REPLACEMENT, "dữ liệu textbox");
       next = replaceRequired(next, PRESET_ANCHOR, PRESET_REPLACEMENT, "preset textbox");
       next = replaceRequired(next, ADD_STICKER_ANCHOR, ADD_STICKER_REPLACEMENT, "hàm chèn sticker");
       next = replaceRequired(next, EXCERPT_CLASS_ANCHOR, EXCERPT_CLASS_REPLACEMENT, "class đối tượng note");

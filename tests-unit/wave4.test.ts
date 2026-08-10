@@ -131,8 +131,9 @@ test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent"
 
 test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const runtimeAdapter = await readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8");
   const editor = await readFile(new URL("../app/page-title-editor.tsx", import.meta.url), "utf8");
-  assert.match(page, /type NotePageContentPatch = Partial<Omit<NotePage, "id" \| "title" \| "titleHtml" \| "__mednoteLazyPage">>/);
+  assert.match(runtimeAdapter, /export type NotePageContentPatch = Partial<Omit<NotePage, "id" \| "title" \| "titleHtml" \| "__mednoteLazyPage">>/);
   assert.match(page, /<PageTitleEditor/);
   assert.doesNotMatch(page, /activeNote\.titleHtml/);
   assert.doesNotMatch(page, /page\.titleHtml \?/);
