@@ -12,10 +12,14 @@ async function submitName(page, locator, value) {
 const profile = `/tmp/mednote-electron-wave3-${Date.now()}`;
 
 async function launch() {
-  return electron.launch({
-    args: ['--no-sandbox', '--headless', '--disable-gpu', '--no-zygote', '--single-process', `--user-data-dir=${profile}`, '.'],
+  const application = await electron.launch({
+    // xvfb supplies the display in CI. Keeping Electron in its normal
+    // multi-process lifecycle is required for BrowserWindow close events.
+    args: ['.', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`],
     env: { ...process.env, ELECTRON_DISABLE_SANDBOX: '1' },
   });
+  application.process().stderr?.on('data', (chunk) => process.stderr.write(chunk));
+  return application;
 }
 
 (async () => {
