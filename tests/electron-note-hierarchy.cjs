@@ -23,24 +23,24 @@ async function submitName(page, locator, value) {
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
 
-    let nav = page.locator('.mednote-page-sheet-nav');
+    let nav = page.locator('.note-sidebar-v6');
     await expect(nav).toBeVisible({ timeout: 15_000 });
-    await submitName(page, nav.locator('[data-new-notebook]'), 'Electron Nội tiết');
-    await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Electron Nội tiết');
+    await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Electron Nội tiết');
+    await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
 
-    nav = page.locator('.mednote-page-sheet-nav');
-    await submitName(page, nav.locator('[data-add-section]').first(), 'Chuyển hóa');
-    await expect(page.locator('.mednote-page-sheet-nav .mps-section strong', { hasText: 'Chuyển hóa' })).toBeVisible();
+    nav = page.locator('.note-sidebar-v6');
+    await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Chuyển hóa');
+    await expect(page.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
 
-    nav = page.locator('.mednote-page-sheet-nav');
-    await submitName(page, nav.locator('[data-add-page]').first(), 'Đái tháo đường');
-    await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'Đái tháo đường' })).toBeVisible();
+    nav = page.locator('.note-sidebar-v6');
+    await submitName(page, nav.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');
+    await expect(page.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    nav = page.locator('.mednote-page-sheet-nav');
-    await expect(nav.locator('[data-notebook-select] option:checked')).toHaveText('Electron Nội tiết');
-    await expect(nav.locator('.mps-section strong', { hasText: 'Chuyển hóa' })).toBeVisible();
-    await expect(nav.locator('.mps-page-card', { hasText: 'Đái tháo đường' })).toBeVisible();
+    nav = page.locator('.note-sidebar-v6');
+    await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
+    await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
+    await expect(nav.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
     process.stdout.write('Electron hierarchy test passed\n');
   } finally {
     await app.close();

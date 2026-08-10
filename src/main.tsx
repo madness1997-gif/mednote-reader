@@ -14,8 +14,6 @@ import "../app/note-stickers.css";
 import "../app/note-zoom-runtime";
 import "../app/pdf-wheel-zoom-runtime";
 import "../app/note-symbol-library";
-import "../app/relation-navigation-collapse";
-import "../app/independent-library-runtime";
 
 const pdfExportE2E = new URLSearchParams(window.location.search).get("pdfExportE2E") === "1";
 

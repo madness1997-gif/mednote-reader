@@ -115,16 +115,10 @@ import {
 import { pdfDocumentOptions } from "./pdf-config";
 import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 import { requestNoteDestination, type NoteDestination } from "./mednote-dialog";
-import {
-  createSection as createLibrarySection,
-  getLibraryView,
-  readAppState,
-  syncFromApp,
-  upsertRelation,
-  type RelationSource,
-  type RelationTarget,
-} from "./independent-library-core";
-import { createLogicalPage as createLibraryPage } from "./page-sheet-actions";
+import NoteSidebar from "./note-sidebar";
+import { loadIncrementalLibrary } from "./incremental-library-store";
+import { noteStore, readLegacyRelationV2, useNoteStoreSnapshot } from "./note-store";
+import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
 
 type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox" | "callout";
 type InkTool = "pen" | "highlight" | "shape";
@@ -203,6 +197,7 @@ type PaperSettings = {
 };
 type NotePage = {
   id: string;
+  __mednoteLazyPage?: boolean;
   title: string;
   titleHtml?: string;
   body: string;
@@ -289,6 +284,8 @@ type WorkspaceItem = {
   name: string;
   documents: LibraryDocument[];
   activeDocumentId: string | null;
+  /** Document-runtime adapter only; Notebook ownership remains in v6. */
+  noteNotebookId?: string | null;
   notebooks: Notebook[];
   activeNotebookId: string;
   sourcePage: number;
@@ -313,6 +310,7 @@ type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
 type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;
 
 const STORAGE_KEY = "mednote-library-v2";
+const DOCUMENT_RUNTIME_KEY = "mednote-document-runtime-v1";
 const RELATION_META_WORKSPACE_ID = "__mednote_relations_v2__";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
 const DB_NAME = "mednote-local";
@@ -828,6 +826,70 @@ function createBlankPage(citationPage: number | null = 1, index = 1, paper: Pape
   };
 }
 
+function notePageToSheetContent(page: NotePage): SheetContent {
+  const {
+    id: _id,
+    title: _title,
+    titleHtml: _titleHtml,
+    __mednoteLazyPage: _lazy,
+    ...content
+  } = page;
+  return content as SheetContent;
+}
+
+function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetContent, lazy = false): NotePage {
+  const fallback = createBlankPage(null, 1);
+  const page = normalizePage({
+    ...fallback,
+    ...(content || {}),
+    id: sheetId,
+    title: pageTitle,
+    titleHtml: pageTitle,
+  } as NotePage);
+  if (lazy) page.__mednoteLazyPage = true;
+  return page;
+}
+
+function notebookFromStructure(
+  structure: NoteStructure,
+  notebookId: string,
+  contents: SheetContentMap = {},
+  activeContent?: SheetContent | null,
+): Notebook | null {
+  const notebook = structure.notebooks.find((record) => record.id === notebookId);
+  if (!notebook) return null;
+  const sections = ordered(structure.sections.filter((record) => record.notebookId === notebook.id));
+  const pages = sections.flatMap((section) => ordered(structure.pages.filter((record) => record.sectionId === section.id)));
+  const pageMap = new Map(pages.map((record) => [record.id, record]));
+  const sheets = pages.flatMap((page) => ordered(structure.sheets.filter((sheet) => sheet.pageId === page.id)));
+  return {
+    id: notebook.id,
+    title: notebook.title,
+    pages: sheets.map((sheet) => {
+      const content = contents[sheet.id] || (sheet.id === structure.active.activeSheetId ? activeContent || undefined : undefined);
+      return notePageFromSheet(sheet.id, pageMap.get(sheet.pageId)?.title || "Page mới", content, !content);
+    }),
+    activePageId: structure.active.activeNotebookId === notebook.id
+      ? structure.active.activeSheetId
+      : sheets[0]?.id || "",
+    createdAt: 0,
+  };
+}
+
+function documentRuntimeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
+  const placeholder = createReaderPlaceholder(workspace.id);
+  const linkedNotebookId = workspace.noteNotebookId
+    || workspace.notebooks.find((notebook) => !isReaderPlaceholder(notebook) && notebook.id === workspace.activeNotebookId)?.id
+    || workspace.notebooks.find((notebook) => !isReaderPlaceholder(notebook))?.id
+    || null;
+  return {
+    ...workspace,
+    noteNotebookId: linkedNotebookId,
+    notebooks: [placeholder],
+    activeNotebookId: placeholder.id,
+  };
+}
+
 function createNotebook(title: string, citationPage = 1): Notebook {
   const page = createBlankPage(citationPage);
   return {
@@ -875,6 +937,7 @@ function createDemoWorkspace(pages: NotePage[] = initialPages): WorkspaceItem {
     name: "Diabetic Neuropathy — Chapter 3",
     documents: [],
     activeDocumentId: null,
+    noteNotebookId: notebook.id,
     notebooks: [notebook],
     activeNotebookId: notebook.id,
     sourcePage: 126,
@@ -889,6 +952,7 @@ function createEmptyWorkspace(): WorkspaceItem {
     name: "Chưa có tài liệu",
     documents: [],
     activeDocumentId: null,
+    noteNotebookId: notebook.id,
     notebooks: [notebook],
     activeNotebookId: notebook.id,
     sourcePage: 1,
@@ -2109,6 +2173,7 @@ function InkCanvas({ tool, color, width, penStyle, shape, strokes, onCommit }: I
 }
 
 export default function Home() {
+  const noteState = useNoteStoreSnapshot();
   const previewPdfInputRef = useRef<HTMLInputElement>(null);
   const libraryPdfInputRef = useRef<HTMLInputElement>(null);
   const temporaryPdfBlobsRef = useRef(new Map<string, Blob>());
@@ -2228,14 +2293,30 @@ export default function Home() {
   }, []);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
-  const activeNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
+  const legacyActiveNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
+  const storeActiveNotebook = noteState.structure
+    ? notebookFromStructure(noteState.structure, noteState.structure.active.activeNotebookId, {}, noteState.activeSheetContent)
+    : null;
+  const activeNotebook = storeActiveNotebook || legacyActiveNotebook;
   const notePages = activeNotebook.pages;
   const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
+  const activeNoteHydrating = noteState.hydratingSheetId === activeNote.id || activeNote.__mednoteLazyPage === true;
+  const hasActiveNote = Boolean(noteState.structure?.active.activeSheetId)
+    && (activeWorkspace.kind === "empty" || activeWorkspace.kind === "demo"
+      || Boolean(activeWorkspace.noteNotebookId && noteState.structure?.notebooks.some((notebook) => notebook.id === activeWorkspace.noteNotebookId)));
   const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
   const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
+
+  useEffect(() => {
+    const notebookId = activeWorkspace.noteNotebookId;
+    const structure = noteStore.getSnapshot().structure;
+    if (!notebookId || !structure?.notebooks.some((notebook) => notebook.id === notebookId)
+      || structure.active.activeNotebookId === notebookId) return;
+    void noteStore.openNotebook(notebookId).catch(() => undefined);
+  }, [activeWorkspace.id, activeWorkspace.noteNotebookId, noteState.status]);
 
   const activateTextEditor = useCallback((editorId: string, editor: HTMLElement, range: Range | null) => {
     activeTextEditorRef.current = { id: editorId, editor };
@@ -2550,16 +2631,9 @@ export default function Home() {
   };
 
   const updateActiveNotebook = (updater: (notebook: Notebook) => Notebook) => {
-    const notebookId = activeWorkspace.activeNotebookId;
-    setWorkspaces((items) => {
-      const source = items.flatMap((workspace) => workspace.notebooks).find((notebook) => notebook.id === notebookId);
-      if (!source) return items;
-      const updated = updater(source);
-      return items.map((workspace) => ({
-        ...workspace,
-        notebooks: workspace.notebooks.map((notebook) => notebook.id === notebookId ? updated : notebook),
-      }));
-    });
+    const updated = updater(activeNotebook);
+    const page = updated.pages.find((item) => item.id === updated.activePageId);
+    if (page && page.id === activeNote.id) noteStore.updateActiveSheetContent(notePageToSheetContent(page));
   };
 
   const setSourcePage = (value: number | ((page: number) => number)) => {
@@ -2616,28 +2690,6 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const activateNotePage = (event: Event) => {
-      const pageId = (event as CustomEvent<string>).detail;
-      if (!pageId) return;
-      const workspaceId = activeWorkspaceIdRef.current;
-      setWorkspaces((items) => items.map((workspace) => {
-        if (workspace.id !== workspaceId) return workspace;
-        const notebookId = workspace.activeNotebookId;
-        const notebook = workspace.notebooks.find((item) => item.id === notebookId);
-        if (!notebook?.pages.some((item) => item.id === pageId) || notebook.activePageId === pageId) return workspace;
-        return {
-          ...workspace,
-          notebooks: workspace.notebooks.map((item) => item.id === notebookId
-            ? { ...item, activePageId: pageId }
-            : item),
-        };
-      }));
-    };
-    window.addEventListener("mednote:activate-note-page", activateNotePage);
-    return () => window.removeEventListener("mednote:activate-note-page", activateNotePage);
-  }, []);
-
   const sourcePages = useMemo(() => {
     if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
     return Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1);
@@ -2646,23 +2698,65 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     const restore = async () => {
+      let legacySnapshot: PersistedLibrary | null = null;
+      let documentSnapshot: PersistedLibrary | null = null;
+      let indexedSnapshot: PersistedLibrary | null = null;
       try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored) as PersistedLibrary;
-          if (parsed.workspaces?.length && !cancelled) {
-            const normalized = parsed.workspaces.map(normalizeWorkspace);
-            setWorkspaces(normalized);
-            setActiveWorkspaceId(parsed.activeWorkspaceId || parsed.workspaces[0].id);
-            setReaderShare(parsed.readerShare || 50);
-            setWorkspaceMode(parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split");
-            setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
-            localSavedAtRef.current = parsed.savedAt || Date.now();
-            setReady(true);
-            return;
-          }
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as PersistedLibrary;
+          if (parsed?.workspaces?.length) legacySnapshot = parsed;
         }
-      } catch { /* migrate the previous single-notebook format */ }
+      } catch { /* v5 remains the preferred migration source. */ }
+      try {
+        const raw = localStorage.getItem(DOCUMENT_RUNTIME_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as PersistedLibrary;
+          if (parsed?.workspaces?.length) documentSnapshot = parsed;
+        }
+      } catch { /* fall back to the last v5 document contexts. */ }
+      try {
+        indexedSnapshot = await loadIncrementalLibrary() as PersistedLibrary | null;
+      } catch { /* A fresh install has no v5 records. */ }
+
+      const fallbackWorkspace = createEmptyWorkspace();
+      const fallbackSnapshot: PersistedLibrary = {
+        workspaces: [fallbackWorkspace],
+        activeWorkspaceId: fallbackWorkspace.id,
+        readerShare: 50,
+        workspaceMode: "note",
+        noteZoom: 1,
+        savedAt: Date.now(),
+      };
+      try {
+        await noteStore.initialize({
+          relation: readLegacyRelationV2(),
+          localSnapshot: (indexedSnapshot || legacySnapshot || undefined) as PersistedLibrary | undefined,
+          fallbackSnapshot,
+        });
+      } catch (error) {
+        if (!cancelled) setToast(error instanceof Error ? error.message : "Không thể mở kho note v6");
+      }
+
+      const preferred = documentSnapshot || indexedSnapshot || legacySnapshot;
+      if (preferred?.workspaces?.length && !cancelled) {
+        const normalized = preferred.workspaces
+          .filter((workspace) => workspace.id !== RELATION_META_WORKSPACE_ID && workspace.kind !== "temporary")
+          .map((workspace) => documentRuntimeWorkspace(normalizeWorkspace(workspace)));
+        if (normalized.length) {
+          const nextActiveId = normalized.some((workspace) => workspace.id === preferred.activeWorkspaceId)
+            ? preferred.activeWorkspaceId
+            : normalized[0].id;
+          setWorkspaces(normalized);
+          setActiveWorkspaceId(nextActiveId);
+          setReaderShare(preferred.readerShare || 50);
+          setWorkspaceMode(preferred.workspaceMode === "reader" || preferred.workspaceMode === "note" ? preferred.workspaceMode : "split");
+          setNoteZoom(Math.max(.5, Math.min(2, preferred.noteZoom || 1)));
+          localSavedAtRef.current = preferred.savedAt || Date.now();
+          setReady(true);
+          return;
+        }
+      }
 
       let legacy: LegacyNotebookState | null = null;
       try {
@@ -2670,11 +2764,8 @@ export default function Home() {
         if (stored) legacy = JSON.parse(stored) as LegacyNotebookState;
       } catch { /* keep demo data */ }
 
-      const legacyPages = (legacy?.pages?.length ? legacy.pages : initialPages).map(normalizePage);
-      let restoredWorkspace = createDemoWorkspace(legacyPages);
-      restoredWorkspace.notebooks[0].activePageId = legacyPages.some((page) => page.id === legacy?.activeNoteId)
-        ? legacy!.activeNoteId!
-        : legacyPages[0].id;
+      const legacyPages = (legacy?.pages?.length ? legacy.pages : [createBlankPage()]).map(normalizePage);
+      let restoredWorkspace = createEmptyWorkspace();
 
       try {
         const storedPdf = await readLegacyPdf();
@@ -2708,10 +2799,10 @@ export default function Home() {
       } catch { /* IndexedDB may be unavailable */ }
 
       if (!cancelled) {
-        setWorkspaces([restoredWorkspace]);
+        setWorkspaces([documentRuntimeWorkspace(restoredWorkspace)]);
         setActiveWorkspaceId(restoredWorkspace.id);
         setReaderShare(legacy?.readerShare || 50);
-        setWorkspaceMode("split");
+        setWorkspaceMode(restoredWorkspace.documents.length ? "split" : "note");
         setNoteZoom(1);
         setReady(true);
       }
@@ -2732,57 +2823,25 @@ export default function Home() {
       localSavedAtRef.current = savedAt;
       const persistentWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID);
       const activeTemporary = workspaces.find((workspace) => workspace.id === activeWorkspaceId && workspace.kind === "temporary");
-      const mirroredNotebookId = activeTemporary?.notebooks.find((notebook) => !isReaderPlaceholder(notebook))?.id;
+      const linkedPersistentWorkspace = activeTemporary?.noteNotebookId
+        ? persistentWorkspaces.find((workspace) => workspace.noteNotebookId === activeTemporary.noteNotebookId)
+        : undefined;
       const persistentActiveWorkspaceId = persistentWorkspaces.some((workspace) => workspace.id === activeWorkspaceId)
         ? activeWorkspaceId
-        : persistentWorkspaces.find((workspace) => mirroredNotebookId && workspace.notebooks.some((notebook) => notebook.id === mirroredNotebookId))?.id
-          || persistentWorkspaces[0]?.id
+        : linkedPersistentWorkspace?.id || persistentWorkspaces[0]?.id
           || "";
-      const persistentWorkspaceMode: WorkspaceMode = activeTemporary && mirroredNotebookId ? "note" : workspaceMode;
-      const snapshot = { workspaces: persistentWorkspaces, activeWorkspaceId: persistentActiveWorkspaceId, readerShare, workspaceMode: persistentWorkspaceMode, noteZoom, savedAt } satisfies PersistedLibrary;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      (window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = JSON.parse(JSON.stringify(snapshot)) as PersistedLibrary;
-      window.dispatchEvent(new CustomEvent("mednote-live-state-changed", { detail: { origin: "react" } }));
+      const snapshot = {
+        workspaces: persistentWorkspaces.map(documentRuntimeWorkspace),
+        activeWorkspaceId: persistentActiveWorkspaceId,
+        readerShare,
+        workspaceMode: activeTemporary?.noteNotebookId ? "note" : workspaceMode,
+        noteZoom,
+        savedAt,
+      } satisfies PersistedLibrary;
+      localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify(snapshot));
     } catch { /* storage may be unavailable in private browsing */ }
   }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);
   // MEDNOTE_AUTOSAVE_EFFECT_END
-
-  useEffect(() => {
-    const ingestLiveState = (event: Event) => {
-      if ((event as CustomEvent<{ origin?: string }>).detail?.origin === "react") return;
-      const live = (window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__;
-      if (!live?.workspaces?.length) return;
-      const incoming = live.workspaces
-        .filter((workspace) => workspace.id !== RELATION_META_WORKSPACE_ID && workspace.kind !== "temporary")
-        .map((workspace) => normalizeWorkspace(workspace));
-      if (!incoming.length) return;
-      const canonicalNotebooks = new Map(incoming.flatMap((workspace) => workspace.notebooks.map((notebook) => [notebook.id, notebook] as const)));
-      const temporary = workspacesRef.current.filter((workspace) => workspace.kind === "temporary").map((workspace) => ({
-        ...workspace,
-        notebooks: workspace.notebooks.map((notebook) => canonicalNotebooks.get(notebook.id) || notebook),
-      }));
-      const next = [...temporary, ...incoming];
-      const keepTemporaryActive = temporary.some((workspace) => workspace.id === activeWorkspaceIdRef.current);
-      const nextActiveId = keepTemporaryActive
-        ? activeWorkspaceIdRef.current
-        : incoming.some((workspace) => workspace.id === live.activeWorkspaceId)
-          ? live.activeWorkspaceId
-          : incoming[0].id;
-      workspacesRef.current = next;
-      activeWorkspaceIdRef.current = nextActiveId;
-      setWorkspaces(next);
-      setActiveWorkspaceId(nextActiveId);
-      setReaderShare(live.readerShare || 50);
-      const nextWorkspaceMode = keepTemporaryActive
-        ? workspaceModeRef.current
-        : live.workspaceMode === "reader" || live.workspaceMode === "note" ? live.workspaceMode : "split";
-      workspaceModeRef.current = nextWorkspaceMode;
-      setWorkspaceMode(nextWorkspaceMode);
-      setNoteZoom(Math.max(.5, Math.min(2, live.noteZoom || 1)));
-    };
-    window.addEventListener("mednote-live-state-changed", ingestLiveState);
-    return () => window.removeEventListener("mednote-live-state-changed", ingestLiveState);
-  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -2918,6 +2977,10 @@ export default function Home() {
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
   const updateActiveNote = (changes: Partial<NotePage>) => {
+    if (activeNoteHydrating) {
+      setToast("Đang mở nội dung tờ note…");
+      return;
+    }
     updateActiveNotebook((notebook) => ({
       ...notebook,
       pages: notebook.pages.map((page) => page.id === notebook.activePageId ? { ...page, ...changes } : page),
@@ -3360,7 +3423,7 @@ export default function Home() {
     setToast(`Đã quay lại ${excerpt.documentName} · trang ${excerpt.page}`);
   };
 
-  const hasMeaningfulLocalData = () => workspaces.some((workspace) => {
+  const hasMeaningfulLocalData = () => Boolean(noteState.structure?.sheets.length) || workspaces.some((workspace) => {
     if (workspace.kind === "document" || workspace.kind === "collection") return true;
     if (workspace.kind === "demo") return false;
     return workspace.notebooks.some((notebook) => notebook.pages.some((page) => page.body.trim() || page.excerpts.length || page.strokes.length));
@@ -3373,6 +3436,26 @@ export default function Home() {
     setDriveError(null);
     if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
     try {
+      await noteStore.flush();
+      const structure = noteStore.getSnapshot().structure;
+      const contents = structure ? await noteStore.loadAllContents() : {};
+      const materializedNotebooks = structure
+        ? ordered(structure.notebooks).map((notebook) => notebookFromStructure(structure, notebook.id, contents)).filter((notebook): notebook is Notebook => Boolean(notebook))
+        : [];
+      const documentWorkspaces = workspaces
+        .filter((workspace) => workspace.kind !== "temporary")
+        .map(documentRuntimeWorkspace);
+      const noteWorkspace: WorkspaceItem = {
+        id: "note-runtime-v6",
+        kind: "empty",
+        name: "Ghi chú MedNote",
+        documents: [],
+        activeDocumentId: null,
+        notebooks: materializedNotebooks,
+        activeNotebookId: structure?.active.activeNotebookId || materializedNotebooks[0]?.id || "",
+        sourcePage: 1,
+      };
+      const syncWorkspaces = materializedNotebooks.length ? [...documentWorkspaces, noteWorkspace] : documentWorkspaces;
       const remoteFiles = await listDriveAppFiles(token);
       const remoteByMednoteId = new Map(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file] as const] : []));
       const documents = new Map<string, LibraryDocument>();
@@ -3392,7 +3475,7 @@ export default function Home() {
         remoteByMednoteId.set(mednoteId, uploaded);
       }
 
-      const assetIds = new Set(workspaces.flatMap((workspace) => workspace.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : [])))));
+      const assetIds = new Set(materializedNotebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : []))));
       for (const assetId of assetIds) {
         const mednoteId = `asset:${assetId}`;
         if (remoteByMednoteId.has(mednoteId)) continue;
@@ -3408,7 +3491,7 @@ export default function Home() {
       }
 
       const savedAt = localSavedAtRef.current || Date.now();
-      const snapshot: PersistedLibrary = { workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt };
+      const snapshot: PersistedLibrary = { workspaces: syncWorkspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt };
       const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
       await upsertDriveFile(token, {
         name: "MedNote Workspace.json",
@@ -3449,6 +3532,7 @@ export default function Home() {
       const parsed = JSON.parse(await manifestBlob.text()) as PersistedLibrary;
       if (!Array.isArray(parsed.workspaces) || !parsed.workspaces.length) throw new Error("Bản lưu Drive không hợp lệ");
       const normalized = parsed.workspaces.map(normalizeWorkspace);
+      await noteStore.replaceFromLegacySnapshot(parsed, readLegacyRelationV2());
       let missingFiles = 0;
 
       for (const workspace of normalized) {
@@ -3474,8 +3558,12 @@ export default function Home() {
 
       const savedAt = parsed.savedAt || (manifestFile.modifiedTime ? Date.parse(manifestFile.modifiedTime) : Date.now());
       localSavedAtRef.current = savedAt;
-      setWorkspaces(normalized);
-      setActiveWorkspaceId(normalized.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : normalized[0].id);
+      const documentWorkspaces = normalized
+        .filter((workspace) => workspace.id !== "note-runtime-v6")
+        .map(documentRuntimeWorkspace);
+      const restoredDocuments = documentWorkspaces.length ? documentWorkspaces : [documentRuntimeWorkspace(createEmptyWorkspace())];
+      setWorkspaces(restoredDocuments);
+      setActiveWorkspaceId(restoredDocuments.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : restoredDocuments[0].id);
       setReaderShare(parsed.readerShare || 50);
       setWorkspaceMode(parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split");
       setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
@@ -3783,8 +3871,18 @@ export default function Home() {
 
   const exportNotebook = async () => {
     setToast("Đang tạo tệp note…");
+    const structure = noteState.structure;
+    if (!structure) return setToast("Kho note chưa sẵn sàng");
+    let exportNotebook = activeNotebook;
+    try {
+      const contents = await noteStore.loadNotebookContents(activeNotebook.id);
+      exportNotebook = notebookFromStructure(structure, activeNotebook.id, contents) || activeNotebook;
+    } catch {
+      setToast("Không thể nạp đầy đủ các tờ để xuất");
+      return;
+    }
     const pagesHtml: string[] = [];
-    for (const [index, page] of activeNotebook.pages.entries()) {
+    for (const [index, page] of exportNotebook.pages.entries()) {
       const text = normalizeText(page.text);
       const font = TEXT_FONTS.find((option) => option.id === text.font) ?? TEXT_FONTS[0];
       const textStyle = `font-family:${font.family};font-size:${text.size}px;color:${text.color === "auto" ? "#24343c" : text.color};font-weight:${text.bold ? 700 : 400};font-style:${text.italic ? "italic" : "normal"};text-decoration:${text.underline ? "underline" : "none"};text-align:${text.align}`;
@@ -3925,14 +4023,14 @@ export default function Home() {
     const name = files.length === 1
       ? files[0].name.replace(/\.pdf$/i, "")
       : `Bộ tài liệu · ${files[0].name.replace(/\.pdf$/i, "")} +${files.length - 1}`;
-    const view = getLibraryView();
+    const noteStructure = noteStore.getSnapshot().structure;
     const requestedDestination = await requestNoteDestination({
       documentLabel: name,
       savedToLibrary: saveToLibrary,
-      notebooks: (view?.notebooks || []).filter((notebook) => notebook.available).map((notebook) => ({
+      notebooks: ordered(noteStructure?.notebooks || []).map((notebook) => ({
         id: notebook.id,
         title: notebook.title,
-        sections: notebook.sections.map((section) => ({ id: section.id, title: section.title })),
+        sections: ordered((noteStructure?.sections || []).filter((section) => section.notebookId === notebook.id)).map((section) => ({ id: section.id, title: section.title })),
       })),
     });
     const destination: NoteDestination = requestedDestination || { mode: "none" };
@@ -3948,14 +4046,24 @@ export default function Home() {
       files.forEach((file, index) => temporaryPdfBlobsRef.current.set(documents[index].id, file));
     }
 
-    const existingNotebook = destination.mode === "section" || destination.mode === "page"
-      ? libraryWorkspaces.flatMap((workspace) => workspace.notebooks).find((notebook) => notebook.id === destination.notebookId)
-      : undefined;
-    const selectedNotebook = destination.mode === "notebook"
-      ? createNotebook(destination.title, 1)
-      : existingNotebook
-        ? JSON.parse(JSON.stringify(existingNotebook)) as Notebook
-        : null;
+    let selectedNotebookId: string | null = null;
+    const firstPage = createBlankPage(1);
+    try {
+      if (destination.mode === "notebook") {
+        const result = await noteStore.createNotebook(destination.title, notePageToSheetContent(firstPage));
+        selectedNotebookId = result.active.activeNotebookId;
+      } else if (destination.mode === "section") {
+        const sectionResult = await noteStore.createSection(destination.notebookId, destination.title);
+        await noteStore.createPage(sectionResult.id, name, notePageToSheetContent(firstPage));
+        selectedNotebookId = destination.notebookId;
+      } else if (destination.mode === "page") {
+        await noteStore.createPage(destination.sectionId, destination.title, notePageToSheetContent(firstPage));
+        selectedNotebookId = destination.notebookId;
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể tạo vị trí note");
+      selectedNotebookId = null;
+    }
     const placeholder = createReaderPlaceholder(workspaceId);
     const workspace: WorkspaceItem = {
       id: workspaceId,
@@ -3963,96 +4071,55 @@ export default function Home() {
       name,
       documents,
       activeDocumentId: documents[0].id,
-      notebooks: selectedNotebook ? [selectedNotebook] : [placeholder],
-      activeNotebookId: selectedNotebook?.id || placeholder.id,
+      noteNotebookId: selectedNotebookId,
+      notebooks: [placeholder],
+      activeNotebookId: placeholder.id,
       sourcePage: 1,
     };
 
-    let nextWorkspaces = [workspace, ...libraryWorkspaces.filter((item) => item.kind !== "temporary" && item.id !== workspace.id)];
-    if (!saveToLibrary && destination.mode === "notebook" && selectedNotebook) {
-      const noteWorkspaceId = `relation-note:${selectedNotebook.id}`;
-      if (!nextWorkspaces.some((item) => item.id === noteWorkspaceId)) {
-        nextWorkspaces.push({
-          id: noteWorkspaceId,
-          kind: "empty",
-          name: selectedNotebook.title,
-          documents: [],
-          activeDocumentId: null,
-          notebooks: [selectedNotebook],
-          activeNotebookId: selectedNotebook.id,
-          sourcePage: 1,
-        });
-      }
+    const persistentWorkspaces = libraryWorkspaces.filter((item) => item.kind !== "temporary" && item.id !== workspace.id);
+    if (!saveToLibrary && selectedNotebookId && !persistentWorkspaces.some((item) => item.noteNotebookId === selectedNotebookId)) {
+      const notebookTitle = noteStore.getSnapshot().structure?.notebooks.find((notebook) => notebook.id === selectedNotebookId)?.title || "Ghi chú MedNote";
+      const noteWorkspaceId = `relation-note:${selectedNotebookId}`;
+      const notePlaceholder = createReaderPlaceholder(noteWorkspaceId);
+      persistentWorkspaces.unshift({
+        id: noteWorkspaceId,
+        kind: "empty",
+        name: notebookTitle,
+        documents: [],
+        activeDocumentId: null,
+        noteNotebookId: selectedNotebookId,
+        notebooks: [notePlaceholder],
+        activeNotebookId: notePlaceholder.id,
+        sourcePage: 1,
+      });
     }
+    const nextWorkspaces = [workspace, ...persistentWorkspaces];
     workspacesRef.current = nextWorkspaces;
     activeWorkspaceIdRef.current = workspace.id;
     setWorkspaces(nextWorkspaces);
     setActiveWorkspaceId(workspace.id);
-    const nextMode: WorkspaceMode = selectedNotebook ? "split" : "reader";
+    const nextMode: WorkspaceMode = selectedNotebookId ? "split" : "reader";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
     setLibraryOpen(false);
 
     const persistent = nextWorkspaces.filter((item) => item.kind !== "temporary" && item.id !== RELATION_META_WORKSPACE_ID);
-    const mirroredWorkspaceId = selectedNotebook
-      ? persistent.find((item) => item.notebooks.some((notebook) => notebook.id === selectedNotebook.id))?.id
+    const linkedPersistentWorkspace = selectedNotebookId
+      ? persistent.find((item) => item.noteNotebookId === selectedNotebookId)
       : undefined;
     const savedAt = Date.now();
     const snapshot = {
       workspaces: persistent,
       activeWorkspaceId: saveToLibrary
         ? workspace.id
-        : mirroredWorkspaceId || (persistent.some((item) => item.id === activeWorkspaceIdRef.current) ? activeWorkspaceIdRef.current : persistent[0]?.id || ""),
+        : linkedPersistentWorkspace?.id || (persistent.some((item) => item.id === activeWorkspaceIdRef.current) ? activeWorkspaceIdRef.current : persistent[0]?.id || ""),
       readerShare,
-      workspaceMode: saveToLibrary ? nextMode : selectedNotebook ? "note" : workspaceMode,
+      workspaceMode: saveToLibrary ? nextMode : selectedNotebookId ? "note" : workspaceMode,
       noteZoom,
       savedAt,
     } satisfies PersistedLibrary;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    (window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = JSON.parse(JSON.stringify(snapshot)) as PersistedLibrary;
-    window.dispatchEvent(new CustomEvent("mednote-live-state-changed", { detail: { origin: "react" } }));
-
-    let relationTarget: RelationTarget | null = selectedNotebook
-      ? { type: "notebook", id: selectedNotebook.id, notebookId: selectedNotebook.id }
-      : null;
-    if (selectedNotebook && destination.mode === "section") {
-      const sectionId = createLibrarySection(selectedNotebook.id, destination.title);
-      if (sectionId) {
-        const logicalPageId = createLibraryPage(selectedNotebook.id, sectionId, name);
-        relationTarget = logicalPageId
-          ? { type: "section", id: sectionId, notebookId: selectedNotebook.id, sectionId }
-          : relationTarget;
-      }
-    } else if (selectedNotebook && destination.mode === "page") {
-      const logicalPageId = createLibraryPage(selectedNotebook.id, destination.sectionId, destination.title);
-      if (logicalPageId) {
-        const liveState = readAppState();
-        const liveNotebook = liveState?.workspaces.flatMap((item) => item.notebooks || []).find((notebook) => String(notebook.id) === selectedNotebook.id);
-        const physicalPage = (liveNotebook?.pages || []).find((page: Record<string, unknown>) => String(page.pageId || page.id) === logicalPageId);
-        relationTarget = {
-          type: "page",
-          id: logicalPageId,
-          notebookId: selectedNotebook.id,
-          sectionId: destination.sectionId,
-          pageId: String(physicalPage?.id || logicalPageId),
-        };
-      }
-    } else if (selectedNotebook) {
-      syncFromApp();
-    }
-
-    if (saveToLibrary && relationTarget) {
-      const linkedView = getLibraryView();
-      let source: RelationSource | null = documents.length === 1
-        ? { type: "document", id: documents[0].id }
-        : null;
-      if (!source) {
-        const signature = documents.map((document) => document.id).sort().join("|");
-        const group = linkedView?.groups.find((item) => item.documentIds.slice().sort().join("|") === signature);
-        if (group) source = { type: "group", id: group.id };
-      }
-      if (source) upsertRelation("workspace", source, relationTarget, true);
-    }
+    localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) }));
 
     setToast(destination.mode === "none"
       ? saveToLibrary
@@ -4087,94 +4154,70 @@ export default function Home() {
         await saveLocalPdf(blob, savedDocuments[index]);
       }));
       const placeholder = createReaderPlaceholder(savedWorkspaceId);
-      const realNotebooks = activeWorkspace.notebooks.filter((notebook) => !isReaderPlaceholder(notebook));
       const savedWorkspace: WorkspaceItem = {
         ...activeWorkspace,
         id: savedWorkspaceId,
         kind: savedDocuments.length === 1 ? "document" : "collection",
         documents: savedDocuments,
         activeDocumentId: savedDocuments[0].id,
-        notebooks: realNotebooks.length ? realNotebooks : [placeholder],
-        activeNotebookId: realNotebooks.some((notebook) => notebook.id === activeWorkspace.activeNotebookId)
-          ? activeWorkspace.activeNotebookId
-          : realNotebooks[0]?.id || placeholder.id,
+        notebooks: [placeholder],
+        activeNotebookId: placeholder.id,
       };
       const nextWorkspaces = workspacesRef.current.map((workspace) => workspace.id === activeWorkspace.id ? savedWorkspace : workspace);
       workspacesRef.current = nextWorkspaces;
       activeWorkspaceIdRef.current = savedWorkspaceId;
       setWorkspaces(nextWorkspaces);
       setActiveWorkspaceId(savedWorkspaceId);
-      workspaceModeRef.current = realNotebooks.length ? "split" : "reader";
+      workspaceModeRef.current = hasActiveNote ? "split" : "reader";
       setWorkspaceMode(workspaceModeRef.current);
       const savedAt = Date.now();
       const snapshot = {
         workspaces: nextWorkspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID),
         activeWorkspaceId: savedWorkspaceId,
         readerShare,
-        workspaceMode: realNotebooks.length ? "split" as const : "reader" as const,
+        workspaceMode: hasActiveNote ? "split" as const : "reader" as const,
         noteZoom,
         savedAt,
       } satisfies PersistedLibrary;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      (window as Window & { __MEDNOTE_LIVE_STATE__?: PersistedLibrary }).__MEDNOTE_LIVE_STATE__ = JSON.parse(JSON.stringify(snapshot)) as PersistedLibrary;
-      window.dispatchEvent(new CustomEvent("mednote-live-state-changed", { detail: { origin: "react" } }));
+      localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) }));
       temporaryPdfBlobsRef.current.clear();
-      setToast(realNotebooks.length ? "Đã lưu PDF; note vẫn được giữ" : "Đã lưu PDF đang xem vào thư viện — chưa tạo note");
+      setToast(hasActiveNote ? "Đã lưu PDF; note vẫn được giữ" : "Đã lưu PDF đang xem vào thư viện — chưa tạo note");
     } catch {
       setToast("Không thể lưu PDF đang xem vào thư viện");
     }
   };
 
-  const addNotePage = () => {
+  const addNotePage = async () => {
     const next = createBlankPage(sourcePage, activeNotebook.pages.length + 1);
-    updateActiveNotebook((notebook) => ({ ...notebook, pages: [...notebook.pages, next], activePageId: next.id }));
-    setActiveTool("text");
-    setToast(`Đã thêm trang ${PAPER_SIZES[next.paper.size].label}`);
+    const sectionId = noteState.structure?.active.activeSectionId;
+    if (!sectionId) return;
+    try {
+      await noteStore.createPage(sectionId, next.title, notePageToSheetContent(next));
+      setActiveTool("text");
+      setToast(`Đã thêm Page ${PAPER_SIZES[next.paper.size].label}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể thêm Page");
+    }
   };
 
-  const addNotebook = () => {
-    const existingNotebooks = activeWorkspace.notebooks.filter((item) => !isReaderPlaceholder(item));
-    const notebook = createNotebook(
+  const addNotebook = async () => {
+    const existingNotebooks = noteState.structure?.notebooks || [];
+    const title = (
       activeWorkspace.documents.length
         ? `Ghi chú — ${activeWorkspace.name}`
-        : `Sổ ghi chú ${existingNotebooks.length + 1}`,
-      activeWorkspace.documents.length ? sourcePage : 1,
+        : `Sổ ghi chú ${existingNotebooks.length + 1}`
     );
-    if (activeWorkspace.kind === "temporary") {
-      const updatedTemporary = {
-        ...activeWorkspace,
-        notebooks: [...activeWorkspace.notebooks.filter((item) => !isReaderPlaceholder(item)), notebook],
-        activeNotebookId: notebook.id,
-      };
-      const noteWorkspaceId = `relation-note:${notebook.id}`;
-      const noteWorkspace: WorkspaceItem = {
-        id: noteWorkspaceId,
-        kind: "empty",
-        name: notebook.title,
-        documents: [],
-        activeDocumentId: null,
-        notebooks: [notebook],
-        activeNotebookId: notebook.id,
-        sourcePage: 1,
-      };
-      setWorkspaces((items) => {
-        const next = [updatedTemporary, noteWorkspace, ...items.filter((item) => item.id !== activeWorkspace.id && item.id !== noteWorkspaceId)];
-        workspacesRef.current = next;
-        return next;
-      });
-    } else {
-      updateActiveWorkspace((workspace) => ({
-        ...workspace,
-        notebooks: [...workspace.notebooks.filter((item) => !isReaderPlaceholder(item)), notebook],
-        activeNotebookId: notebook.id,
-      }));
+    const page = createBlankPage(activeWorkspace.documents.length ? sourcePage : 1);
+    try {
+      const result = await noteStore.createNotebook(title, notePageToSheetContent(page));
+      updateActiveWorkspace((workspace) => ({ ...workspace, noteNotebookId: result.active.activeNotebookId }));
+      setActiveTool("text");
+      workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
+      setWorkspaceMode(workspaceModeRef.current);
+      setToast(activeWorkspace.documents.length ? "Đã tạo Notebook cho tài liệu" : "Đã tạo sổ ghi chú mới");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể tạo Notebook");
     }
-    setActiveTool("text");
-    workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
-    setWorkspaceMode(workspaceModeRef.current);
-    setToast(activeWorkspace.kind === "temporary"
-      ? "Đã tạo note độc lập; PDF vẫn chỉ mở tạm"
-      : activeWorkspace.documents.length ? "Đã tạo note cho tài liệu" : "Đã tạo sổ ghi chú mới");
   };
 
   const deleteNotePage = async () => {
@@ -4182,61 +4225,54 @@ export default function Home() {
     const deletedPageId = activeNote.id;
     const assetIds = activeNote.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!);
     await Promise.allSettled(assetIds.map(deleteLocalAsset));
-    if (notePages.length === 1) {
-      const replacement = createBlankPage(sourcePage, 1);
-      updateActiveNotebook((notebook) => ({ ...notebook, pages: [replacement], activePageId: replacement.id }));
+    const structure = noteState.structure;
+    const pageId = structure?.active.activePageId;
+    if (!structure || !pageId) return;
+    const pageSheets = structure.sheets.filter((sheet) => sheet.pageId === pageId);
+    try {
+      if (pageSheets.length > 1) {
+        await noteStore.deleteSheet(activeNote.id);
+        setToast("Đã xóa tờ note");
+      } else {
+        const replacement = createBlankPage(sourcePage, 1);
+        await noteStore.deletePage(pageId, notePageToSheetContent(replacement));
+        setToast("Đã xóa Page; Section vẫn giữ một Page trống khi cần");
+      }
       setStrokeHistory((history) => {
         const next = { ...history };
         delete next[deletedPageId];
         return next;
       });
       setActiveTool("text");
-      setToast("Đã xóa trang và tạo một trang trống");
-      return;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể xóa trang note");
     }
-    const index = notePages.findIndex((page) => page.id === activeNote.id);
-    const nextPages = notePages.filter((page) => page.id !== activeNote.id);
-    const nextActiveId = nextPages[Math.min(index, nextPages.length - 1)].id;
-    updateActiveNotebook((notebook) => ({ ...notebook, pages: nextPages, activePageId: nextActiveId }));
-    setStrokeHistory((history) => {
-      const next = { ...history };
-      delete next[deletedPageId];
-      return next;
-    });
-    setToast("Đã xóa trang note");
   };
 
   const deleteNotebook = async () => {
     const pageCount = activeNotebook.pages.length;
-    const realNotebooks = activeWorkspace.notebooks.filter((item) => !isReaderPlaceholder(item));
-    const lastNotebook = realNotebooks.length === 1;
+    const lastNotebook = (noteState.structure?.notebooks.length || 0) === 1;
     const warning = lastNotebook
       ? activeWorkspace.documents.length
         ? `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? PDF vẫn được giữ để đọc, không tự tạo note mới.`
         : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Sau đó app sẽ tạo một sổ trống mới.`
       : `Xóa sổ note “${activeNotebook.title}” cùng ${pageCount} trang? Thao tác này không thể hoàn tác.`;
     if (!window.confirm(warning)) return;
-    const deletedPageIds = new Set(activeNotebook.pages.map((page) => page.id));
-    const assetIds = activeNotebook.pages.flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!));
+    const contents = await noteStore.loadNotebookContents(activeNotebook.id);
+    const materialized = noteState.structure ? notebookFromStructure(noteState.structure, activeNotebook.id, contents) : activeNotebook;
+    const deletedPageIds = new Set(materialized?.pages.map((page) => page.id) || []);
+    const assetIds = (materialized?.pages || []).flatMap((page) => page.excerpts.filter((excerpt) => excerpt.kind === "image" && excerpt.assetId).map((excerpt) => excerpt.assetId!));
     await Promise.allSettled(assetIds.map(deleteLocalAsset));
-    if (lastNotebook) {
-      const replacement = activeWorkspace.documents.length
-        ? createReaderPlaceholder(activeWorkspace.id)
-        : createNotebook("Sổ ghi chú mới");
-      updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: [replacement], activeNotebookId: replacement.id }));
-      if (activeWorkspace.documents.length) setWorkspaceMode("reader");
-    } else {
-      const index = activeWorkspace.notebooks.findIndex((notebook) => notebook.id === activeNotebook.id);
-      const nextNotebooks = activeWorkspace.notebooks.filter((notebook) => notebook.id !== activeNotebook.id);
-      const nextActiveId = nextNotebooks[Math.min(index, nextNotebooks.length - 1)].id;
-      updateActiveWorkspace((workspace) => ({ ...workspace, notebooks: nextNotebooks, activeNotebookId: nextActiveId }));
+    try {
+      await noteStore.deleteNotebook(activeNotebook.id, notePageToSheetContent(createBlankPage()));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể xóa Notebook");
+      return;
     }
     setStrokeHistory((history) => Object.fromEntries(Object.entries(history).filter(([pageId]) => !deletedPageIds.has(pageId))));
     setNotePanel(null);
     setActiveTool("text");
-    setToast(lastNotebook
-      ? activeWorkspace.documents.length ? "Đã xóa note; PDF vẫn được giữ độc lập" : "Đã xóa sổ note và tạo sổ trống"
-      : "Đã xóa sổ note");
+    setToast(lastNotebook ? "Đã xóa sổ note và tạo sổ trống" : "Đã xóa sổ note; PDF vẫn được giữ độc lập");
   };
 
   const beginWorkspaceRename = (workspace: WorkspaceItem) => {
@@ -4285,9 +4321,9 @@ export default function Home() {
   const deleteWorkspace = async (workspaceId: string) => {
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
     if (!target) return;
-    const keptNotebooks = target.notebooks.filter((notebook) => !isReaderPlaceholder(notebook));
+    const linkedNotebook = noteState.structure?.notebooks.find((notebook) => notebook.id === target.noteNotebookId);
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
-    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${keptNotebooks.length ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebook ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
     let deletePersistedPdfs: Promise<PromiseSettledResult<void>[]> | null = null;
     if (target.kind === "temporary") {
       target.documents.forEach((document) => temporaryPdfBlobsRef.current.delete(document.id));
@@ -4298,27 +4334,17 @@ export default function Home() {
       deletePersistedPdfs = Promise.allSettled(target.documents.map((document) => deleteLocalPdf(document.id)));
     }
     const deletedDocumentIds = new Set(target.documents.map((document) => document.id));
-    const detachSources = (notebook: Notebook): Notebook => ({
-      ...notebook,
-      pages: notebook.pages.map((page) => {
-        return {
-          ...page,
-          citationPage: null,
-          excerpts: page.excerpts.map((excerpt) => excerpt.documentId && deletedDocumentIds.has(excerpt.documentId)
-            ? { ...excerpt, sourceKind: "manual", documentId: undefined, documentName: undefined, page: undefined, rect: undefined }
-            : excerpt),
-        };
-      }),
-    });
     const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
-    const detachedWorkspace: WorkspaceItem | null = keptNotebooks.length ? {
+    const detachedPlaceholder = createReaderPlaceholder(target.id);
+    const detachedWorkspace: WorkspaceItem | null = linkedNotebook ? {
       ...target,
       kind: "empty",
-      name: keptNotebooks[0].title,
+      name: linkedNotebook.title,
       documents: [],
       activeDocumentId: null,
-      notebooks: keptNotebooks.map(detachSources),
-      activeNotebookId: keptNotebooks.some((notebook) => notebook.id === target.activeNotebookId) ? target.activeNotebookId : keptNotebooks[0].id,
+      noteNotebookId: linkedNotebook.id,
+      notebooks: [detachedPlaceholder],
+      activeNotebookId: detachedPlaceholder.id,
       sourcePage: 1,
     } : null;
     const remaining = workspaces.flatMap((workspace) => workspace.id !== workspaceId
@@ -4444,7 +4470,7 @@ export default function Home() {
   };
 
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
-    if (mode !== "reader" && isReaderPlaceholder(activeNotebook)) {
+    if (mode !== "reader" && !hasActiveNote) {
       setToast(activeWorkspace.kind === "temporary"
         ? "PDF đang mở tạm. Chọn “Tạo note” để ghi chú mà không cần lưu PDF."
         : "PDF này chưa có note. Chọn “Tạo note” khi bạn muốn ghi chú.");
@@ -4529,9 +4555,9 @@ export default function Home() {
         </div>
         <div className="top-actions">
           <nav className="workspace-mode-switcher" aria-label="Chế độ không gian làm việc">
-            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} disabled={isReaderPlaceholder(activeNotebook)} title={isReaderPlaceholder(activeNotebook) ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
+            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} disabled={!hasActiveNote} title={!hasActiveNote ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
             <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
-            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={isReaderPlaceholder(activeNotebook)} title={isReaderPlaceholder(activeNotebook) ? "PDF này chưa có note" : "Chỉ hiện Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
+            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={!hasActiveNote} title={!hasActiveNote ? "Chưa có note" : "Chỉ hiện Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
           </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button
@@ -4544,7 +4570,7 @@ export default function Home() {
             <span>{driveStatus === "syncing" ? "Đang đồng bộ" : driveToken ? "Drive" : "Kết nối Drive"}</span>
           </button>
           {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
-          {activeWorkspace.documents.length > 0 && isReaderPlaceholder(activeNotebook) && <button className="save-session-button" onClick={addNotebook}><NotebookTabs size={15} /> Tạo note</button>}
+          {activeWorkspace.documents.length > 0 && !hasActiveNote && <button className="save-session-button" onClick={() => { void addNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}
           <button className="primary-button" onClick={() => previewPdfInputRef.current?.click()}><FolderOpen size={16} /> Mở PDF</button>
         </div>
       </header>
@@ -5008,8 +5034,9 @@ export default function Home() {
             </div>
           )}
 
-          <div className="note-stage workspace-frame" ref={noteStageRef}>
-            <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={paperStyle} onPointerDown={(event) => {
+          <div className={`note-stage workspace-frame ${activeNoteHydrating ? "note-stage-hydrating" : ""}`} ref={noteStageRef} aria-busy={activeNoteHydrating}>
+            {activeNoteHydrating && <div className="note-hydration-status" role="status" aria-live="polite">Đang mở nội dung tờ…</div>}
+            <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={{ ...paperStyle, pointerEvents: activeNoteHydrating ? "none" : undefined, opacity: activeNoteHydrating ? .72 : 1 }} onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest(".note-excerpt")) return;
               setSelectedExcerptId(null);
               if (!(event.target as HTMLElement).closest("[data-rich-editor-id]")) {
@@ -5047,7 +5074,7 @@ export default function Home() {
             <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Chọn đối tượng để di chuyển, đổi cỡ hoặc sắp xếp lớp" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "callout" ? "Bấm vị trí cần chú thích để tạo hộp callout có mũi tên" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
           </div>
         </section>
-        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú" />
+        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú"><NoteSidebar /></aside>
       </section>
     </main>
   );

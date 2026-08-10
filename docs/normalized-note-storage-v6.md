@@ -1,6 +1,6 @@
 # Normalized note storage v6 contract
 
-Status: Wave 1.5 foundation. Production runtime must not use this repository until the Wave 2 store cutover is implemented and audited.
+Status: Wave 2 runtime cutover. `NoteStore`, command navigation, the editor, and the React sidebar use this repository as the production note source of truth. Legacy v3/v4/v5 and relation-v2 records remain read-only migration inputs until the later cleanup wave.
 
 ## Record ownership
 
@@ -37,6 +37,8 @@ Status: Wave 1.5 foundation. Production runtime must not use this repository unt
 ## Migration and cutover
 
 - v3/v4/v5 content hashes are calculated before persistence and verified again after v6 reload.
-- v5 and relation-v2 remain read-only fallback sources; Wave 1.5 does not delete them.
+- v5 and relation-v2 remain read-only fallback sources; Wave 2 does not delete them.
 - A relation, group, preset or locator that cannot round-trip blocks the v6 marker write.
-- Wave 2 may start only when the large-fixture gate proves that structure loading reads zero `sheet-content:*` keys and the production runtime still has no import of the v6 repository.
+- Startup loads structure metadata plus only the active `SheetContent`. Navigation flushes the outgoing draft, commits the four active IDs, then hydrates the destination Sheet without a page reload.
+- Production entrypoints must not load the old imperative navigation/runtime modules or publish note state through `window.__MEDNOTE_LIVE_STATE__`.
+- The temporary document-runtime snapshot may keep a `noteNotebookId` reference for pre-Wave-3 PDF behavior, but it stores no Notebook hierarchy or Sheet content.

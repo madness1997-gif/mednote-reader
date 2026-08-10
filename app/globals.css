@@ -130,19 +130,20 @@ body {
 .library-rename-item input:focus { box-shadow: 0 0 0 2px rgba(14,107,112,.12); }
 .library-rename-item small { color: var(--muted); font-size: 9px; }
 
-.workspace { width: 100%; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 108px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) 120px; }
-.workspace.pdf-rail-wide { grid-template-columns: 264px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) 120px; }
-.workspace.pdf-rail-collapsed { grid-template-columns: minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) 120px; }
+.workspace { width: 100%; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 108px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
+.workspace.pdf-rail-wide { grid-template-columns: 264px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
+.workspace.pdf-rail-collapsed { grid-template-columns: minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
 .workspace.workspace-mode-reader { grid-template-columns: 108px minmax(0, 1fr); }
 .workspace.workspace-mode-reader.pdf-rail-wide { grid-template-columns: 264px minmax(0, 1fr); }
 .workspace.workspace-mode-reader.pdf-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
 .workspace.workspace-mode-reader .notes-pane, .workspace.workspace-mode-reader .note-navigation-host, .workspace.workspace-mode-reader .split-divider { display: none; }
-.workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) 120px; }
+.workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
 .workspace.workspace-mode-note .pdf-thumbnails, .workspace.workspace-mode-note .reader-pane, .workspace.workspace-mode-note .split-divider { display: none; }
 .workspace.pdf-rail-collapsed .pdf-thumbnails { display: none; }
 .pdf-thumbnails, .note-navigation-host { min-width: 0; background: rgba(255,255,255,.75); overflow: auto; scrollbar-width: thin; }
 .pdf-thumbnails { border-right: 1px solid var(--line); padding: 8px; }
 .note-navigation-host { border-left: 1px solid var(--line); padding: 10px 8px; }
+.note-hydration-status { position: sticky; top: 12px; z-index: 20; align-self: center; width: max-content; max-width: calc(100% - 24px); margin: 8px auto -42px; padding: 8px 12px; border-radius: 999px; color: #36515b; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px rgba(27,52,61,.14); font-size: 13px; pointer-events: none; }
 .rail-heading { height: 38px; justify-content: space-between; color: var(--muted); padding: 0 3px; }
 .pdf-rail-tabs { position: sticky; top: 0; z-index: 2; height: 39px; display: flex; align-items: center; justify-content: center; gap: 2px; margin: -2px -2px 7px; padding: 3px 2px 6px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); }
 .pdf-rail-tabs button { width: 31px; height: 31px; flex: 0 0 31px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
@@ -715,7 +716,7 @@ body {
   .workspace.workspace-mode-reader { grid-template-columns: 82px minmax(0, 1fr); }
   .workspace.workspace-mode-reader.pdf-rail-wide { grid-template-columns: 240px minmax(0, 1fr); }
   .workspace.workspace-mode-reader.pdf-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
-  .workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) 120px; }
+  .workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
   .workspace.workspace-mode-note .note-navigation-host { display: block; }
   .note-navigation-host { display: none; }
   .search-field { width: 150px; }

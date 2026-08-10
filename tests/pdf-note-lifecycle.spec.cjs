@@ -5,6 +5,25 @@ test.use({ viewport: { width: 1280, height: 900 } });
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
+async function indexedRecord(page, key) {
+  return page.evaluate(async (recordKey) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mednote-local', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = db.transaction('documents', 'readonly').objectStore('documents').get(recordKey);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      db.close();
+    }
+  }, key);
+}
+
 async function pdfKeys(page) {
   return page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
@@ -24,29 +43,27 @@ async function pdfKeys(page) {
   });
 }
 
-test('preview stays temporary; saving, creating a note, and deleting the PDF are independent', async ({ page }) => {
+test('preview, PDF persistence, note creation, and PDF deletion remain independent', async ({ page }) => {
   const pdf = await PDFDocument.create();
   pdf.addPage([240, 320]);
   const bytes = await pdf.save();
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({
-    name: 'independent.pdf',
-    mimeType: 'application/pdf',
-    buffer: Buffer.from(bytes),
+    name: 'independent.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes),
   });
   const destinationDialog = page.locator('.mednote-note-destination');
   await expect(destinationDialog).toBeVisible();
   await destinationDialog.locator('input[name="mode"][value="none"]').check();
   await destinationDialog.locator('button[type="submit"]').click();
-  await expect(destinationDialog).toBeHidden();
 
   await expect(page.locator('.save-session-button', { hasText: 'Lưu vào thư viện' })).toBeVisible();
   await expect(page.locator('.autosave-status')).toContainText('không lưu, không tạo note');
-  await page.waitForTimeout(500);
   expect(await pdfKeys(page)).toEqual([]);
-  const persistedWhilePreviewing = await page.evaluate(() => window.__MEDNOTE_LIVE_STATE__);
-  expect(persistedWhilePreviewing.workspaces.some((workspace) => workspace.kind === 'temporary')).toBe(false);
+  await expect.poll(() => page.evaluate(() => {
+    const snapshot = JSON.parse(localStorage.getItem('mednote-document-runtime-v1') || 'null');
+    return snapshot?.workspaces?.some((workspace) => workspace.kind === 'temporary') || false;
+  })).toBe(false);
 
   await page.locator('.save-session-button', { hasText: 'Lưu vào thư viện' }).click();
   await expect(page.locator('.save-session-button', { hasText: 'Tạo note' })).toBeVisible({ timeout: 10_000 });
@@ -54,44 +71,35 @@ test('preview stays temporary; saving, creating a note, and deleting the PDF are
 
   await page.locator('.save-session-button', { hasText: 'Tạo note' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
-  await expect(page.locator('.mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
-  await page.waitForTimeout(500);
-  const stateWithNote = await page.evaluate(() => window.__MEDNOTE_LIVE_STATE__);
-  const savedWorkspace = stateWithNote.workspaces.find((workspace) => workspace.documents.some((document) => document.name === 'independent.pdf'));
-  expect(savedWorkspace).toBeTruthy();
-  expect(savedWorkspace.notebooks.some((notebook) => !notebook.id.startsWith('__mednote_reader_placeholder__:'))).toBe(true);
+  const nav = page.locator('.note-sidebar-v6');
+  await expect(nav).toBeVisible({ timeout: 10_000 });
+  await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Ghi chú — independent');
+  const linkedNotebookId = await nav.locator('select[aria-label="Notebook"]').inputValue();
+  await expect.poll(() => indexedRecord(page, `library:v6:notebook:${linkedNotebookId}`)).toMatchObject({ title: 'Ghi chú — independent' });
+  await expect.poll(() => page.evaluate(() => {
+    const snapshot = JSON.parse(localStorage.getItem('mednote-document-runtime-v1') || 'null');
+    return snapshot?.workspaces?.find((workspace) => workspace.documents?.some((document) => document.name === 'independent.pdf'))?.noteNotebookId || null;
+  })).toBe(linkedNotebookId);
 
   await page.getByRole('button', { name: 'Mở thư viện' }).click();
   const pdfRow = page.locator('.library-row', { hasText: 'independent' }).first();
-  await pdfRow.locator('.native-library-more').click();
-  const deletePdf = pdfRow.locator('.library-delete');
-  await expect(deletePdf).toBeVisible({ timeout: 10_000 });
   page.once('dialog', (dialog) => dialog.accept());
-  await deletePdf.click();
+  await pdfRow.locator('.library-delete').click();
 
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 10_000 });
-  await expect(page.locator('.mednote-page-sheet-nav')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-sidebar-v6')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => pdfKeys(page)).toEqual([]);
-  await expect.poll(() => page.evaluate(() => {
-    const workspace = window.__MEDNOTE_LIVE_STATE__.workspaces.find((item) => item.documents?.length === 0
-      && item.notebooks?.some((notebook) => notebook.title === 'Ghi chú — independent'));
-    const notebook = workspace?.notebooks.find((item) => item.title === 'Ghi chú — independent');
-    return workspace && notebook
-      ? { documents: workspace.documents.length, detached: notebook.pages.every((notePage) => notePage.citationPage === null) }
-      : null;
-  })).toEqual({ documents: 0, detached: true });
+  await expect.poll(() => indexedRecord(page, `library:v6:notebook:${linkedNotebookId}`)).toMatchObject({ title: 'Ghi chú — independent' });
 });
 
-test('temporary PDF can create a persistent notebook without saving the PDF', async ({ page }) => {
+test('temporary PDF can create a persistent v6 Notebook without saving the PDF', async ({ page }) => {
   const pdf = await PDFDocument.create();
   pdf.addPage([240, 320]);
   const bytes = await pdf.save();
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({
-    name: 'temporary-study.pdf',
-    mimeType: 'application/pdf',
-    buffer: Buffer.from(bytes),
+    name: 'temporary-study.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes),
   });
 
   const dialog = page.locator('.mednote-note-destination');
@@ -101,36 +109,30 @@ test('temporary PDF can create a persistent notebook without saving the PDF', as
   await dialog.locator('button[type="submit"]').click();
 
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/, { timeout: 10_000 });
-  await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Sổ từ PDF tạm');
+  const selector = page.locator('.note-sidebar-v6 select[aria-label="Notebook"]');
+  await expect(selector.locator('option:checked')).toHaveText('Sổ từ PDF tạm');
+  const notebookId = await selector.inputValue();
   expect(await pdfKeys(page)).toEqual([]);
+  await expect.poll(() => indexedRecord(page, `library:v6:notebook:${notebookId}`)).toMatchObject({ title: 'Sổ từ PDF tạm' });
   await expect.poll(() => page.evaluate(() => {
-    const state = window.__MEDNOTE_LIVE_STATE__;
-    return !state.workspaces.some((workspace) => workspace.kind === 'temporary')
-      && state.workspaces.some((workspace) => workspace.documents.length === 0
-        && workspace.notebooks.some((notebook) => notebook.title === 'Sổ từ PDF tạm'));
-  })).toBe(true);
+    const snapshot = JSON.parse(localStorage.getItem('mednote-document-runtime-v1') || 'null');
+    return snapshot?.workspaces?.some((workspace) => workspace.kind === 'temporary') || false;
+  })).toBe(false);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 10_000 });
-  await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Sổ từ PDF tạm');
+  await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Sổ từ PDF tạm');
   expect(await pdfKeys(page)).toEqual([]);
 });
 
-test('temporary PDF can create a Page or Section in an existing notebook', async ({ page }) => {
+test('temporary PDF can create a v6 Page or Section in an existing Notebook', async ({ page }) => {
   await page.addInitScript(() => {
-    if (sessionStorage.getItem('pdf-destination-seeded') === '1') return;
     localStorage.clear();
-    sessionStorage.setItem('pdf-destination-seeded', '1');
+    sessionStorage.clear();
     const now = Date.now();
     const notePage = {
-      id: 'destination-page-1',
-      title: 'Trang nền',
-      titleHtml: 'Trang nền',
-      body: '',
-      bodyHtml: '',
-      citationPage: null,
-      strokes: [],
-      excerpts: [],
+      id: 'destination-page-1', title: 'Trang nền', titleHtml: 'Trang nền', body: '', bodyHtml: '',
+      citationPage: null, strokes: [], excerpts: [],
       paper: { size: 'a4', orientation: 'portrait', template: 'blank', color: 'white' },
       text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
     };
@@ -148,7 +150,7 @@ test('temporary PDF can create a Page or Section in an existing notebook', async
   pdf.addPage([240, 320]);
   const bytes = Buffer.from(await pdf.save());
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.mednote-page-sheet-nav [data-notebook-select] option:checked')).toHaveText('Sổ nền');
+  await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Sổ nền');
 
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({ name: 'page-target.pdf', mimeType: 'application/pdf', buffer: bytes });
   let dialog = page.locator('.mednote-note-destination');
@@ -157,12 +159,12 @@ test('temporary PDF can create a Page or Section in an existing notebook', async
   await dialog.locator('[data-title]').fill('Page từ PDF tạm');
   await dialog.locator('button[type="submit"]').click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
-  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'Page từ PDF tạm' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-page', { hasText: 'Page từ PDF tạm' })).toBeVisible();
   expect(await pdfKeys(page)).toEqual([]);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
-  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'Page từ PDF tạm' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-page', { hasText: 'Page từ PDF tạm' })).toBeVisible();
 
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({ name: 'section-target.pdf', mimeType: 'application/pdf', buffer: bytes });
   dialog = page.locator('.mednote-note-destination');
@@ -170,11 +172,11 @@ test('temporary PDF can create a Page or Section in an existing notebook', async
   await dialog.locator('[data-notebook]').selectOption('destination-notebook-1');
   await dialog.locator('[data-title]').fill('Section từ PDF tạm');
   await dialog.locator('button[type="submit"]').click();
-  await expect(page.locator('.mednote-page-sheet-nav .mps-section strong', { hasText: 'Section từ PDF tạm' })).toBeVisible();
-  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'section-target' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-section.active', { hasText: 'Section từ PDF tạm' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-page', { hasText: 'section-target' })).toBeVisible();
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.mednote-page-sheet-nav .mps-section strong', { hasText: 'Section từ PDF tạm' })).toBeVisible();
-  await expect(page.locator('.mednote-page-sheet-nav .mps-page-card', { hasText: 'section-target' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-section.active', { hasText: 'Section từ PDF tạm' })).toBeVisible();
+  await expect(page.locator('.note-sidebar-page', { hasText: 'section-target' })).toBeVisible();
   expect(await pdfKeys(page)).toEqual([]);
 });

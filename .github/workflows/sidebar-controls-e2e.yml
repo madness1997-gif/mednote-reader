@@ -4,15 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "app/independent-library-runtime.ts"
-      - "app/page-sheet-navigation.ts"
-      - "app/page-sheet-runtime.ts"
-      - "app/page-sheet-state.ts"
-      - "app/page-sheet-active-context-repair.ts"
-      - "app/page-sheet-sidebar-functional-only.ts"
-      - "app/page-sheet-sidebar-clean.ts"
-      - "app/page-sheet-toolbar-actions.ts"
-      - "app/relation-navigation-collapse.ts"
+      - "app/indexeddb-note-repository.ts"
+      - "app/note-commands.ts"
+      - "app/note-navigation.ts"
+      - "app/note-sidebar.css"
+      - "app/note-sidebar.tsx"
+      - "app/note-store.ts"
+      - "app/page.tsx"
       - "tests/sidebar-controls.spec.cjs"
       - "tests/sidebar-active-context.spec.cjs"
       - ".github/workflows/sidebar-controls-e2e.yml"

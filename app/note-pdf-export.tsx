@@ -1,8 +1,9 @@
 import { ChevronDown, FileDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { currentContext, pageGroups, type SheetPage } from "./page-sheet-state";
 import { appendPaperToPdf, createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
+import { ordered, type NoteStructure } from "./note-domain";
+import { noteStore, useNoteStoreSnapshot } from "./note-store";
 
 type ExportScope = "notebook" | "section" | "page" | "sheet";
 type ExportPlan = {
@@ -47,17 +48,20 @@ function uniqueIndices(indices: number[]) {
   return [...new Set(indices.filter((index) => Number.isInteger(index) && index >= 0))];
 }
 
-function notePageIds() {
-  const context = currentContext();
-  if (context) return ((context.notebook.pages || []) as SheetPage[]).map((sheet) => String(sheet.id));
+function notePageIds(structure = noteStore.getSnapshot().structure) {
+  if (structure) {
+    const notebookId = structure.active.activeNotebookId;
+    const sectionIds = new Set(ordered(structure.sections.filter((section) => section.notebookId === notebookId)).map((section) => section.id));
+    const pages = ordered(structure.pages.filter((page) => sectionIds.has(page.sectionId)));
+    return pages.flatMap((page) => ordered(structure.sheets.filter((sheet) => sheet.pageId === page.id)).map((sheet) => sheet.id));
+  }
   const paper = document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
   return paper?.dataset.notePageId ? [paper.dataset.notePageId] : [];
 }
 
-function buildExportPlans(): ExportPlan[] {
-  const context = currentContext();
-  const availablePageIds = notePageIds();
-  if (!context) {
+function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
+  const availablePageIds = notePageIds(structure);
+  if (!structure) {
     return availablePageIds.length ? [{
       scope: "notebook",
       title: "Notebook",
@@ -67,31 +71,27 @@ function buildExportPlans(): ExportPlan[] {
     }] : [];
   }
 
-  const { notebook, record, activeSection, activeSheet } = context;
-  const physicalSheets = (notebook.pages || []) as SheetPage[];
-  const indexById = new Map(physicalSheets.map((sheet, index) => [String(sheet.id), index]));
+  const active = structure.active;
+  const notebook = structure.notebooks.find((record) => record.id === active.activeNotebookId);
+  const activeSection = structure.sections.find((record) => record.id === active.activeSectionId);
+  const activePage = structure.pages.find((record) => record.id === active.activePageId);
+  if (!notebook || !activeSection || !activePage) return [];
+  const indexById = new Map(availablePageIds.map((id, index) => [id, index]));
   const indicesForIds = (ids: string[]) => uniqueIndices(
     ids.map((id) => indexById.get(id)).filter((index): index is number => typeof index === "number"),
   );
   const sheetIdsForSection = (sectionId: string) => {
-    const section = record.sections.find((item) => item.id === sectionId);
-    return section ? pageGroups(notebook, section).flatMap((group) => group.sheets.map((sheet) => String(sheet.id))) : [];
+    const pages = ordered(structure.pages.filter((page) => page.sectionId === sectionId));
+    return pages.flatMap((page) => ordered(structure.sheets.filter((sheet) => sheet.pageId === page.id)).map((sheet) => sheet.id));
   };
 
-  const orderedNotebookIds = record.sections.flatMap((section) => sheetIdsForSection(section.id));
-  const included = new Set(orderedNotebookIds);
-  for (const sheet of physicalSheets) {
-    const id = String(sheet.id);
-    if (!included.has(id)) orderedNotebookIds.push(id);
-  }
-
-  const activeSheetId = String(activeSheet?.id || notebook.activePageId || "");
-  const groups = pageGroups(notebook, activeSection);
-  const activeGroup = groups.find((group) => group.sheets.some((sheet) => String(sheet.id) === activeSheetId)) || groups[0];
-  const activeSheetIndex = activeGroup?.sheets.findIndex((sheet) => String(sheet.id) === activeSheetId) ?? -1;
-  const notebookTitle = String(record.title || notebook.title || "Notebook").trim() || "Notebook";
+  const orderedNotebookIds = [...availablePageIds];
+  const activeSheetId = active.activeSheetId;
+  const activePageSheets = ordered(structure.sheets.filter((sheet) => sheet.pageId === activePage.id));
+  const activeSheetIndex = activePageSheets.findIndex((sheet) => sheet.id === activeSheetId);
+  const notebookTitle = String(notebook.title || "Notebook").trim() || "Notebook";
   const sectionTitle = String(activeSection.title || "Section").trim() || "Section";
-  const pageTitle = String(activeGroup?.title || "Page").trim() || "Page";
+  const pageTitle = String(activePage.title || "Page").trim() || "Page";
   const sheetLabel = activeSheetIndex >= 0 ? `Sheet ${activeSheetIndex + 1}` : "Sheet hiện tại";
 
   const plans: ExportPlan[] = [
@@ -111,16 +111,14 @@ function buildExportPlans(): ExportPlan[] {
     },
   ];
 
-  if (activeGroup) {
-    const ids = activeGroup.sheets.map((sheet) => String(sheet.id));
-    plans.push({
-      scope: "page",
-      title: "Page",
-      detail: `${pageTitle} · ${ids.length} Sheet`,
-      fileName: `${safeFileName(`${notebookTitle} - ${pageTitle}`)}.pdf`,
-      pageIndices: indicesForIds(ids),
-    });
-  }
+  const ids = activePageSheets.map((sheet) => sheet.id);
+  plans.push({
+    scope: "page",
+    title: "Page",
+    detail: `${pageTitle} · ${ids.length} Sheet`,
+    fileName: `${safeFileName(`${notebookTitle} - ${pageTitle}`)}.pdf`,
+    pageIndices: indicesForIds(ids),
+  });
 
   if (activeSheetId && indexById.has(activeSheetId)) {
     plans.push({
@@ -142,7 +140,7 @@ async function activateNotePage(index: number) {
 
   let paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
   if (paper?.dataset.notePageId !== pageId) {
-    window.dispatchEvent(new CustomEvent("mednote:activate-note-page", { detail: pageId }));
+    await noteStore.openSheet(pageId);
   }
 
   for (let attempt = 0; attempt < 45; attempt += 1) {
@@ -193,6 +191,7 @@ function makePdfUrl(bytes: Uint8Array) {
 }
 
 export default function NotePdfExporter() {
+  const noteState = useNoteStoreSnapshot();
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [plans, setPlans] = useState<ExportPlan[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -218,19 +217,15 @@ export default function NotePdfExporter() {
       if (frame) return;
       frame = window.requestAnimationFrame(() => {
         frame = 0;
-        const next = buildExportPlans();
+        const next = buildExportPlans(noteState.structure);
         setPlans((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
       });
     };
     refreshPlans();
-    window.addEventListener("mednote-live-state-changed", refreshPlans);
-    window.addEventListener("mednote-note-context-changed", refreshPlans);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
-      window.removeEventListener("mednote-live-state-changed", refreshPlans);
-      window.removeEventListener("mednote-note-context-changed", refreshPlans);
     };
-  }, [target]);
+  }, [target, noteState.revision]);
 
   useEffect(() => () => {
     if (readyUrlRef.current) URL.revokeObjectURL(readyUrlRef.current);
