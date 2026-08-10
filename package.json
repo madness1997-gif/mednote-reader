@@ -14,6 +14,7 @@
     "test:wave4": "node --import tsx --test tests-unit/wave4.test.ts",
     "test:p3": "node --import tsx --test tests-unit/local-binary-storage.test.ts",
     "test:p4": "node --import tsx --test tests-unit/app-bootstrap.test.ts",
+    "test:p5": "node --import tsx --test tests-unit/document-library-controller.test.ts",
     "test:all": "playwright test",
     "build:pages": "vite build --config vite.github.config.ts",
     "build:desktop": "vite build --config vite.desktop.config.ts",
