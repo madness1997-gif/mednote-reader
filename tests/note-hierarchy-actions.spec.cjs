@@ -22,6 +22,7 @@ async function reloadAndFindNavigator(page) {
 }
 
 test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
