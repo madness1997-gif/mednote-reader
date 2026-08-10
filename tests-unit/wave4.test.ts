@@ -96,3 +96,48 @@ test("obsolete imperative hierarchy runtimes are removed", async () => {
   const entry = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(entry, /page-sheet-|independent-library-|relation-library-|relation-navigation-collapse/);
 });
+
+
+test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent", async () => {
+  const dbName = `mednote-p0-${crypto.randomUUID()}`;
+  const repository = new IndexedDbNoteRepository({ dbName });
+  await repository.replaceLibrary(library());
+  const store = new NoteStore(repository);
+  try {
+    await store.initialize({ skipMigration: true });
+    store.patchActiveSheetContent({ body: "Draft trước khi đổi tên" });
+    await store.renamePage("page-a", "Điều trị cập nhật");
+
+    const snapshot = store.getSnapshot();
+    assert.equal(snapshot.structure?.pages.find((page) => page.id === "page-a")?.title, "Điều trị cập nhật");
+    assert.equal(snapshot.activeSheetContent?.body, "Draft trước khi đổi tên");
+    assert.equal((await repository.loadSheetContent("sheet-a1"))?.body, "Draft trước khi đổi tên");
+
+    await store.openSheet("sheet-a2");
+    assert.equal(store.getSnapshot().structure?.pages.find((page) => page.id === "page-a")?.title, "Điều trị cập nhật");
+
+    const stored = await repository.loadLibrary();
+    assert.equal(stored?.notes.pages.find((page) => page.id === "page-a")?.title, "Điều trị cập nhật");
+    for (const content of Object.values(stored?.sheetContents || {})) {
+      assert.equal("title" in content, false);
+      assert.equal("titleHtml" in content, false);
+      assert.equal("logicalPageTitle" in content, false);
+    }
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
+test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const editor = await readFile(new URL("../app/page-title-editor.tsx", import.meta.url), "utf8");
+  assert.match(page, /type NotePageContentPatch = Partial<Omit<NotePage, "id" \| "title" \| "titleHtml" \| "__mednoteLazyPage">>/);
+  assert.match(page, /<PageTitleEditor/);
+  assert.doesNotMatch(page, /activeNote\.titleHtml/);
+  assert.doesNotMatch(page, /page\.titleHtml \?/);
+  assert.doesNotMatch(page, /titleHtml: pageTitle/);
+  assert.match(page, /noteStore\.renamePage\(activeLogicalPage\.id, "TÊN CHỦ ĐỀ"\)/);
+  assert.match(editor, /PAGE_TITLE_DEBOUNCE_MS = 280/);
+  assert.match(editor, /noteStore\.renamePage\(targetPageId, nextTitle\)/);
+});

@@ -69,6 +69,26 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
   await expect(nav.locator('.note-sidebar-page', { hasText: 'ĐTĐ type 2' })).toBeVisible();
   nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.note-sidebar-page', { hasText: 'ĐTĐ type 2' })).toBeVisible();
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ type 2');
+
+  let titleEditor = page.locator('[data-page-title-editor]');
+  await titleEditor.evaluate((element) => element.setAttribute('contenteditable', 'true'));
+  await titleEditor.fill('ĐTĐ canvas');
+  await titleEditor.blur();
+  await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ canvas' })).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Thêm tờ vào ĐTĐ canvas' }).click();
+  await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ canvas' })).toContainText('2 tờ');
+  await nav.locator('.note-sidebar-sheet-open', { hasText: 'Tờ 2' }).click();
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ canvas');
+
+  nav = await reloadAndFindNavigator(page);
+  await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ canvas' })).toContainText('2 tờ');
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ canvas');
+
+  await submitName(page, nav.getByRole('button', { name: 'Đổi tên ĐTĐ canvas' }), 'ĐTĐ type 2');
+  await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ type 2' })).toBeVisible();
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ type 2');
 
   await submitName(page, nav.getByRole('button', { name: 'Đổi tên Nội tiết' }), 'Chuyển hóa');
   await expect(nav.locator('.note-sidebar-section-open', { hasText: 'Chuyển hóa' })).toBeVisible();
@@ -81,8 +101,8 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
   nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Nội tiết học');
 
-  await nav.getByRole('button', { name: 'Thêm tờ vào ĐTĐ type 2' }).click();
   await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ type 2' })).toContainText('2 tờ');
   nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ type 2' })).toContainText('2 tờ');
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ type 2');
 });

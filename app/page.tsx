@@ -120,6 +120,7 @@ import { pdfDocumentOptions } from "./pdf-config";
 import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 import { requestNoteDestination, type NoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
+import PageTitleEditor from "./page-title-editor";
 import { loadIncrementalLibrary } from "./incremental-library-store";
 import { noteStore, readLegacyRelationV2, useNoteStoreSnapshot } from "./note-store";
 import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
@@ -212,6 +213,8 @@ type NotePage = {
   text: TextSettings;
   excerpts: NoteExcerpt[];
 };
+
+type NotePageContentPatch = Partial<Omit<NotePage, "id" | "title" | "titleHtml" | "__mednoteLazyPage">>;
 
 type NoteExcerpt = {
   id: string;
@@ -851,7 +854,6 @@ function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetCo
     ...(content || {}),
     id: sheetId,
     title: pageTitle,
-    titleHtml: pageTitle,
   } as NotePage);
   if (lazy) page.__mednoteLazyPage = true;
   return page;
@@ -1063,7 +1065,6 @@ function createReaderPlaceholder(sourceId: string): Notebook {
   const page = createBlankPage(null, 1, { ...DEFAULT_NEW_NOTE_PAPER, template: "blank" });
   page.id = `${READER_PLACEHOLDER_PREFIX}page:${sourceId}`;
   page.title = "Reader";
-  page.titleHtml = "Reader";
   page.body = "";
   page.bodyHtml = "";
   return {
@@ -2346,7 +2347,7 @@ function NoteSheetPreview({
         <div className="paper-background" />
         {loaded ? <>
           <div className={`typed-layer ${note.excerpts.length ? "has-excerpts" : ""}`} style={presentation.textLayerStyle}>
-            <div className="note-title-input" dangerouslySetInnerHTML={{ __html: note.titleHtml ?? plainTextToRichHtml(note.title) }} />
+            <div className="note-title-input">{note.title}</div>
             <div className="note-editor rich-text-editor" dangerouslySetInnerHTML={{ __html: note.bodyHtml ?? plainTextToRichHtml(note.body) }} />
             <div className="note-excerpts" aria-hidden="true">
               {note.excerpts.map((excerpt, index) => <DraggableExcerpt
@@ -3248,7 +3249,7 @@ export default function Home() {
     setTextInsertPopover(null);
   }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
 
-  const updateActiveNote = (changes: Partial<NotePage>) => {
+  const updateActiveNote = (changes: NotePageContentPatch) => {
     if (activeNoteHydrating) {
       setToast("Đang mở nội dung tờ note…");
       return;
@@ -4231,7 +4232,7 @@ export default function Home() {
           : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
         excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
-      pagesHtml.push(`<section><h2>${index + 1}. ${page.titleHtml ? sanitizeRichTextHtml(page.titleHtml) : escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
+      pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
     }
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(activeNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(activeNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
@@ -4788,12 +4789,15 @@ export default function Home() {
       paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
       text: { ...activeNote.text, font: "times", size: 12, align: "left" },
       ...(shouldSeed ? {
-        title: replaceDefaultTitle ? "TÊN CHỦ ĐỀ" : activeNote.title,
-        titleHtml: replaceDefaultTitle ? undefined : activeNote.titleHtml,
         bodyHtml: FIRST_AID_TEMPLATE_HTML,
         body: FIRST_AID_TEMPLATE_TEXT,
       } : {}),
     });
+    if (shouldSeed && replaceDefaultTitle && activeLogicalPage?.id) {
+      void noteStore.renamePage(activeLogicalPage.id, "TÊN CHỦ ĐỀ").catch((error) => {
+        setToast(error instanceof Error ? error.message : "Không thể đổi tên Page");
+      });
+    }
     setActiveTool("text");
     setToast(shouldSeed ? "Đã tạo khung note First Aid để điền nội dung" : "Đã áp dụng bố cục First Aid");
   };
@@ -5396,13 +5400,22 @@ export default function Home() {
             }}>
               <div className="paper-background" />
               <div className={`typed-layer ${activeNote.excerpts.length ? "has-excerpts" : ""}`} style={textLayerStyle}>
-                <RichTextEditor key={`title:${activeNote.id}`} editorId={`title:${activeNote.id}`} className="note-title-input" html={activeNote.titleHtml ?? plainTextToRichHtml(activeNote.title)} editable={activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer")} singleLine placeholder="Nhập tiêu đề" ariaLabel="Tiêu đề ghi chú" onChange={(titleHtml, title) => updateActiveNote({ titleHtml, title })} onActivate={(editorId, editor, range) => {
-                  if (activeNote.paper.template === "first-aid" && activeTool === "pointer") {
-                    setActiveTool("text");
-                    setNotePanel("text");
-                  }
-                  activateTextEditor(editorId, editor, range);
-                }} onNormalizeInput={normalizeTextEditorInput} />
+                <PageTitleEditor
+                  key={`page-title:${activeLogicalPage?.id ?? activeNote.id}`}
+                  pageId={activeLogicalPage?.id ?? ""}
+                  title={activeLogicalPage?.title ?? activeNote.title}
+                  className="note-title-input"
+                  editable={Boolean(activeLogicalPage?.id) && (activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer"))}
+                  placeholder="Nhập tiêu đề"
+                  ariaLabel="Tiêu đề ghi chú"
+                  onActivate={() => {
+                    if (activeNote.paper.template === "first-aid" && activeTool === "pointer") {
+                      setActiveTool("text");
+                      setNotePanel("text");
+                    }
+                  }}
+                  onError={(message) => setToast(message)}
+                />
                 <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
                 <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
                   {activeNote.excerpts.map((excerpt, index) => {
