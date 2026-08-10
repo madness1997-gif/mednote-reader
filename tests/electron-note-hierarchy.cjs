@@ -27,16 +27,6 @@ async function launch() {
   try {
     let page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    await page.evaluate(async () => {
-      localStorage.clear();
-      await new Promise((resolve, reject) => {
-        const request = indexedDB.deleteDatabase('mednote-local');
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-        request.onblocked = () => reject(new Error('mednote-local delete blocked'));
-      });
-    });
-    await page.reload({ waitUntil: 'domcontentloaded' });
 
     let nav = page.locator('.note-sidebar-v6');
     await expect(nav).toBeVisible({ timeout: 15_000 });
