@@ -48,6 +48,7 @@ import {
   Omega,
   PaintBucket,
   PanelLeftOpen,
+  PanelRightOpen,
   Pencil,
   PenLine,
   PenTool,
@@ -2402,7 +2403,7 @@ export default function Home() {
   const [firstAidCropResult, setFirstAidCropResult] = useState<FirstAidCropResult | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
   const dictionaryAbortRef = useRef<AbortController | null>(null);
-  const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("pages");
+  const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("outline");
   const [outline, setOutline] = useState<PdfOutlineEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
@@ -2435,6 +2436,9 @@ export default function Home() {
   const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
   const [renamingWorkspaceName, setRenamingWorkspaceName] = useState("");
   const [showPdfRail, setShowPdfRail] = useState(true);
+  const [showNoteSidebar, setShowNoteSidebar] = useState(() => {
+    try { return localStorage.getItem("mednote-note-sidebar-v6-hidden") !== "1"; } catch { return true; }
+  });
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
   const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
   const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
@@ -4841,6 +4845,10 @@ export default function Home() {
     "--reader-share": `${readerShare}fr`,
     "--notes-share": `${100 - readerShare}fr`,
   } as React.CSSProperties;
+  const setNoteSidebarVisibility = (visible: boolean) => {
+    setShowNoteSidebar(visible);
+    try { localStorage.setItem("mednote-note-sidebar-v6-hidden", visible ? "0" : "1"); } catch { /* UI preference is non-critical. */ }
+  };
   const selectedPaperSize = PAPER_SIZES[activeNote.paper.size];
   const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;
   const paperHeight = activeNote.paper.orientation === "portrait" ? selectedPaperSize.height : selectedPaperSize.width;
@@ -5024,7 +5032,7 @@ export default function Home() {
         </div>
       )}
 
-      <section className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} ref={workspaceRef} style={gridStyle}>
+      <section className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} ref={workspaceRef} style={gridStyle}>
         <aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">
           <div className="pdf-rail-tabs">
             <button className={pdfRailTab === "pages" ? "active" : ""} onClick={() => setPdfRailTab("pages")} title="Trang" aria-label="Hình thu nhỏ các trang"><ScanText size={17} /></button>
@@ -5156,6 +5164,7 @@ export default function Home() {
           <div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
+                {!showNoteSidebar && <button className="icon-button compact" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện điều hướng ghi chú" title="Hiện điều hướng ghi chú"><PanelRightOpen size={17} /></button>}
                 <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
               </div>
               <span className="toolbar-spacer" />
@@ -5421,7 +5430,7 @@ export default function Home() {
             />)}
           </div>
         </section>
-        <aside className="note-navigation-host" aria-label="Điều hướng ghi chú"><NoteSidebar /></aside>
+        {showNoteSidebar && <aside className="note-navigation-host" aria-label="Điều hướng ghi chú"><NoteSidebar onRequestClose={() => setNoteSidebarVisibility(false)} /></aside>}
       </section>
     </main>
   );

@@ -95,12 +95,28 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
   await page.locator('.mednote-native-dialog [data-cancel]').click();
 
   await close.click();
-  const collapsed = page.locator('.note-sidebar-v6-collapsed');
-  await expect(collapsed).toBeVisible();
+  await expect(page.locator('.note-navigation-host')).toHaveCount(0);
+  await expect(page.locator('.workspace')).toHaveClass(/note-sidebar-collapsed/);
+  const notesPane = page.locator('.notes-pane');
+  const workspaceBox = await page.locator('.workspace').boundingBox();
+  const notesBox = await notesPane.boundingBox();
+  expect(workspaceBox).not.toBeNull();
+  expect(notesBox).not.toBeNull();
+  expect(notesBox.x + notesBox.width).toBeGreaterThanOrEqual(workspaceBox.x + workspaceBox.width - 1);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('1');
-  await collapsed.getByRole('button', { name: 'Mở điều hướng ghi chú' }).click();
+  await notesPane.getByRole('button', { name: 'Hiện điều hướng ghi chú' }).click();
   await expect(page.locator('.note-sidebar-bookbar')).toBeVisible();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('0');
+});
+
+test('PDF sidebar defaults to the embedded outline instead of thumbnails', async ({ page }) => {
+  await page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('mednote-library-v2'));
+    localStorage.setItem('mednote-library-v2', JSON.stringify({ ...saved, workspaceMode: 'split' }));
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: 'Mục lục PDF' })).toHaveClass(/active/);
+  await expect(page.getByRole('button', { name: 'Hình thu nhỏ các trang' })).not.toHaveClass(/active/);
 });
 
 test('search and Notebook menu remain stable without DOM maintenance loops', async ({ page }) => {

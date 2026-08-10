@@ -133,11 +133,15 @@ body {
 .workspace { width: 100%; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 108px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
 .workspace.pdf-rail-wide { grid-template-columns: 264px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
 .workspace.pdf-rail-collapsed { grid-template-columns: minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)) minmax(300px, 340px); }
+.workspace.note-sidebar-collapsed { grid-template-columns: 108px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)); }
+.workspace.pdf-rail-wide.note-sidebar-collapsed { grid-template-columns: 264px minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)); }
+.workspace.pdf-rail-collapsed.note-sidebar-collapsed { grid-template-columns: minmax(0, var(--reader-share, 50fr)) 8px minmax(0, var(--notes-share, 50fr)); }
 .workspace.workspace-mode-reader { grid-template-columns: 108px minmax(0, 1fr); }
 .workspace.workspace-mode-reader.pdf-rail-wide { grid-template-columns: 264px minmax(0, 1fr); }
 .workspace.workspace-mode-reader.pdf-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
 .workspace.workspace-mode-reader .notes-pane, .workspace.workspace-mode-reader .note-navigation-host, .workspace.workspace-mode-reader .split-divider { display: none; }
 .workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
+.workspace.workspace-mode-note.note-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
 .workspace.workspace-mode-note .pdf-thumbnails, .workspace.workspace-mode-note .reader-pane, .workspace.workspace-mode-note .split-divider { display: none; }
 .workspace.pdf-rail-collapsed .pdf-thumbnails { display: none; }
 .pdf-thumbnails, .note-navigation-host { min-width: 0; background: rgba(255,255,255,.75); overflow: auto; scrollbar-width: thin; }
@@ -735,6 +739,7 @@ body {
   .workspace.workspace-mode-reader.pdf-rail-wide { grid-template-columns: 240px minmax(0, 1fr); }
   .workspace.workspace-mode-reader.pdf-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
   .workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
+  .workspace.workspace-mode-note.note-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
   .workspace.workspace-mode-note .note-navigation-host { display: block; }
   .note-navigation-host { display: none; }
   .search-field { width: 150px; }

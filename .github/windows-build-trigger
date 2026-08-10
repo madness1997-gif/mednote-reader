@@ -1,4 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-09T21:36:35+07:00
+Requested: 2026-08-10T17:09:48+07:00
 Base app commit: the main commit containing this trigger
-Reason: release desktop 1.2.9 with stable lazy-note hydration and relation-library synchronization
+Reason: release desktop 1.2.10 with PDF outline default and fully collapsible note sidebar

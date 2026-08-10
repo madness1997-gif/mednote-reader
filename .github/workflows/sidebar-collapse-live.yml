@@ -83,10 +83,16 @@ jobs:
             const close = nav.getByRole('button', { name: 'Thu gọn điều hướng' });
             await close.waitFor({ state: 'visible', timeout: 10000 });
             await close.click();
-            const collapsed = page.locator('.note-sidebar-v6-collapsed');
-            await collapsed.waitFor({ state: 'visible', timeout: 5000 });
+            await page.locator('.note-navigation-host').waitFor({ state: 'detached', timeout: 5000 });
+            const workspace = page.locator('.workspace');
+            const notesPane = page.locator('.notes-pane');
+            const workspaceBox = await workspace.boundingBox();
+            const notesBox = await notesPane.boundingBox();
+            if (!workspaceBox || !notesBox || notesBox.x + notesBox.width < workspaceBox.x + workspaceBox.width - 1) {
+              throw new Error(`Note pane did not reclaim the sidebar column: ${JSON.stringify({ workspaceBox, notesBox })}`);
+            }
 
-            const restore = collapsed.getByRole('button', { name: 'Mở điều hướng ghi chú' });
+            const restore = notesPane.getByRole('button', { name: 'Hiện điều hướng ghi chú' });
             await restore.waitFor({ state: 'visible', timeout: 5000 });
             await restore.click();
             await page.locator('.note-sidebar-bookbar').waitFor({ state: 'visible', timeout: 5000 });

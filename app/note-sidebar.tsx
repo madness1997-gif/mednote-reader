@@ -5,7 +5,6 @@ import {
   Ellipsis,
   FilePlus2,
   FolderPlus,
-  Menu,
   MoveRight,
   NotebookTabs,
   Pencil,
@@ -21,9 +20,10 @@ import { noteStore, type NoteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered, type NoteStructure } from "./note-domain";
 import "./note-sidebar.css";
 
-type NoteSidebarProps = { store?: NoteStore };
-
-const SIDEBAR_HIDDEN_KEY = "mednote-note-sidebar-v6-hidden";
+type NoteSidebarProps = {
+  store?: NoteStore;
+  onRequestClose?: () => void;
+};
 
 function siblingCount(structure: NoteStructure, pageId: string) {
   return structure.sheets.filter((sheet) => sheet.pageId === pageId).length;
@@ -40,13 +40,10 @@ function textError(error: unknown) {
   return error instanceof Error ? error.message : "Không thể cập nhật ghi chú";
 }
 
-export function NoteSidebar({ store = noteStore }: NoteSidebarProps) {
+export function NoteSidebar({ store = noteStore, onRequestClose }: NoteSidebarProps) {
   const state = useNoteStoreSnapshot(store);
   const structure = state.structure;
   const navigation = useMemo(() => new NoteNavigation(store), [store]);
-  const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1"; } catch { return false; }
-  });
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
@@ -62,19 +59,6 @@ export function NoteSidebar({ store = noteStore }: NoteSidebarProps) {
     if (!pageId) return;
     setExpandedPages((current) => current.has(pageId) ? current : new Set([...current, pageId]));
   }, [structure?.active.activePageId]);
-
-  const setSidebarHidden = (next: boolean) => {
-    setHidden(next);
-    try { localStorage.setItem(SIDEBAR_HIDDEN_KEY, next ? "1" : "0"); } catch { /* UI preference is non-critical. */ }
-  };
-
-  if (hidden) {
-    return (
-      <div className="note-sidebar-v6 note-sidebar-v6-collapsed" data-testid="note-sidebar-v6">
-        <button type="button" onClick={() => setSidebarHidden(false)} aria-label="Mở điều hướng ghi chú" title="Mở điều hướng ghi chú"><Menu size={18} /></button>
-      </div>
-    );
-  }
 
   if (state.status === "idle" || state.status === "loading" || !structure) {
     return <div className="note-sidebar-v6 note-sidebar-v6-status" data-testid="note-sidebar-v6" role="status">Đang mở cấu trúc note…</div>;
@@ -183,7 +167,7 @@ export function NoteSidebar({ store = noteStore }: NoteSidebarProps) {
         </select>
         <button type="button" onClick={() => run(createNotebook)} title="Tạo Notebook" aria-label="Tạo Notebook"><Plus size={16} /></button>
         <button type="button" onClick={() => setMenuOpen((open) => !open)} title="Thao tác Notebook" aria-label="Thao tác Notebook" aria-expanded={menuOpen}><Ellipsis size={17} /></button>
-        <button type="button" onClick={() => setSidebarHidden(true)} title="Thu gọn" aria-label="Thu gọn điều hướng"><X size={16} /></button>
+        <button type="button" onClick={onRequestClose} title="Thu gọn" aria-label="Thu gọn điều hướng"><X size={16} /></button>
         {menuOpen && <div className="note-sidebar-menu">
           <button type="button" onClick={() => { setMenuOpen(false); run(renameActiveNotebook); }}><Pencil size={14} />Đổi tên Notebook</button>
           <button type="button" className="danger" onClick={() => { setMenuOpen(false); run(deleteActiveNotebook); }}><Trash2 size={14} />Xóa Notebook</button>
