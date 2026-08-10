@@ -107,6 +107,9 @@ import {
   type DriveAppFile,
   type DriveUser,
 } from "./google-drive";
+import { createDriveBackup, stageDriveBackup, type DriveLibrary } from "./drive-backup";
+import type { DocumentGraph, DocumentRecord } from "./document-domain";
+import type { SaveDocumentWorkspaceInput } from "./document-repository";
 import {
   lookupEnglishVietnamese,
   oxfordLookupUrl,
@@ -315,7 +318,8 @@ const RELATION_META_WORKSPACE_ID = "__mednote_relations_v2__";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
 const DB_NAME = "mednote-local";
 const DB_STORE = "documents";
-const DRIVE_MANIFEST_ID = "manifest:v1";
+const DRIVE_MANIFEST_ID = "manifest:v2";
+const DRIVE_LEGACY_MANIFEST_ID = "manifest:v1";
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
 const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
@@ -888,6 +892,122 @@ function documentRuntimeWorkspace(workspace: WorkspaceItem): WorkspaceItem {
     notebooks: [placeholder],
     activeNotebookId: placeholder.id,
   };
+}
+
+type LinkedNoteTarget = { targetType: "page" | "sheet"; targetId: string };
+
+function documentRecordFromRuntime(document: LibraryDocument): DocumentRecord {
+  return {
+    id: document.id,
+    name: document.name,
+    size: document.size,
+    lastModified: document.lastModified,
+    available: true,
+    payload: { reader: normalizeReader(document.reader) },
+  };
+}
+
+function documentWorkspaceInput(
+  workspace: WorkspaceItem,
+  target: LinkedNoteTarget | null,
+  preset: { workspaceMode: WorkspaceMode; readerShare: number; noteZoom: number },
+): SaveDocumentWorkspaceInput {
+  const now = Date.now();
+  const documents = workspace.documents.map(documentRecordFromRuntime);
+  const group = documents.length > 1 ? {
+    id: workspace.id,
+    name: workspace.name,
+    documentIds: documents.map((document) => document.id),
+    createdAt: now,
+    updatedAt: now,
+  } : undefined;
+  const links = target ? documents.map((document) => ({
+    id: `link-${stableId(`${document.id}:${target.targetType}:${target.targetId}`)}`,
+    documentId: document.id,
+    targetType: target.targetType,
+    targetId: target.targetId,
+  })) : [];
+  const linkRelations = target && links.length ? [{
+    id: `relation-${stableId(`${workspace.id}:${target.targetType}:${target.targetId}`)}`,
+    linkIds: links.map((link) => link.id),
+    kind: "workspace" as const,
+    sourceType: group ? "group" as const : "document" as const,
+    sourceId: group?.id || documents[0].id,
+    isDefault: true,
+    createdAt: now,
+    updatedAt: now,
+    lastOpenedAt: now,
+    workspacePreset: {
+      workspaceMode: preset.workspaceMode,
+      readerShare: preset.readerShare,
+      noteZoom: preset.noteZoom,
+      activeDocumentId: workspace.activeDocumentId,
+      pdfPages: Object.fromEntries(workspace.documents.map((document) => [document.id, document.reader.page])),
+    },
+  }] : [];
+  return {
+    documents,
+    context: {
+      id: workspace.id,
+      kind: workspace.kind,
+      name: workspace.name,
+      documentIds: documents.map((document) => document.id),
+      activeDocumentId: workspace.activeDocumentId,
+      sourcePage: workspace.sourcePage,
+    },
+    group,
+    links,
+    linkRelations,
+  };
+}
+
+function notebookIdForDocumentContext(graph: DocumentGraph, structure: NoteStructure, documentIds: string[]) {
+  const documentSet = new Set(documentIds);
+  const link = graph.links.find((record) => documentSet.has(record.documentId));
+  if (!link) return null;
+  const pageId = link.targetType === "page"
+    ? link.targetId
+    : structure.sheets.find((sheet) => sheet.id === link.targetId)?.pageId;
+  const page = structure.pages.find((record) => record.id === pageId);
+  const section = page && structure.sections.find((record) => record.id === page.sectionId);
+  return section?.notebookId || null;
+}
+
+function workspacesFromDocumentGraph(graph: DocumentGraph, structure: NoteStructure): WorkspaceItem[] {
+  const documents = new Map(graph.documents.map((document) => [document.id, document]));
+  return graph.contexts.flatMap((context) => {
+    const contextDocuments = context.documentIds.flatMap((id) => {
+      const document = documents.get(id);
+      if (!document) return [];
+      return [{
+        id: document.id,
+        name: document.name,
+        size: document.size,
+        lastModified: document.lastModified,
+        reader: normalizeReader(document.payload.reader as Partial<ReaderState> | undefined),
+      } satisfies LibraryDocument];
+    });
+    if (!contextDocuments.length) return [];
+    const kind = context.kind === "collection" || context.kind === "demo" || context.kind === "empty" ? context.kind : "document";
+    const placeholder = createReaderPlaceholder(context.id);
+    return [{
+      id: context.id,
+      kind,
+      name: context.name,
+      documents: contextDocuments,
+      activeDocumentId: context.activeDocumentId && contextDocuments.some((document) => document.id === context.activeDocumentId)
+        ? context.activeDocumentId
+        : contextDocuments[0].id,
+      noteNotebookId: notebookIdForDocumentContext(graph, structure, context.documentIds),
+      notebooks: [placeholder],
+      activeNotebookId: placeholder.id,
+      sourcePage: Math.max(1, context.sourcePage || 1),
+    } satisfies WorkspaceItem];
+  });
+}
+
+function workspacesFromLibraryV6(library: DriveLibrary): WorkspaceItem[] {
+  return workspacesFromDocumentGraph(library.documents, library.notes);
 }
 
 function createNotebook(title: string, citationPage = 1): Notebook {
@@ -2739,6 +2859,24 @@ export default function Home() {
       }
 
       const preferred = documentSnapshot || indexedSnapshot || legacySnapshot;
+      const v6State = noteStore.getSnapshot();
+      const v6DocumentWorkspaces = v6State.structure
+        ? workspacesFromDocumentGraph(v6State.documents, v6State.structure)
+        : [];
+      if (v6DocumentWorkspaces.length && !cancelled) {
+        const preferredActiveId = preferred?.activeWorkspaceId;
+        const nextActiveId = preferredActiveId && v6DocumentWorkspaces.some((workspace) => workspace.id === preferredActiveId)
+          ? preferredActiveId
+          : v6DocumentWorkspaces[0].id;
+        setWorkspaces(v6DocumentWorkspaces);
+        setActiveWorkspaceId(nextActiveId);
+        setReaderShare(preferred?.readerShare || 50);
+        setWorkspaceMode(preferred?.workspaceMode === "reader" || preferred?.workspaceMode === "note" ? preferred.workspaceMode : "split");
+        setNoteZoom(Math.max(.5, Math.min(2, preferred?.noteZoom || 1)));
+        localSavedAtRef.current = preferred?.savedAt || Date.now();
+        setReady(true);
+        return;
+      }
       if (preferred?.workspaces?.length && !cancelled) {
         const normalized = preferred.workspaces
           .filter((workspace) => workspace.id !== RELATION_META_WORKSPACE_ID && workspace.kind !== "temporary")
@@ -3437,25 +3575,17 @@ export default function Home() {
     if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
     try {
       await noteStore.flush();
-      const structure = noteStore.getSnapshot().structure;
-      const contents = structure ? await noteStore.loadAllContents() : {};
+      const persistentWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.documents.length > 0);
+      for (const workspace of persistentWorkspaces) {
+        await noteStore.saveDocumentWorkspace(documentWorkspaceInput(workspace, null, { workspaceMode, readerShare, noteZoom }));
+      }
+      await noteStore.setPreferences({ activeDocumentContextId: activeWorkspaceId, readerShare, workspaceMode, noteZoom });
+      const library = await noteStore.exportLibrary();
+      const structure = library.notes;
+      const contents = library.sheetContents;
       const materializedNotebooks = structure
         ? ordered(structure.notebooks).map((notebook) => notebookFromStructure(structure, notebook.id, contents)).filter((notebook): notebook is Notebook => Boolean(notebook))
         : [];
-      const documentWorkspaces = workspaces
-        .filter((workspace) => workspace.kind !== "temporary")
-        .map(documentRuntimeWorkspace);
-      const noteWorkspace: WorkspaceItem = {
-        id: "note-runtime-v6",
-        kind: "empty",
-        name: "Ghi chú MedNote",
-        documents: [],
-        activeDocumentId: null,
-        notebooks: materializedNotebooks,
-        activeNotebookId: structure?.active.activeNotebookId || materializedNotebooks[0]?.id || "",
-        sourcePage: 1,
-      };
-      const syncWorkspaces = materializedNotebooks.length ? [...documentWorkspaces, noteWorkspace] : documentWorkspaces;
       const remoteFiles = await listDriveAppFiles(token);
       const remoteByMednoteId = new Map(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file] as const] : []));
       const documents = new Map<string, LibraryDocument>();
@@ -3490,14 +3620,14 @@ export default function Home() {
         remoteByMednoteId.set(mednoteId, uploaded);
       }
 
-      const savedAt = localSavedAtRef.current || Date.now();
-      const snapshot: PersistedLibrary = { workspaces: syncWorkspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, savedAt };
+      const savedAt = library.savedAt;
+      const backup = createDriveBackup(library);
       const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
       await upsertDriveFile(token, {
-        name: "MedNote Workspace.json",
+        name: "MedNote Library v2.json",
         mimeType: "application/json",
         mednoteId: DRIVE_MANIFEST_ID,
-        blob: new Blob([JSON.stringify(snapshot)], { type: "application/json" }),
+        blob: new Blob([JSON.stringify(backup)], { type: "application/json" }),
         existingId: existingManifest?.id,
       });
       setDriveReady(true);
@@ -3526,7 +3656,64 @@ export default function Home() {
     try {
       const remoteFiles = await listDriveAppFiles(token);
       const remoteByMednoteId = new Map<string, DriveAppFile>(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file]] : []));
-      const manifestFile = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
+      const v2ManifestFile = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
+      if (v2ManifestFile) {
+        const manifestBlob = await downloadDriveFile(token, v2ManifestFile.id);
+        const staged = await stageDriveBackup(JSON.parse(await manifestBlob.text()));
+        let missingFiles = 0;
+        for (const record of staged.documents.documents) {
+          const remote = remoteByMednoteId.get(`pdf:${record.id}`);
+          if (!remote) {
+            missingFiles += 1;
+            continue;
+          }
+          const document: LibraryDocument = {
+            id: record.id,
+            name: record.name,
+            size: record.size,
+            lastModified: record.lastModified,
+            reader: normalizeReader(record.payload.reader as Partial<ReaderState> | undefined),
+          };
+          await saveLocalPdf(await downloadDriveFile(token, remote.id), document);
+        }
+        const assetIds = new Set(Object.values(staged.sheetContents).flatMap((content) => {
+          const excerpts = Array.isArray(content.excerpts) ? content.excerpts as NoteExcerpt[] : [];
+          return excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : []);
+        }));
+        for (const assetId of assetIds) {
+          const remote = remoteByMednoteId.get(`asset:${assetId}`);
+          if (!remote) {
+            missingFiles += 1;
+            continue;
+          }
+          await saveLocalAsset(assetId, await downloadDriveFile(token, remote.id));
+        }
+
+        await noteStore.replaceFromLibrary(staged);
+        const restoredDocuments = workspacesFromLibraryV6(staged);
+        const restoredWorkspaces = restoredDocuments.length ? restoredDocuments : [documentRuntimeWorkspace(createEmptyWorkspace())];
+        const activeContextId = staged.preferences.activeDocumentContextId;
+        const nextActiveWorkspaceId = restoredWorkspaces.some((workspace) => workspace.id === activeContextId)
+          ? activeContextId
+          : restoredWorkspaces[0].id;
+        localSavedAtRef.current = staged.savedAt;
+        workspacesRef.current = restoredWorkspaces;
+        activeWorkspaceIdRef.current = nextActiveWorkspaceId;
+        setWorkspaces(restoredWorkspaces);
+        setActiveWorkspaceId(nextActiveWorkspaceId);
+        setReaderShare(Math.max(20, Math.min(80, staged.preferences.readerShare || 50)));
+        setWorkspaceMode(staged.preferences.workspaceMode || "split");
+        setNoteZoom(Math.max(.5, Math.min(2, staged.preferences.noteZoom || 1)));
+        setDriveReady(true);
+        setDriveLastSyncedAt(staged.savedAt);
+        setDriveStatus("connected");
+        setToast(missingFiles ? `Đã khôi phục v2; thiếu ${missingFiles} tệp trên Drive` : "Đã khôi phục đầy đủ thư viện v2 từ Google Drive");
+        return true;
+      }
+
+      // Manifest v1 is import-only. A successful next sync writes a new v2
+      // manifest and never mutates the legacy backup.
+      const manifestFile = remoteByMednoteId.get(DRIVE_LEGACY_MANIFEST_ID);
       if (!manifestFile) throw new Error("Google Drive chưa có bản lưu MedNote");
       const manifestBlob = await downloadDriveFile(token, manifestFile.id);
       const parsed = JSON.parse(await manifestBlob.text()) as PersistedLibrary;
@@ -3604,7 +3791,7 @@ export default function Home() {
       setDriveToken(token);
       setDriveUser(user);
       setDriveStatus("connected");
-      const remoteExists = files.some((file) => file.appProperties?.mednoteId === DRIVE_MANIFEST_ID);
+      const remoteExists = files.some((file) => file.appProperties?.mednoteId === DRIVE_MANIFEST_ID || file.appProperties?.mednoteId === DRIVE_LEGACY_MANIFEST_ID);
       if (remoteExists && !hasMeaningfulLocalData()) {
         await restoreFromDrive(token, false);
       } else if (!remoteExists) {
@@ -4047,18 +4234,22 @@ export default function Home() {
     }
 
     let selectedNotebookId: string | null = null;
+    let selectedTarget: LinkedNoteTarget | null = null;
     const firstPage = createBlankPage(1);
     try {
       if (destination.mode === "notebook") {
         const result = await noteStore.createNotebook(destination.title, notePageToSheetContent(firstPage));
         selectedNotebookId = result.active.activeNotebookId;
+        selectedTarget = { targetType: "page", targetId: result.active.activePageId };
       } else if (destination.mode === "section") {
         const sectionResult = await noteStore.createSection(destination.notebookId, destination.title);
-        await noteStore.createPage(sectionResult.id, name, notePageToSheetContent(firstPage));
+        const result = await noteStore.createPage(sectionResult.id, name, notePageToSheetContent(firstPage));
         selectedNotebookId = destination.notebookId;
+        selectedTarget = { targetType: "page", targetId: result.active.activePageId };
       } else if (destination.mode === "page") {
-        await noteStore.createPage(destination.sectionId, destination.title, notePageToSheetContent(firstPage));
+        const result = await noteStore.createPage(destination.sectionId, destination.title, notePageToSheetContent(firstPage));
         selectedNotebookId = destination.notebookId;
+        selectedTarget = { targetType: "page", targetId: result.active.activePageId };
       }
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể tạo vị trí note");
@@ -4076,6 +4267,13 @@ export default function Home() {
       activeNotebookId: placeholder.id,
       sourcePage: 1,
     };
+    if (saveToLibrary) {
+      try {
+        await noteStore.saveDocumentWorkspace(documentWorkspaceInput(workspace, selectedTarget, { workspaceMode: selectedNotebookId ? "split" : "reader", readerShare, noteZoom }));
+      } catch (error) {
+        setToast(error instanceof Error ? `PDF đã lưu nhưng liên kết note chưa ghi được: ${error.message}` : "PDF đã lưu nhưng liên kết note chưa ghi được");
+      }
+    }
 
     const persistentWorkspaces = libraryWorkspaces.filter((item) => item.kind !== "temporary" && item.id !== workspace.id);
     if (!saveToLibrary && selectedNotebookId && !persistentWorkspaces.some((item) => item.noteNotebookId === selectedNotebookId)) {
@@ -4163,6 +4361,18 @@ export default function Home() {
         notebooks: [placeholder],
         activeNotebookId: placeholder.id,
       };
+      const structure = noteStore.getSnapshot().structure;
+      const linkedPageId = structure && savedWorkspace.noteNotebookId
+        ? structure.pages.find((page) => {
+          const section = structure.sections.find((record) => record.id === page.sectionId);
+          return section?.notebookId === savedWorkspace.noteNotebookId;
+        })?.id
+        : null;
+      await noteStore.saveDocumentWorkspace(documentWorkspaceInput(
+        savedWorkspace,
+        linkedPageId ? { targetType: "page", targetId: linkedPageId } : null,
+        { workspaceMode: linkedPageId ? "split" : "reader", readerShare, noteZoom },
+      ));
       const nextWorkspaces = workspacesRef.current.map((workspace) => workspace.id === activeWorkspace.id ? savedWorkspace : workspace);
       workspacesRef.current = nextWorkspaces;
       activeWorkspaceIdRef.current = savedWorkspaceId;
@@ -4210,6 +4420,13 @@ export default function Home() {
     const page = createBlankPage(activeWorkspace.documents.length ? sourcePage : 1);
     try {
       const result = await noteStore.createNotebook(title, notePageToSheetContent(page));
+      if (activeWorkspace.kind !== "temporary" && activeWorkspace.documents.length) {
+        await noteStore.saveDocumentWorkspace(documentWorkspaceInput(
+          activeWorkspace,
+          { targetType: "page", targetId: result.active.activePageId },
+          { workspaceMode: "split", readerShare, noteZoom },
+        ));
+      }
       updateActiveWorkspace((workspace) => ({ ...workspace, noteNotebookId: result.active.activeNotebookId }));
       setActiveTool("text");
       workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
@@ -4314,6 +4531,14 @@ export default function Home() {
       const renamedDocument = { ...targetDocument, name: `${nextName}.pdf` };
       void readLocalPdf(targetDocument.id).then((stored) => stored ? saveLocalPdf(stored.blob, renamedDocument) : undefined).catch(() => undefined);
     }
+    if (target && target.kind !== "temporary" && target.documents.length) {
+      const updatedWorkspace: WorkspaceItem = {
+        ...target,
+        name: nextName,
+        documents: targetDocument ? [{ ...targetDocument, name: `${nextName}.pdf` }] : target.documents,
+      };
+      void noteStore.saveDocumentWorkspace(documentWorkspaceInput(updatedWorkspace, null, { workspaceMode, readerShare, noteZoom })).catch(() => undefined);
+    }
     cancelWorkspaceRename();
     setToast("Đã đổi tên tài liệu");
   };
@@ -4324,6 +4549,14 @@ export default function Home() {
     const linkedNotebook = noteState.structure?.notebooks.find((notebook) => notebook.id === target.noteNotebookId);
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
     if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebook ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    if (target.kind !== "temporary") {
+      try {
+        await noteStore.deleteDocumentWorkspace(target.id);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Không thể tháo liên kết tài liệu");
+        return;
+      }
+    }
     let deletePersistedPdfs: Promise<PromiseSettledResult<void>[]> | null = null;
     if (target.kind === "temporary") {
       target.documents.forEach((document) => temporaryPdfBlobsRef.current.delete(document.id));
@@ -4375,6 +4608,29 @@ export default function Home() {
       return;
     }
     if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
+    if (activeWorkspace.kind !== "temporary") {
+      const graph = noteStore.getSnapshot().documents;
+      const links = graph.links.filter((link) => link.documentId !== activeDocument.id);
+      const linkIds = new Set(links.map((link) => link.id));
+      await noteStore.replaceDocumentGraph({
+        documents: graph.documents.filter((document) => document.id !== activeDocument.id),
+        contexts: graph.contexts.map((context) => context.id === activeWorkspace.id ? {
+          ...context,
+          documentIds: context.documentIds.filter((id) => id !== activeDocument.id),
+          activeDocumentId: context.activeDocumentId === activeDocument.id
+            ? context.documentIds.find((id) => id !== activeDocument.id) || null
+            : context.activeDocumentId,
+        } : context),
+        groups: graph.groups.map((group) => group.id === activeWorkspace.id
+          ? { ...group, documentIds: group.documentIds.filter((id) => id !== activeDocument.id), updatedAt: Date.now() }
+          : group),
+        links,
+        linkRelations: graph.linkRelations.flatMap((relation) => {
+          const remainingLinkIds = relation.linkIds.filter((id) => linkIds.has(id));
+          return remainingLinkIds.length ? [{ ...relation, linkIds: remainingLinkIds, updatedAt: Date.now() }] : [];
+        }),
+      });
+    }
     if (activeWorkspace.kind === "temporary") temporaryPdfBlobsRef.current.delete(activeDocument.id);
     else await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
     const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);

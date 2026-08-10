@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const http = require("node:http");
@@ -18,6 +18,19 @@ protocol.registerSchemesAsPrivileged([{
 
 let mainWindow = null;
 let activeAuthorization = null;
+let pendingClose = null;
+const closeApproved = new WeakSet();
+
+function showFlushFailure(target, message) {
+  if (target.isDestroyed()) return;
+  void dialog.showMessageBox(target, {
+    type: "error",
+    title: "MedNote chưa thể đóng",
+    message: "Không thể lưu toàn bộ thay đổi trước khi đóng.",
+    detail: message || "Hãy thử đóng lại sau vài giây. Dữ liệu đang mở vẫn được giữ nguyên.",
+    buttons: ["Tiếp tục làm việc"],
+  });
+}
 
 function credentialPath() {
   return path.join(app.getPath("userData"), "google-drive-token.bin");
@@ -281,6 +294,27 @@ function createWindow() {
       void shell.openExternal(url);
     }
   });
+  mainWindow.on("close", (event) => {
+    if (closeApproved.has(mainWindow)) return;
+    event.preventDefault();
+    if (pendingClose) return;
+    const requestId = crypto.randomUUID();
+    const target = mainWindow;
+    const timeout = setTimeout(() => {
+      if (pendingClose?.requestId !== requestId) return;
+      pendingClose = null;
+      showFlushFailure(target, "Hết thời gian chờ lưu dữ liệu; MedNote chưa đóng.");
+    }, 15_000);
+    pendingClose = { requestId, target, timeout };
+    target.webContents.send("app:flush-before-close", requestId);
+  });
+  mainWindow.on("closed", () => {
+    if (pendingClose?.target === mainWindow) {
+      clearTimeout(pendingClose.timeout);
+      pendingClose = null;
+    }
+    mainWindow = null;
+  });
   const devUrl = process.env.MEDNOTE_DEV_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(path.join(__dirname, "..", "dist-electron", "index.html"));
@@ -292,6 +326,18 @@ ipcMain.handle("drive:authorize", async (_event, credentials = {}) => {
   return activeAuthorization;
 });
 ipcMain.handle("drive:revoke", (_event, token) => revokeDrive(token));
+ipcMain.on("app:flush-result", (event, result = {}) => {
+  if (!pendingClose || event.sender !== pendingClose.target.webContents || result.requestId !== pendingClose.requestId) return;
+  const { target, timeout } = pendingClose;
+  clearTimeout(timeout);
+  pendingClose = null;
+  if (!result.success) {
+    showFlushFailure(target, result.error || "Không thể lưu dữ liệu; MedNote chưa đóng.");
+    return;
+  }
+  closeApproved.add(target);
+  if (!target.isDestroyed()) target.close();
+});
 
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();

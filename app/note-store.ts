@@ -7,7 +7,9 @@ import {
   type LegacySnapshot,
 } from "./note-migration";
 import { NoteCommands, type NoteCommandResult } from "./note-commands";
-import type { NoteRepository } from "./note-repository";
+import type { DocumentGraph } from "./document-domain";
+import type { SaveDocumentWorkspaceInput } from "./document-repository";
+import type { LibraryPreferences, LibraryV6, NoteRepository } from "./note-repository";
 import {
   noteContextForSheet,
   ordered,
@@ -22,6 +24,7 @@ export type NoteStoreStatus = "idle" | "loading" | "ready" | "error";
 export type NoteStoreSnapshot = {
   status: NoteStoreStatus;
   structure: NoteStructure | null;
+  documents: DocumentGraph;
   activeSheetContent: SheetContent | null;
   hydratingSheetId: string | null;
   dirty: boolean;
@@ -41,6 +44,7 @@ export type NoteStoreInitializeOptions = {
 const EMPTY_SNAPSHOT: NoteStoreSnapshot = {
   status: "idle",
   structure: null,
+  documents: { documents: [], contexts: [], groups: [], links: [], linkRelations: [] },
   activeSheetContent: null,
   hydratingSheetId: null,
   dirty: false,
@@ -109,10 +113,11 @@ export class NoteStore {
         }
         const structure = await this.repository.loadNoteStructure();
         if (!structure) throw new Error("Không thể đọc cấu trúc note v6 sau migration");
-        const activeSheetContent = structure.active.activeSheetId
-          ? await this.repository.loadSheetContent(structure.active.activeSheetId)
-          : null;
-        this.publish({ status: "ready", structure, activeSheetContent, hydratingSheetId: null, dirty: false, busy: false, error: null });
+        const [activeSheetContent, documents] = await Promise.all([
+          structure.active.activeSheetId ? this.repository.loadSheetContent(structure.active.activeSheetId) : Promise.resolve(null),
+          this.repository.loadDocumentGraph(),
+        ]);
+        this.publish({ status: "ready", structure, documents: documents || EMPTY_SNAPSHOT.documents, activeSheetContent, hydratingSheetId: null, dirty: false, busy: false, error: null });
       } catch (error) {
         this.publish({ status: "error", busy: false, hydratingSheetId: null, error: errorMessage(error) });
         throw error;
@@ -154,17 +159,18 @@ export class NoteStore {
   }
 
   private async hydrateCommitted(result: NoteCommandResult, force = false) {
+    const documents = await this.repository.loadDocumentGraph() || this.snapshot.documents;
     const nextSheetId = result.active.activeSheetId;
     const currentSheetId = this.snapshot.structure?.active.activeSheetId;
     if (!nextSheetId) {
-      this.publish({ structure: result.structure, activeSheetContent: null, hydratingSheetId: null, dirty: false, busy: false });
+      this.publish({ structure: result.structure, documents, activeSheetContent: null, hydratingSheetId: null, dirty: false, busy: false });
       return;
     }
     if (!force && nextSheetId === currentSheetId && this.snapshot.activeSheetContent) {
-      this.publish({ structure: result.structure, hydratingSheetId: null, busy: false });
+      this.publish({ structure: result.structure, documents, hydratingSheetId: null, busy: false });
       return;
     }
-    this.publish({ structure: result.structure, activeSheetContent: null, hydratingSheetId: nextSheetId, dirty: false });
+    this.publish({ structure: result.structure, documents, activeSheetContent: null, hydratingSheetId: nextSheetId, dirty: false });
     const content = await this.repository.loadSheetContent(nextSheetId);
     const stillActive = this.snapshot.structure?.active.activeSheetId === nextSheetId;
     if (stillActive) this.publish({ activeSheetContent: content || {}, hydratingSheetId: null, dirty: false, busy: false });
@@ -281,6 +287,78 @@ export class NoteStore {
     return Object.fromEntries(entries);
   }
 
+  saveDocumentWorkspace(input: SaveDocumentWorkspaceInput) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      this.publish({ busy: true, error: null });
+      try {
+        const documents = await this.repository.saveDocumentWorkspace(input);
+        this.publish({ documents, busy: false });
+        return documents;
+      } catch (error) {
+        this.publish({ busy: false, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  deleteDocumentWorkspace(contextId: string) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      this.publish({ busy: true, error: null });
+      try {
+        const documents = await this.repository.deleteDocumentWorkspace(contextId);
+        this.publish({ documents, busy: false });
+        return documents;
+      } catch (error) {
+        this.publish({ busy: false, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  replaceDocumentGraph(documents: DocumentGraph) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      await this.repository.replaceDocumentGraph(documents);
+      this.publish({ documents: clone(documents), error: null });
+    });
+  }
+
+  setPreferences(preferences: LibraryPreferences) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      await this.repository.setPreferences(clone(preferences));
+    });
+  }
+
+  async exportLibrary(): Promise<LibraryV6> {
+    await this.flush();
+    const library = await this.repository.loadLibrary();
+    if (!library) throw new Error("Kho note v6 chưa sẵn sàng để xuất");
+    return library;
+  }
+
+  replaceFromLibrary(library: LibraryV6) {
+    const snapshot = clone(library);
+    return this.serialize(async () => {
+      await this.flushDraft();
+      this.publish({ busy: true, error: null });
+      try {
+        await this.repository.replaceLibrary(snapshot);
+        const verified = await this.repository.loadLibrary();
+        if (!verified) throw new Error("Không thể đọc thư viện v6 sau khi khôi phục");
+        const structure = verified.notes;
+        const documents = verified.documents;
+        await this.hydrateCommitted({ structure, active: structure.active }, true);
+        this.publish({ documents, busy: false, error: null });
+      } catch (error) {
+        this.publish({ busy: false, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
   replaceFromLegacySnapshot(snapshot: LegacySnapshot, relation?: LegacyRelationV2) {
     return this.serialize(async () => {
       await this.flushDraft();
@@ -291,9 +369,10 @@ export class NoteStore {
           throw new Error(`Không thể khôi phục vì có liên kết chưa bảo toàn: ${migrated.report.warnings.join("; ")}`);
         }
         await this.repository.replaceLibrary(migrated.library);
-        const structure = await this.repository.loadNoteStructure();
-        if (!structure) throw new Error("Không thể đọc cấu trúc note sau khi khôi phục");
+        const [structure, documents] = await Promise.all([this.repository.loadNoteStructure(), this.repository.loadDocumentGraph()]);
+        if (!structure || !documents) throw new Error("Không thể đọc cấu trúc note sau khi khôi phục");
         await this.hydrateCommitted({ structure, active: structure.active }, true);
+        this.publish({ documents });
       } catch (error) {
         this.publish({ busy: false, error: errorMessage(error) });
         throw error;

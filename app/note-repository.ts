@@ -1,4 +1,5 @@
 import type { DocumentGraph } from "./document-domain";
+import type { DocumentRepository } from "./document-repository";
 import type { ActiveNoteState, HydratedSheet, NoteStructure, SheetContent, SheetContentMap } from "./note-domain";
 
 export const NOTE_SCHEMA_VERSION = 6 as const;
@@ -34,7 +35,7 @@ export type CreateSectionInput = { id?: string; notebookId: string; title: strin
 export type CreatePageInput = { id?: string; sectionId: string; title: string; sheetId?: string; content?: SheetContent };
 export type CreateSheetInput = { id?: string; pageId: string; content?: SheetContent };
 
-export interface NoteRepository {
+export interface NoteRepository extends DocumentRepository {
   /** Full, eager bundle reserved for migration, export, backup and integrity verification. */
   loadLibrary(): Promise<LibraryV6 | null>;
   /** Default startup read: hierarchy and active IDs only; never reads SheetContent records. */
@@ -57,6 +58,7 @@ export interface NoteRepository {
   deletePage(id: string): Promise<void>;
   deleteSheet(id: string): Promise<void>;
   saveSheetContent(sheetId: string, content: SheetContent): Promise<void>;
+  setPreferences(preferences: LibraryPreferences): Promise<void>;
   readActiveState(): Promise<ActiveNoteState | null>;
   setActiveState(active: ActiveNoteState): Promise<void>;
   flush(): Promise<void>;

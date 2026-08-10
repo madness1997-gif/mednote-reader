@@ -1,5 +1,5 @@
 import { assertDocumentGraph, type DocumentGraph, type DocumentLinkRelation, type NoteDocumentLink } from "./document-domain";
-import type { DocumentRepository } from "./document-repository";
+import type { DocumentRepository, SaveDocumentWorkspaceInput } from "./document-repository";
 import { assertNoteStructure, assertSheetContents, hydrateSheet, noteContextForSheet, ordered, type ActiveNoteState, type Notebook, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
 import { NOTE_SCHEMA_VERSION, type CreateNotebookInput, type CreatePageInput, type CreateSectionInput, type CreateSheetInput, type LibraryPreferences, type LibraryV6, type NoteRepository } from "./note-repository";
 
@@ -298,6 +298,104 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
     });
   }
 
+  saveDocumentWorkspace(input: SaveDocumentWorkspaceInput) {
+    const snapshot = clone(input);
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const keys = [...v6StructureRecordKeys(meta), ...v6DocumentRecordKeys(meta)].filter((key) => key !== V6_KEYS.meta);
+      const records = await this.requiredRecordMap(store, keys);
+      const notes = this.noteStructureFromRecords(meta, records);
+      const current = this.documentGraphFromRecords(meta, notes, records);
+      const merge = <T extends { id: string }>(existing: T[], incoming: T[]) => {
+        const next = new Map(existing.map((record) => [record.id, record]));
+        incoming.forEach((record) => next.set(record.id, clone(record)));
+        return [...next.values()];
+      };
+      const documents = merge(current.documents, snapshot.documents);
+      const contexts = merge(current.contexts, [snapshot.context]);
+      const groups = merge(current.groups, snapshot.group ? [snapshot.group] : []);
+      const links = merge(current.links, snapshot.links || []);
+      const linkRelations = merge(current.linkRelations, snapshot.linkRelations || []);
+      const graph: DocumentGraph = { documents, contexts, groups, links, linkRelations };
+      assertDocumentGraph(graph, notes);
+      this.writeDocumentGraph(store, meta, graph);
+      return clone(graph);
+    }));
+  }
+
+  deleteDocumentWorkspace(contextId: string) {
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const keys = [...v6StructureRecordKeys(meta), ...v6DocumentRecordKeys(meta)].filter((key) => key !== V6_KEYS.meta);
+      const records = await this.requiredRecordMap(store, keys);
+      const notes = this.noteStructureFromRecords(meta, records);
+      const current = this.documentGraphFromRecords(meta, notes, records);
+      const removedContext = current.contexts.find((context) => context.id === contextId);
+      if (!removedContext) return current;
+
+      const contexts = current.contexts.filter((context) => context.id !== contextId);
+      const removedGroupIds = new Set(current.groups.filter((group) => group.id === contextId).map((group) => group.id));
+      const groups = current.groups.filter((group) => !removedGroupIds.has(group.id));
+      const referencedDocumentIds = new Set([
+        ...contexts.flatMap((context) => context.documentIds),
+        ...groups.flatMap((group) => group.documentIds),
+      ]);
+      const removedDocumentIds = new Set(removedContext.documentIds.filter((id) => !referencedDocumentIds.has(id)));
+      const documents = current.documents.filter((document) => !removedDocumentIds.has(document.id));
+      const links = current.links.filter((link) => !removedDocumentIds.has(link.documentId));
+      const linkIds = new Set(links.map((link) => link.id));
+      const linkRelations = current.linkRelations.flatMap((relation) => {
+        if ((relation.sourceType === "group" && removedGroupIds.has(relation.sourceId))
+          || (relation.sourceType === "document" && removedDocumentIds.has(relation.sourceId))) return [];
+        const remainingLinkIds = relation.linkIds.filter((id) => linkIds.has(id));
+        return remainingLinkIds.length ? [{ ...relation, linkIds: remainingLinkIds }] : [];
+      });
+      const graph: DocumentGraph = { documents, contexts, groups, links, linkRelations };
+      assertDocumentGraph(graph, notes);
+      this.writeDocumentGraph(store, meta, graph);
+      return clone(graph);
+    }));
+  }
+
+  replaceDocumentGraph(graph: DocumentGraph) {
+    const snapshot = clone(graph);
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const keys = v6StructureRecordKeys(meta).filter((key) => key !== V6_KEYS.meta);
+      const notes = this.noteStructureFromRecords(meta, await this.requiredRecordMap(store, keys));
+      assertDocumentGraph(snapshot, notes);
+      this.writeDocumentGraph(store, meta, snapshot);
+    }));
+  }
+
+  private writeDocumentGraph(store: IDBObjectStore, meta: V6Meta, graph: DocumentGraph) {
+    const entries: Array<[string, { id: string }]> = [
+      ...graph.documents.map((record) => [`${V6_KEYS.document}${record.id}`, record] as [string, typeof record]),
+      ...graph.contexts.map((record) => [`${V6_KEYS.context}${record.id}`, record] as [string, typeof record]),
+      ...graph.groups.map((record) => [`${V6_KEYS.group}${record.id}`, record] as [string, typeof record]),
+      ...graph.links.map((record) => [`${V6_KEYS.link}${record.id}`, record] as [string, typeof record]),
+      ...graph.linkRelations.map((record) => [`${V6_KEYS.linkRelation}${record.id}`, record] as [string, typeof record]),
+    ];
+    entries.forEach(([key, record]) => store.put(clone(record), key));
+    const nextMeta = touchMeta({
+      ...meta,
+      documentIds: graph.documents.map((record) => record.id),
+      contextIds: graph.contexts.map((record) => record.id),
+      groupIds: graph.groups.map((record) => record.id),
+      linkIds: graph.links.map((record) => record.id),
+      linkRelationIds: graph.linkRelations.map((record) => record.id),
+    });
+    const keep = new Set(entries.map(([key]) => key));
+    [
+      ...meta.documentIds.map((id) => `${V6_KEYS.document}${id}`),
+      ...meta.contextIds.map((id) => `${V6_KEYS.context}${id}`),
+      ...meta.groupIds.map((id) => `${V6_KEYS.group}${id}`),
+      ...meta.linkIds.map((id) => `${V6_KEYS.link}${id}`),
+      ...meta.linkRelationIds.map((id) => `${V6_KEYS.linkRelation}${id}`),
+    ].filter((key) => !keep.has(key)).forEach((key) => store.delete(key));
+    store.put(nextMeta, V6_KEYS.meta);
+  }
+
   async loadSheet(sheetId: string) {
     await this.flush();
     return this.transaction("readonly", async ({ store }) => {
@@ -320,6 +418,14 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       if (content === undefined) throw new RepositoryCorruptionError([key]);
       return clone(content);
     });
+  }
+
+  setPreferences(preferences: LibraryPreferences) {
+    const snapshot = clone(preferences);
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      store.put(touchMeta({ ...meta, preferences: snapshot }), V6_KEYS.meta);
+    }));
   }
 
   replaceLibrary(library: LibraryV6) {

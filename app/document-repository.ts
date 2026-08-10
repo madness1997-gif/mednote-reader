@@ -1,10 +1,27 @@
-import type { DocumentGraph } from "./document-domain";
+import type {
+  DocumentContext,
+  DocumentGraph,
+  DocumentGroup,
+  DocumentLinkRelation,
+  DocumentRecord,
+  NoteDocumentLink,
+} from "./document-domain";
 
-/**
- * Document persistence stays outside the Notebook → Section → Page → Sheet
- * hierarchy. Write commands are intentionally deferred to the PDF-linking wave;
- * Wave 1 only needs an independent read boundary and atomic migration storage.
- */
+export type SaveDocumentWorkspaceInput = {
+  documents: DocumentRecord[];
+  context: DocumentContext;
+  group?: DocumentGroup;
+  links?: NoteDocumentLink[];
+  linkRelations?: DocumentLinkRelation[];
+};
+
+/** Document persistence stays outside Notebook → Section → Page → Sheet. */
 export interface DocumentRepository {
   loadDocumentGraph(): Promise<DocumentGraph | null>;
+  /** Atomically persists one reader context and every link created with it. */
+  saveDocumentWorkspace(input: SaveDocumentWorkspaceInput): Promise<DocumentGraph>;
+  /** Removes a reader context and its unreferenced documents without deleting notes. */
+  deleteDocumentWorkspace(contextId: string): Promise<DocumentGraph>;
+  /** Whole-graph boundary reserved for verified restore and metadata reconciliation. */
+  replaceDocumentGraph(graph: DocumentGraph): Promise<void>;
 }

@@ -28,9 +28,18 @@ jobs:
           npm run typecheck
           npm run test:wave1
           npm run test:wave2
+          npm run test:wave3
+      - name: Run browser regression suite
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:all
       - run: npm run build:pages
         env:
           VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com
+      - name: Build desktop and verify flush-before-close
+        run: |
+          npm run build:desktop
+          xvfb-run -a node tests/electron-note-hierarchy.cjs
       - name: Stamp deployment version
         run: echo "${GITHUB_SHA}" > pages-dist/deploy-version.txt
       - uses: actions/configure-pages@v5

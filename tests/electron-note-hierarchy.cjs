@@ -9,17 +9,28 @@ async function submitName(page, locator, value) {
   await expect(dialog).toBeHidden();
 }
 
-(async () => {
-  const app = await electron.launch({
-    args: ['--no-sandbox', '--headless', '--disable-gpu', '--no-zygote', '--single-process', '--user-data-dir=/tmp/mednote-electron-profile', '.'],
+const profile = `/tmp/mednote-electron-wave3-${Date.now()}`;
+
+async function launch() {
+  return electron.launch({
+    args: ['--no-sandbox', '--headless', '--disable-gpu', '--no-zygote', '--single-process', `--user-data-dir=${profile}`, '.'],
     env: { ...process.env, ELECTRON_DISABLE_SANDBOX: '1' },
   });
+}
+
+(async () => {
+  let app = await launch();
   try {
-    const page = await app.firstWindow();
+    let page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
     await page.evaluate(async () => {
       localStorage.clear();
-      indexedDB.deleteDatabase('mednote-local');
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase('mednote-local');
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error('mednote-local delete blocked'));
+      });
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
 
@@ -36,14 +47,19 @@ async function submitName(page, locator, value) {
     await submitName(page, nav.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');
     await expect(page.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    // Close without a reload or an explicit save. Electron must wait for the
+    // renderer's v6 queue and IndexedDB transaction to flush.
+    await app.close();
+    app = await launch();
+    page = await app.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
     nav = page.locator('.note-sidebar-v6');
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
     await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
     process.stdout.write('Electron hierarchy test passed\n');
   } finally {
-    await app.close();
+    try { await app.close(); } catch { /* already closed after a failed assertion */ }
   }
 })().catch((error) => {
   console.error(error);

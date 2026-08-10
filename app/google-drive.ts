@@ -20,6 +20,8 @@ declare global {
       isDesktop: true;
       authorizeDrive: (clientId: string, clientSecret?: string) => Promise<string>;
       revokeDrive: (token: string) => Promise<void>;
+      onFlushRequested: (listener: (requestId: string) => void) => () => void;
+      completeFlush: (requestId: string, success: boolean, error?: string) => void;
     };
     google?: {
       accounts: {
