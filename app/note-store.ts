@@ -9,6 +9,7 @@ import {
 import { NoteCommands, type NoteCommandResult } from "./note-commands";
 import type { DocumentGraph } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
+import { remapDocumentReferencesInContent } from "./note-document-source";
 import type { LibraryPreferences, LibraryV6, NoteRepository } from "./note-repository";
 import {
   noteContextForSheet,
@@ -378,6 +379,54 @@ export class NoteStore {
     if (!structure) return {};
     const entries = await Promise.all(structure.sheets.map(async (sheet) => [sheet.id, await this.repository.loadSheetContent(sheet.id) || {}] as const));
     return Object.fromEntries(entries);
+  }
+
+  remapDocumentReferences(idMap: ReadonlyMap<string, string>) {
+    const mapping = new Map([...idMap.entries()].filter(([from, to]) => from && to && from !== to));
+    if (!mapping.size) return Promise.resolve(0);
+    return this.serialize(async () => {
+      await this.flushDraft();
+      const structure = this.snapshot.structure;
+      if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
+      this.publish({ busy: true, error: null });
+      try {
+        const loaded = await Promise.all(structure.sheets.map(async (sheet) => [sheet.id, await this.repository.loadSheetContent(sheet.id) || {}] as const));
+        const changed = new Map<string, SheetContent>();
+        loaded.forEach(([sheetId, content]) => {
+          const result = remapDocumentReferencesInContent(content, mapping);
+          if (result.changed) changed.set(sheetId, result.content);
+        });
+        for (const [sheetId, content] of changed) await this.commands.saveSheetContent(sheetId, content);
+        const activeSheetId = structure.active.activeSheetId;
+        const activeSheetContent = activeSheetId && changed.has(activeSheetId)
+          ? clone(changed.get(activeSheetId)!)
+          : this.snapshot.activeSheetContent;
+        const pageSheetContents = Object.fromEntries(Object.entries(this.snapshot.pageSheetContents).map(([sheetId, content]) => [
+          sheetId,
+          changed.has(sheetId) ? clone(changed.get(sheetId)!) : content,
+        ]));
+        this.publish({ activeSheetContent, pageSheetContents, dirty: false, busy: false });
+        return changed.size;
+      } catch (error) {
+        this.publish({ busy: false, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  deleteDocumentFromWorkspace(contextId: string, documentId: string) {
+    return this.serialize(async () => {
+      await this.flushDraft();
+      this.publish({ busy: true, error: null });
+      try {
+        const documents = await this.repository.deleteDocumentFromWorkspace(contextId, documentId);
+        this.publish({ documents, busy: false });
+        return documents;
+      } catch (error) {
+        this.publish({ busy: false, error: errorMessage(error) });
+        throw error;
+      }
+    });
   }
 
   saveDocumentWorkspace(input: SaveDocumentWorkspaceInput) {

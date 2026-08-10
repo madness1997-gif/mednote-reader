@@ -111,6 +111,7 @@ import {
 import { createDriveBackup, stageDriveBackup, type DriveLibrary } from "./drive-backup";
 import type { DocumentGraph, DocumentRecord } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
+import { resolveDocumentSource, type ResolvedDocumentSource } from "./note-document-source";
 import {
   lookupEnglishVietnamese,
   oxfordLookupUrl,
@@ -1362,6 +1363,7 @@ function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
 
 type DraggableExcerptProps = {
   excerpt: NoteExcerpt;
+  source: ResolvedDocumentSource<PdfRect> | null;
   index: number;
   selected: boolean;
   selectable: boolean;
@@ -1376,7 +1378,7 @@ type DraggableExcerptProps = {
   onDelete: (excerptId: string) => void;
 };
 
-function DraggableExcerpt({ excerpt, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
+function DraggableExcerpt({ excerpt, source, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
   const articleRef = useRef<HTMLElement>(null);
   const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
   const isCallout = excerpt.annotationKind === "callout";
@@ -1554,6 +1556,12 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
   const calloutStartX = calloutEdgeRatio > 1 ? 50 + calloutDeltaX / calloutEdgeRatio : 50;
   const calloutStartY = calloutEdgeRatio > 1 ? 50 + calloutDeltaY / calloutEdgeRatio : 50;
   const calloutLineColor = appearance?.borderColor && appearance.borderColor !== "transparent" ? appearance.borderColor : "#1b7184";
+  const sourceTitle = source
+    ? source.available
+      ? `Nguồn: ${source.displayName}${source.page ? ` · trang ${source.page}` : ""}. Nhấp đúp để quay lại PDF`
+      : `Nguồn PDF không còn trong thư viện: ${source.displayName}`
+    : undefined;
+  const imageSourceName = source?.displayName ?? (excerpt.sourceKind === "manual" ? excerpt.documentName ?? "Hình ảnh" : "PDF");
 
   return (
     <article
@@ -1584,12 +1592,12 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
       onPointerUp={finishInteraction}
       onPointerCancel={finishInteraction}
       onDoubleClick={(event) => {
-        if (excerpt.sourceKind === "manual" || !excerpt.documentId || !excerpt.page) return;
+        if (!source?.available || !source.documentId || !source.page) return;
         event.preventDefault();
         event.stopPropagation();
         onOpenSource(excerpt);
       }}
-      title={excerpt.sourceKind !== "manual" && excerpt.documentId && excerpt.page ? "Nhấp đúp để quay lại đúng vị trí trong PDF" : undefined}
+      title={sourceTitle}
       aria-selected={selected}
     >
       {isCallout && calloutAnchor && <svg className="callout-leader" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -1643,7 +1651,7 @@ function DraggableExcerpt({ excerpt, index, selected, selectable, movable, edita
             onNormalizeInput={onNormalizeTextInput}
           />
         ) : excerpt.assetId ? (
-          <div className="excerpt-image-viewport" style={{ opacity: layout.opacity }}><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${excerpt.documentName ?? "PDF"}, trang ${excerpt.page ?? 1}`} /></div></div>
+          <div className="excerpt-image-viewport" style={{ opacity: layout.opacity }}><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${imageSourceName}, trang ${source?.page ?? excerpt.page ?? 1}${source && !source.available ? ", nguồn không còn trong thư viện" : ""}`} /></div></div>
         ) : <span>Không tìm thấy ảnh</span>}
       </div>
       {selected && movable && isCallout && calloutAnchor && <button
@@ -2324,12 +2332,14 @@ function NoteSheetPreview({
   zoom,
   loaded,
   onActivate,
+  resolveSource,
 }: {
   note: NotePage;
   sheetNumber: number;
   zoom: number;
   loaded: boolean;
   onActivate: () => void;
+  resolveSource: (excerpt: NoteExcerpt) => ResolvedDocumentSource<PdfRect> | null;
 }) {
   const presentation = notePagePresentation(note, zoom);
   return (
@@ -2353,6 +2363,7 @@ function NoteSheetPreview({
               {note.excerpts.map((excerpt, index) => <DraggableExcerpt
                 key={excerpt.id}
                 excerpt={excerpt}
+                source={resolveSource(excerpt)}
                 index={index}
                 selected={false}
                 selectable={false}
@@ -2528,6 +2539,7 @@ export default function Home() {
   const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
+  const resolveExcerptSource = useCallback((excerpt: NoteExcerpt) => resolveDocumentSource(excerpt, noteState.documents, activeWorkspace.documents), [activeWorkspace.documents, noteState.documents]);
 
   useEffect(() => {
     const notebookId = activeWorkspace.noteNotebookId;
@@ -3690,22 +3702,41 @@ export default function Home() {
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
-    if (excerpt.sourceKind === "manual" || !excerpt.documentId || !excerpt.page) return;
-    if (!activeWorkspace.documents.some((document) => document.id === excerpt.documentId)) {
-      setToast("Tài liệu nguồn đã bị xóa khỏi cụm");
+    const source = resolveExcerptSource(excerpt);
+    if (!source?.documentId || !source.page) return;
+    if (!source.available) {
+      setToast("Tài liệu nguồn không còn trong thư viện");
       return;
     }
-    if (activeDocument?.id === excerpt.documentId) {
-      goToPage(excerpt.page);
-      if (excerpt.rect) {
-        setSourceFocus({ documentId: excerpt.documentId, page: excerpt.page, rect: excerpt.rect });
-        window.setTimeout(() => setSourceFocus((focus) => focus && focus.documentId === excerpt.documentId && focus.page === excerpt.page ? null : focus), 3600);
-      }
-    } else {
-      switchDocument(excerpt.documentId, excerpt.page, excerpt.rect);
+    const sourceWorkspace = workspaces.find((workspace) => workspace.documents.some((document) => document.id === source.documentId));
+    if (!sourceWorkspace) {
+      setToast("Tài liệu nguồn không còn trong thư viện");
+      return;
     }
+    if (sourceWorkspace.id === activeWorkspace.id) {
+      switchDocument(source.documentId, source.page, source.rect);
+    } else {
+      const nextPage = source.page;
+      const nextWorkspaces = workspaces.map((workspace) => workspace.id === sourceWorkspace.id ? {
+        ...workspace,
+        activeDocumentId: source.documentId,
+        sourcePage: nextPage,
+        documents: workspace.documents.map((document) => document.id === source.documentId
+          ? { ...document, reader: { ...normalizeReader(document.reader), page: nextPage } }
+          : document),
+      } : workspace);
+      workspacesRef.current = nextWorkspaces;
+      activeWorkspaceIdRef.current = sourceWorkspace.id;
+      setWorkspaces(nextWorkspaces);
+      setActiveWorkspaceId(sourceWorkspace.id);
+      if (source.rect) {
+        setSourceFocus({ documentId: source.documentId, page: nextPage, rect: source.rect });
+        window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === source.documentId && focus.page === nextPage ? null : focus), 3600);
+      }
+    }
+    workspaceModeRef.current = "split";
     setWorkspaceMode("split");
-    setToast(`Đã quay lại ${excerpt.documentName} · trang ${excerpt.page}`);
+    setToast(`Đã quay lại ${source.displayName} · trang ${source.page}`);
   };
 
   const hasMeaningfulLocalData = () => Boolean(noteState.structure?.sheets.length) || workspaces.some((workspace) => {
@@ -4227,9 +4258,10 @@ export default function Home() {
           const blob = await readLocalAsset(excerpt.assetId);
           if (blob) content = `<img src="${await blobToDataUrl(blob)}" alt="Hình trích từ PDF">`;
         }
+        const source = resolveExcerptSource(excerpt);
         const caption = excerpt.sourceKind === "manual"
           ? excerpt.annotationKind === "callout" ? "Callout" : "Hộp chữ"
-          : `${escapeHtml(excerpt.documentName ?? "PDF")} — trang ${excerpt.page ?? 1}`;
+          : `${escapeHtml(source?.displayName ?? "PDF đã xóa")} — trang ${source?.page ?? excerpt.page ?? 1}${source && !source.available ? " · nguồn không còn trong thư viện" : ""}`;
         excerptsHtml.push(`<figure>${content}<figcaption>${caption}</figcaption></figure>`);
       }
       pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
@@ -4481,67 +4513,92 @@ export default function Home() {
       ...document,
       id: `doc-${stableId(`${document.name}:${document.size}:${document.lastModified}`)}`,
     }));
+    const idMap = new Map(activeWorkspace.documents.map((document, index) => [document.id, savedDocuments[index].id]));
     const savedWorkspaceId = savedDocuments.length === 1
       ? `workspace-${savedDocuments[0].id}`
       : `collection-${stableId(savedDocuments.map((document) => document.id).sort().join(":"))}`;
     const existing = workspaces.find((workspace) => workspace.id === savedWorkspaceId);
     if (existing) {
-      setWorkspaces((items) => items.filter((workspace) => workspace.id !== activeWorkspace.id));
+      try {
+        await noteStore.remapDocumentReferences(idMap);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Không thể cập nhật nguồn PDF trong note");
+        return;
+      }
+      const nextWorkspaces = workspacesRef.current.filter((workspace) => workspace.id !== activeWorkspace.id);
+      workspacesRef.current = nextWorkspaces;
+      activeWorkspaceIdRef.current = existing.id;
+      setWorkspaces(nextWorkspaces);
       setActiveWorkspaceId(existing.id);
       temporaryPdfBlobsRef.current.clear();
-      setToast("PDF này đã có trong thư viện");
+      setToast("PDF này đã có trong thư viện; nguồn note đã được nối lại");
       return;
     }
+
     try {
       await Promise.all(activeWorkspace.documents.map(async (document, index) => {
         const blob = temporaryPdfBlobsRef.current.get(document.id);
         if (!blob) throw new Error("missing temporary PDF");
         await saveLocalPdf(blob, savedDocuments[index]);
       }));
-      const placeholder = createReaderPlaceholder(savedWorkspaceId);
-      const savedWorkspace: WorkspaceItem = {
-        ...activeWorkspace,
-        id: savedWorkspaceId,
-        kind: savedDocuments.length === 1 ? "document" : "collection",
-        documents: savedDocuments,
-        activeDocumentId: savedDocuments[0].id,
-        notebooks: [placeholder],
-        activeNotebookId: placeholder.id,
-      };
-      const structure = noteStore.getSnapshot().structure;
-      const linkedPageId = structure && savedWorkspace.noteNotebookId
-        ? structure.pages.find((page) => {
-          const section = structure.sections.find((record) => record.id === page.sectionId);
-          return section?.notebookId === savedWorkspace.noteNotebookId;
-        })?.id
-        : null;
+    } catch {
+      setToast("Không thể lưu PDF đang xem vào thư viện");
+      return;
+    }
+
+    const placeholder = createReaderPlaceholder(savedWorkspaceId);
+    const savedWorkspace: WorkspaceItem = {
+      ...activeWorkspace,
+      id: savedWorkspaceId,
+      kind: savedDocuments.length === 1 ? "document" : "collection",
+      documents: savedDocuments,
+      activeDocumentId: savedDocuments[0].id,
+      notebooks: [placeholder],
+      activeNotebookId: placeholder.id,
+    };
+    const structure = noteStore.getSnapshot().structure;
+    const linkedPageId = structure && savedWorkspace.noteNotebookId
+      ? structure.pages.find((page) => {
+        const section = structure.sections.find((record) => record.id === page.sectionId);
+        return section?.notebookId === savedWorkspace.noteNotebookId;
+      })?.id
+      : null;
+
+    let graphSaved = false;
+    try {
       await noteStore.saveDocumentWorkspace(documentWorkspaceInput(
         savedWorkspace,
         linkedPageId ? { targetType: "page", targetId: linkedPageId } : null,
         { workspaceMode: linkedPageId ? "split" : "reader", readerShare, noteZoom },
       ));
-      const nextWorkspaces = workspacesRef.current.map((workspace) => workspace.id === activeWorkspace.id ? savedWorkspace : workspace);
-      workspacesRef.current = nextWorkspaces;
-      activeWorkspaceIdRef.current = savedWorkspaceId;
-      setWorkspaces(nextWorkspaces);
-      setActiveWorkspaceId(savedWorkspaceId);
-      workspaceModeRef.current = hasActiveNote ? "split" : "reader";
-      setWorkspaceMode(workspaceModeRef.current);
-      const savedAt = Date.now();
-      const snapshot = {
-        workspaces: nextWorkspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID),
-        activeWorkspaceId: savedWorkspaceId,
-        readerShare,
-        workspaceMode: hasActiveNote ? "split" as const : "reader" as const,
-        noteZoom,
-        savedAt,
-      } satisfies PersistedLibrary;
-      localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) }));
-      temporaryPdfBlobsRef.current.clear();
-      setToast(hasActiveNote ? "Đã lưu PDF; note vẫn được giữ" : "Đã lưu PDF đang xem vào thư viện — chưa tạo note");
-    } catch {
-      setToast("Không thể lưu PDF đang xem vào thư viện");
+      graphSaved = true;
+      await noteStore.remapDocumentReferences(idMap);
+    } catch (error) {
+      if (graphSaved) await noteStore.deleteDocumentWorkspace(savedWorkspaceId).catch(() => undefined);
+      await Promise.allSettled(savedDocuments.map((document) => deleteLocalPdf(document.id)));
+      setToast(error instanceof Error ? `Không thể hoàn tất lưu PDF: ${error.message}` : "Không thể hoàn tất lưu PDF");
+      return;
     }
+
+    const nextWorkspaces = workspacesRef.current.map((workspace) => workspace.id === activeWorkspace.id ? savedWorkspace : workspace);
+    workspacesRef.current = nextWorkspaces;
+    activeWorkspaceIdRef.current = savedWorkspaceId;
+    setWorkspaces(nextWorkspaces);
+    setActiveWorkspaceId(savedWorkspaceId);
+    workspaceModeRef.current = hasActiveNote ? "split" : "reader";
+    setWorkspaceMode(workspaceModeRef.current);
+    const savedAt = Date.now();
+    const snapshot = {
+      workspaces: nextWorkspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.id !== RELATION_META_WORKSPACE_ID),
+      activeWorkspaceId: savedWorkspaceId,
+      readerShare,
+      workspaceMode: hasActiveNote ? "split" as const : "reader" as const,
+      noteZoom,
+      savedAt,
+    } satisfies PersistedLibrary;
+    try { localStorage.setItem(DOCUMENT_RUNTIME_KEY, JSON.stringify({ ...snapshot, workspaces: snapshot.workspaces.map(documentRuntimeWorkspace) })); } catch { /* IndexedDB remains the durable source. */ }
+    temporaryPdfBlobsRef.current.clear();
+    setToast(hasActiveNote ? "Đã lưu PDF; nguồn trong note đã được cập nhật" : "Đã lưu PDF đang xem vào thư viện — chưa tạo note");
   };
 
   const addNotebook = async () => {
@@ -4581,45 +4638,36 @@ export default function Home() {
     setRenamingWorkspaceName("");
   };
 
-  const commitWorkspaceRename = (workspaceId: string) => {
+  const commitWorkspaceRename = async (workspaceId: string) => {
     const nextName = renamingWorkspaceName.trim().replace(/\.pdf$/i, "").trim();
     if (!nextName) {
       setToast("Tên tài liệu không được để trống");
       return;
     }
-    setWorkspaces((items) => items.map((workspace) => {
-      if (workspace.id !== workspaceId) return workspace;
-      const singleDocument = workspace.kind === "document" && workspace.documents.length === 1 ? workspace.documents[0] : null;
-      const renamedDocument = singleDocument ? { ...singleDocument, name: `${nextName}.pdf` } : null;
-      const documents = renamedDocument ? [renamedDocument] : workspace.documents;
-      const notebooks = workspace.notebooks.map((notebook) => ({
-        ...notebook,
-        title: notebook.title === `Ghi chú — ${workspace.name}` ? `Ghi chú — ${nextName}` : notebook.title,
-        pages: renamedDocument ? notebook.pages.map((page) => ({
-          ...page,
-          excerpts: page.excerpts.map((excerpt) => excerpt.documentId === renamedDocument.id
-            ? { ...excerpt, documentName: renamedDocument.name }
-            : excerpt),
-        })) : notebook.pages,
-      }));
-      return { ...workspace, name: nextName, documents, notebooks };
-    }));
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
-    const targetDocument = target?.kind === "document" && target.documents.length === 1 ? target.documents[0] : null;
-    if (targetDocument) {
-      const renamedDocument = { ...targetDocument, name: `${nextName}.pdf` };
-      void readLocalPdf(targetDocument.id).then((stored) => stored ? saveLocalPdf(stored.blob, renamedDocument) : undefined).catch(() => undefined);
+    if (!target) return;
+    const targetDocument = target.kind === "document" && target.documents.length === 1 ? target.documents[0] : null;
+    const renamedDocument = targetDocument ? { ...targetDocument, name: `${nextName}.pdf` } : null;
+    const updatedWorkspace: WorkspaceItem = {
+      ...target,
+      name: nextName,
+      documents: renamedDocument ? [renamedDocument] : target.documents,
+    };
+    try {
+      if (target.kind !== "temporary" && target.documents.length) {
+        await noteStore.saveDocumentWorkspace(documentWorkspaceInput(updatedWorkspace, null, { workspaceMode, readerShare, noteZoom }));
+      }
+      if (renamedDocument) {
+        void readLocalPdf(renamedDocument.id).then((stored) => stored ? saveLocalPdf(stored.blob, renamedDocument) : undefined).catch(() => undefined);
+      }
+      const nextWorkspaces = workspaces.map((workspace) => workspace.id === workspaceId ? updatedWorkspace : workspace);
+      workspacesRef.current = nextWorkspaces;
+      setWorkspaces(nextWorkspaces);
+      cancelWorkspaceRename();
+      setToast("Đã đổi tên tài liệu");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể đổi tên tài liệu");
     }
-    if (target && target.kind !== "temporary" && target.documents.length) {
-      const updatedWorkspace: WorkspaceItem = {
-        ...target,
-        name: nextName,
-        documents: targetDocument ? [{ ...targetDocument, name: `${nextName}.pdf` }] : target.documents,
-      };
-      void noteStore.saveDocumentWorkspace(documentWorkspaceInput(updatedWorkspace, null, { workspaceMode, readerShare, noteZoom })).catch(() => undefined);
-    }
-    cancelWorkspaceRename();
-    setToast("Đã đổi tên tài liệu");
   };
 
   const deleteWorkspace = async (workspaceId: string) => {
@@ -4628,9 +4676,11 @@ export default function Home() {
     const linkedNotebook = noteState.structure?.notebooks.find((notebook) => notebook.id === target.noteNotebookId);
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
     if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebook ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    let remainingDocumentIds = new Set(noteState.documents.documents.map((document) => document.id));
     if (target.kind !== "temporary") {
       try {
-        await noteStore.deleteDocumentWorkspace(target.id);
+        const documents = await noteStore.deleteDocumentWorkspace(target.id);
+        remainingDocumentIds = new Set(documents.documents.map((document) => document.id));
       } catch (error) {
         setToast(error instanceof Error ? error.message : "Không thể tháo liên kết tài liệu");
         return;
@@ -4640,10 +4690,10 @@ export default function Home() {
     if (target.kind === "temporary") {
       target.documents.forEach((document) => temporaryPdfBlobsRef.current.delete(document.id));
     } else {
-      // Update the workspace immediately. Deleting an IndexedDB blob can wait
-      // behind an in-flight PDF read/render transaction and must not leave the
-      // UI looking as though the destructive action was ignored.
-      deletePersistedPdfs = Promise.allSettled(target.documents.map((document) => deleteLocalPdf(document.id)));
+      // A PDF blob is removed only when no remaining DocumentContext/Group owns
+      // the same DocumentRecord identity.
+      const unreferenced = target.documents.filter((document) => !remainingDocumentIds.has(document.id));
+      deletePersistedPdfs = Promise.allSettled(unreferenced.map((document) => deleteLocalPdf(document.id)));
     }
     const deletedDocumentIds = new Set(target.documents.map((document) => document.id));
     const targetIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
@@ -4687,31 +4737,20 @@ export default function Home() {
       return;
     }
     if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
+    let documents = noteStore.getSnapshot().documents;
     if (activeWorkspace.kind !== "temporary") {
-      const graph = noteStore.getSnapshot().documents;
-      const links = graph.links.filter((link) => link.documentId !== activeDocument.id);
-      const linkIds = new Set(links.map((link) => link.id));
-      await noteStore.replaceDocumentGraph({
-        documents: graph.documents.filter((document) => document.id !== activeDocument.id),
-        contexts: graph.contexts.map((context) => context.id === activeWorkspace.id ? {
-          ...context,
-          documentIds: context.documentIds.filter((id) => id !== activeDocument.id),
-          activeDocumentId: context.activeDocumentId === activeDocument.id
-            ? context.documentIds.find((id) => id !== activeDocument.id) || null
-            : context.activeDocumentId,
-        } : context),
-        groups: graph.groups.map((group) => group.id === activeWorkspace.id
-          ? { ...group, documentIds: group.documentIds.filter((id) => id !== activeDocument.id), updatedAt: Date.now() }
-          : group),
-        links,
-        linkRelations: graph.linkRelations.flatMap((relation) => {
-          const remainingLinkIds = relation.linkIds.filter((id) => linkIds.has(id));
-          return remainingLinkIds.length ? [{ ...relation, linkIds: remainingLinkIds, updatedAt: Date.now() }] : [];
-        }),
-      });
+      try {
+        documents = await noteStore.deleteDocumentFromWorkspace(activeWorkspace.id, activeDocument.id);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Không thể xóa tài liệu khỏi cụm");
+        return;
+      }
     }
-    if (activeWorkspace.kind === "temporary") temporaryPdfBlobsRef.current.delete(activeDocument.id);
-    else await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
+    if (activeWorkspace.kind === "temporary") {
+      temporaryPdfBlobsRef.current.delete(activeDocument.id);
+    } else if (!documents.documents.some((document) => document.id === activeDocument.id)) {
+      await Promise.allSettled([deleteLocalPdf(activeDocument.id)]);
+    }
     const index = activeWorkspace.documents.findIndex((document) => document.id === activeDocument.id);
     const nextDocuments = activeWorkspace.documents.filter((document) => document.id !== activeDocument.id);
     const nextActiveDocument = nextDocuments[Math.min(index, nextDocuments.length - 1)];
@@ -4720,25 +4759,13 @@ export default function Home() {
       documents: nextDocuments,
       activeDocumentId: nextActiveDocument.id,
       sourcePage: nextActiveDocument.reader.page,
-      notebooks: workspace.notebooks.map((notebook) => ({
-        ...notebook,
-        pages: notebook.pages.map((page) => {
-          return {
-            ...page,
-            citationPage: null,
-            excerpts: page.excerpts.map((excerpt) => excerpt.documentId === activeDocument.id
-              ? { ...excerpt, sourceKind: "manual", documentId: undefined, documentName: undefined, page: undefined, rect: undefined }
-              : excerpt),
-          };
-        }),
-      })),
     }));
     setPdfHistory((history) => {
       const next = { ...history };
       delete next[activeDocument.id];
       return next;
     });
-    setToast("Đã xóa tài liệu khỏi cụm; note vẫn được giữ lại");
+    setToast("Đã xóa tài liệu khỏi cụm; provenance trong note vẫn được giữ");
   };
 
   const commitStrokes = (next: Stroke[], previous: Stroke[]) => {
@@ -5386,6 +5413,7 @@ export default function Home() {
               zoom={noteZoom}
               loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
               onActivate={() => { void activateContinuousSheet(note.id); }}
+              resolveSource={resolveExcerptSource}
             />)}
             {noteSheetViewMode === "continuous" && <div className="note-sheet-active-label" data-note-sheet-frame={activeNote.id} style={{ "--paper-max-width": `${basePaperMaxWidth}px`, "--note-view-zoom": noteZoom } as React.CSSProperties}><span>Tờ {activeSheetIndex + 1}</span><b>Đang chỉnh sửa</b></div>}
             <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={{ ...paperStyle, pointerEvents: activeNoteHydrating ? "none" : undefined, opacity: activeNoteHydrating ? .72 : 1 }} onPointerDown={(event) => {
@@ -5421,7 +5449,7 @@ export default function Home() {
                   {activeNote.excerpts.map((excerpt, index) => {
                     const selected = excerpt.id === selectedExcerptId;
                     const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && excerpt.kind === "text")} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
+                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveExcerptSource(excerpt)} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && excerpt.kind === "text")} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
                   })}
                 </div>
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
@@ -5440,6 +5468,7 @@ export default function Home() {
               zoom={noteZoom}
               loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
               onActivate={() => { void activateContinuousSheet(note.id); }}
+              resolveSource={resolveExcerptSource}
             />)}
           </div>
         </section>

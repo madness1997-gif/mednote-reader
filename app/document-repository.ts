@@ -22,6 +22,8 @@ export interface DocumentRepository {
   saveDocumentWorkspace(input: SaveDocumentWorkspaceInput): Promise<DocumentGraph>;
   /** Removes a reader context and its unreferenced documents without deleting notes. */
   deleteDocumentWorkspace(contextId: string): Promise<DocumentGraph>;
+  /** Removes one Document from a reader context while preserving note provenance. */
+  deleteDocumentFromWorkspace(contextId: string, documentId: string): Promise<DocumentGraph>;
   /** Whole-graph boundary reserved for verified restore and metadata reconciliation. */
   replaceDocumentGraph(graph: DocumentGraph): Promise<void>;
 }

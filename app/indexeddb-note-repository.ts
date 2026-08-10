@@ -357,6 +357,53 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
     }));
   }
 
+  deleteDocumentFromWorkspace(contextId: string, documentId: string) {
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const keys = [...v6StructureRecordKeys(meta), ...v6DocumentRecordKeys(meta)].filter((key) => key !== V6_KEYS.meta);
+      const records = await this.requiredRecordMap(store, keys);
+      const notes = this.noteStructureFromRecords(meta, records);
+      const current = this.documentGraphFromRecords(meta, notes, records);
+      const target = current.contexts.find((context) => context.id === contextId);
+      if (!target || !target.documentIds.includes(documentId)) return current;
+      if (target.documentIds.length <= 1) throw new RepositoryMutationError("Context phải còn ít nhất một Document; hãy xóa cả workspace thay vì xóa Document cuối");
+
+      const nextDocumentIds = target.documentIds.filter((id) => id !== documentId);
+      const contexts = current.contexts.map((context) => context.id === contextId ? {
+        ...context,
+        documentIds: nextDocumentIds,
+        activeDocumentId: context.activeDocumentId === documentId ? nextDocumentIds[0] || null : context.activeDocumentId,
+      } : context);
+      const groups = current.groups.map((group) => group.id === contextId
+        ? { ...group, documentIds: group.documentIds.filter((id) => id !== documentId), updatedAt: Date.now() }
+        : group);
+      const referencedDocumentIds = new Set([
+        ...contexts.flatMap((context) => context.documentIds),
+        ...groups.flatMap((group) => group.documentIds),
+      ]);
+      const removeDocumentRecord = !referencedDocumentIds.has(documentId);
+      const documents = removeDocumentRecord ? current.documents.filter((document) => document.id !== documentId) : current.documents;
+      const links = removeDocumentRecord ? current.links.filter((link) => link.documentId !== documentId) : current.links;
+      const linkById = new Map(links.map((link) => [link.id, link]));
+      const groupDocuments = new Set(groups.find((group) => group.id === contextId)?.documentIds || nextDocumentIds);
+      const linkRelations = current.linkRelations.flatMap((relation) => {
+        if (removeDocumentRecord && relation.sourceType === "document" && relation.sourceId === documentId) return [];
+        let linkIds = relation.linkIds.filter((id) => linkById.has(id));
+        if (relation.sourceType === "group" && relation.sourceId === contextId) {
+          linkIds = linkIds.filter((id) => {
+            const link = linkById.get(id);
+            return Boolean(link && groupDocuments.has(link.documentId));
+          });
+        }
+        return linkIds.length ? [{ ...relation, linkIds, updatedAt: Date.now() }] : [];
+      });
+      const graph: DocumentGraph = { documents, contexts, groups, links, linkRelations };
+      assertDocumentGraph(graph, notes);
+      this.writeDocumentGraph(store, meta, graph);
+      return clone(graph);
+    }));
+  }
+
   replaceDocumentGraph(graph: DocumentGraph) {
     const snapshot = clone(graph);
     return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
