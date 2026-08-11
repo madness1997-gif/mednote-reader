@@ -217,8 +217,9 @@ test("delete workspace keeps the note and historical PDF provenance", async () =
       workspaceMode: imported.workspaceMode,
       noteZoom: 1.15,
     });
-    assert.equal(result.workspaces[0].kind, "empty");
-    assert.equal(result.workspaces[0].noteNotebookId, "nb");
+    assert.equal(result.workspaces.some((workspace) => workspace.id === "note-runtime-v6"), true);
+    const structure = await context.repository.loadNoteStructure();
+    assert.equal(structure?.notebooks.some((notebook) => notebook.id === "nb"), true);
     assert.equal((await context.repository.loadDocumentGraph())?.documents.length, 0);
     const content = await context.repository.loadSheetContent("sheet");
     const excerpt = content?.excerpts?.[0] as { sourceKind?: string; documentId?: string; page?: number };
