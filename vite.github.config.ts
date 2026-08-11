@@ -1,14 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { firstAidBlocksPlugin } from "./vite.first-aid-blocks";
-import { noteStickersPlugin } from "./vite.note-stickers";
 import { thumbnailVirtualizationPlugin } from "./vite.thumbnail-virtualization";
 import { workspaceSuspensionPlugin } from "./vite.workspace-suspension";
 import { bundlePdfAssets } from "./vite.pdf-assets";
 
 export default defineConfig({
   base: "/mednote-reader/",
-  plugins: [firstAidBlocksPlugin(), noteStickersPlugin(), thumbnailVirtualizationPlugin(), workspaceSuspensionPlugin(), react(), bundlePdfAssets("pages-dist")],
+  plugins: [thumbnailVirtualizationPlugin(), workspaceSuspensionPlugin(), react(), bundlePdfAssets("pages-dist")],
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],

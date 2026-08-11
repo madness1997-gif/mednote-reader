@@ -107,6 +107,7 @@ import {
   type EnglishVietnameseLookup,
 } from "./dictionary";
 import type { PDFiumDocument } from "./pdfium-renderer";
+import { FirstAidBlockEditor } from "./first-aid-block-editor";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
@@ -114,6 +115,12 @@ import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
 import PageTitleEditor from "./page-title-editor";
+import { RichTextEditor } from "./rich-text-editor";
+import { noteRichTextController } from "./note-rich-text-controller";
+import { NoteInkSession } from "./note-ink-session";
+import { NoteInkCanvas } from "./note-ink-canvas";
+import { NoteObjectLayer } from "./note-object-layer";
+import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
 import {
@@ -148,7 +155,8 @@ type TextToolbarState = TextSettings & {
   numberingStyle: NumberingStyle;
 };
 type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
-type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | null;
+type StickerPresetId = "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";
+type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | "stickers" | null;
 type EquationTemplate = "plain" | "fraction" | "root" | "power" | "subscript" | "sum" | "integral" | "matrix";
 type FirstAidCropPlacement = { x: number; y: number; width: number };
 type FirstAidCropTarget = { noteId: string; blockId: string; placement: FirstAidCropPlacement };
@@ -167,7 +175,6 @@ type DictionaryLookupState = {
   error: string | null;
 };
 
-type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
 type PdfHistory = Record<string, PdfAnnotationHistory>;
 
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
@@ -428,6 +435,15 @@ function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextTool
   };
 }
 
+const STICKER_PRESETS: { id: StickerPresetId; label: string; description: string; width: number; height: number; rotation: number }[] = [
+  { id: "classic-yellow", label: "Sticky vàng", description: "Giấy note cổ điển, góc gấp", width: .30, height: .17, rotation: -1 },
+  { id: "tape-pink", label: "Tape hồng", description: "Note pastel có băng dính phía trên", width: .31, height: .17, rotation: 1 },
+  { id: "pin-mint", label: "Ghim xanh", description: "Thẻ xanh bạc hà có ghim tròn", width: .29, height: .16, rotation: -.5 },
+  { id: "tab-blue", label: "Tab xanh", description: "Thẻ xanh có nhãn tab nổi", width: .31, height: .16, rotation: 0 },
+  { id: "clinical-card", label: "Clinical card", description: "Thẻ trắng viền teal cho ý chính", width: .33, height: .17, rotation: 0 },
+  { id: "high-yield", label: "High-yield", description: "Sticker vàng nhấn mạnh điểm cần nhớ", width: .32, height: .16, rotation: 0 },
+];
+
 const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
   { id: "pointer", label: "Chọn", icon: MousePointer2 },
   { id: "pen", label: "Bút", icon: PenTool },
@@ -565,444 +581,6 @@ function blobToDataUrl(blob: Blob) {
 function rangeBelongsToEditor(range: Range, editor: HTMLElement) {
   const container = range.commonAncestorContainer;
   return container === editor || editor.contains(container.nodeType === Node.ELEMENT_NODE ? container : container.parentNode);
-}
-
-type RichTextEditorProps = {
-  editorId: string;
-  className: string;
-  html: string;
-  editable: boolean;
-  placeholder?: string;
-  ariaLabel: string;
-  autoFocus?: boolean;
-  singleLine?: boolean;
-  onChange: (html: string, text: string) => void;
-  onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
-  onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
-};
-
-function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, singleLine = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || editor.innerHTML === html || document.activeElement === editor) return;
-    editor.innerHTML = html;
-  }, [html]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editable || !autoFocus || !editor) return;
-    const frame = window.requestAnimationFrame(() => {
-      editor.focus({ preventScroll: true });
-      const selection = window.getSelection();
-      if (!selection) return;
-      const currentRange = selection.rangeCount ? selection.getRangeAt(0) : null;
-      if (currentRange && rangeBelongsToEditor(currentRange, editor)) {
-        onActivate(editorId, editor, currentRange.cloneRange());
-        return;
-      }
-      const range = document.createRange();
-      range.selectNodeContents(editor);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      onActivate(editorId, editor, range);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [autoFocus, editable, editorId, onActivate]);
-
-  const captureSelection = () => {
-    const editor = editorRef.current;
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    onActivate(editorId, editor!, range && rangeBelongsToEditor(range, editor!) ? range.cloneRange() : null);
-  };
-
-  const emitChange = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    onNormalizeInput(editorId, editor);
-    onChange(sanitizeRichTextHtml(editor.innerHTML), editor.innerText.replace(/\u00a0/g, " "));
-    captureSelection();
-  };
-
-  return (
-    <div
-      ref={editorRef}
-      className={`${className} rich-text-editor`}
-      data-rich-editor-id={editorId}
-      data-placeholder={placeholder}
-      contentEditable={editable}
-      suppressContentEditableWarning
-      role="textbox"
-      aria-multiline={!singleLine}
-      aria-label={ariaLabel}
-      spellCheck={false}
-      onFocus={captureSelection}
-      onMouseUp={captureSelection}
-      onKeyUp={captureSelection}
-      onKeyDown={(event) => {
-        if (singleLine && event.key === "Enter") event.preventDefault();
-      }}
-      onInput={emitChange}
-      onPaste={(event) => {
-        if (!editable) return;
-        event.preventDefault();
-        const text = event.clipboardData.getData("text/plain");
-        document.execCommand("insertText", false, singleLine ? text.replace(/\s*\r?\n\s*/g, " ") : text);
-      }}
-      onDrop={(event) => {
-        if (!editable) return;
-        event.preventDefault();
-        const text = event.dataTransfer.getData("text/plain");
-        document.execCommand("insertText", false, singleLine ? text.replace(/\s*\r?\n\s*/g, " ") : text);
-      }}
-    />
-  );
-}
-
-function StoredAssetImage({ assetId, alt }: { assetId: string; alt: string }) {
-  const [source, setSource] = useState<string | null>(null);
-  useEffect(() => {
-    let disposed = false;
-    let objectUrl: string | null = null;
-    void localBinaryStorage.readAsset(assetId).then((blob) => {
-      if (!blob || disposed) return;
-      objectUrl = URL.createObjectURL(blob);
-      setSource(objectUrl);
-    });
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [assetId]);
-  return source ? <img src={source} alt={alt} draggable={false} /> : <span className="excerpt-image-loading">Đang mở ảnh…</span>;
-}
-
-type DraggableExcerptProps = {
-  excerpt: NoteExcerpt;
-  source: ResolvedDocumentSource<PdfRect> | null;
-  index: number;
-  selected: boolean;
-  selectable: boolean;
-  movable: boolean;
-  editable: boolean;
-  onSelect: (excerptId: string) => void;
-  onMove: (excerptId: string, layout: ExcerptLayout) => void;
-  onEdit: (excerptId: string, changes: Partial<NoteExcerpt>) => void;
-  onTextActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
-  onNormalizeTextInput: (editorId: string, editor: HTMLElement) => void;
-  onOpenSource: (excerpt: NoteExcerpt) => void;
-  onDelete: (excerptId: string) => void;
-};
-
-function DraggableExcerpt({ excerpt, source, index, selected, selectable, movable, editable, onSelect, onMove, onEdit, onTextActivate, onNormalizeTextInput, onOpenSource, onDelete }: DraggableExcerptProps) {
-  const articleRef = useRef<HTMLElement>(null);
-  const savedLayout = normalizeExcerptLayout(excerpt.layout, index, excerpt.kind);
-  const isCallout = excerpt.annotationKind === "callout";
-  const appearance = excerpt.kind === "text" ? normalizeExcerptAppearance(excerpt.appearance ?? (isCallout ? DEFAULT_CALLOUT_APPEARANCE : undefined), isCallout) : null;
-  const savedCallout = isCallout ? normalizeCalloutSettings(excerpt.callout, savedLayout) : null;
-  const [layout, setLayout] = useState(savedLayout);
-  const [calloutAnchor, setCalloutAnchor] = useState(savedCallout);
-  const interactionRef = useRef<{
-    mode: "move" | "resize" | "rotate" | "anchor";
-    pointerId: number;
-    startX: number;
-    startY: number;
-    centerX: number;
-    centerY: number;
-    startAngle: number;
-    origin: ExcerptLayout;
-    hostWidth: number;
-    hostHeight: number;
-    moved: boolean;
-    current: ExcerptLayout;
-    originAnchor: CalloutSettings | null;
-    currentAnchor: CalloutSettings | null;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!interactionRef.current) setLayout(savedLayout);
-  }, [savedLayout.aspectRatio, savedLayout.autoFit, savedLayout.contentScale, savedLayout.height, savedLayout.opacity, savedLayout.rotation, savedLayout.width, savedLayout.x, savedLayout.y]);
-
-  useEffect(() => {
-    if (!interactionRef.current) setCalloutAnchor(savedCallout);
-  }, [savedCallout?.anchorX, savedCallout?.anchorY]);
-
-  const startInteraction = (event: React.PointerEvent<HTMLElement>, mode: "move" | "resize" | "rotate" | "anchor") => {
-    if (!movable) return;
-    const host = articleRef.current?.parentElement;
-    const article = articleRef.current;
-    if (!host || !article) return;
-    const rect = host.getBoundingClientRect();
-    const articleRect = article.getBoundingClientRect();
-    const centerX = articleRect.left + articleRect.width / 2;
-    const centerY = articleRect.top + articleRect.height / 2;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    interactionRef.current = {
-      mode,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      centerX,
-      centerY,
-      startAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI,
-      origin: layout,
-      hostWidth: Math.max(1, rect.width),
-      hostHeight: Math.max(1, rect.height),
-      moved: false,
-      current: layout,
-      originAnchor: calloutAnchor,
-      currentAnchor: calloutAnchor,
-    };
-  };
-
-  const updateInteraction = (event: React.PointerEvent<HTMLElement>) => {
-    const state = interactionRef.current;
-    if (!state || state.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    const dx = (event.clientX - state.startX) / state.hostWidth;
-    const dy = (event.clientY - state.startY) / state.hostHeight;
-    if (state.mode === "anchor" && state.originAnchor) {
-      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-      state.currentAnchor = {
-        anchorX: Math.min(1, Math.max(0, state.originAnchor.anchorX + dx)),
-        anchorY: Math.min(1, Math.max(0, state.originAnchor.anchorY + dy)),
-      };
-      setCalloutAnchor(state.currentAnchor);
-    } else if (state.mode === "rotate") {
-      const angle = Math.atan2(event.clientY - state.centerY, event.clientX - state.centerX) * 180 / Math.PI;
-      const delta = angle - state.startAngle;
-      if (Math.abs(delta) > .5) state.moved = true;
-      state.current = {
-        ...state.origin,
-        rotation: Math.round((((state.origin.rotation + delta + 180) % 360) + 360) % 360 - 180),
-      };
-    } else if (state.mode === "move") {
-      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-      state.current = {
-          ...state.origin,
-          x: Math.min(1 - state.origin.width, Math.max(0, state.origin.x + dx)),
-          y: Math.min(1 - state.origin.height, Math.max(0, state.origin.y + dy)),
-      };
-    } else if (state.origin.aspectRatio) {
-      const widthFromX = state.origin.width + dx;
-      const widthFromY = state.origin.width + dy * state.hostHeight * state.origin.aspectRatio / state.hostWidth;
-      const requestedWidth = Math.abs(widthFromX - state.origin.width) >= Math.abs(widthFromY - state.origin.width) ? widthFromX : widthFromY;
-      const maxWidthForHeight = (1 - state.origin.y) * state.origin.aspectRatio * state.hostHeight / state.hostWidth;
-      const width = Math.min(1 - state.origin.x, maxWidthForHeight, Math.max(.06, requestedWidth));
-      const height = width * state.hostWidth / (state.origin.aspectRatio * state.hostHeight);
-      if (Math.abs(width - state.origin.width) > .002) state.moved = true;
-      state.current = { ...state.origin, width, height };
-    } else {
-      if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-      state.current = {
-          ...state.origin,
-          width: Math.min(1 - state.origin.x, Math.max(.025, state.origin.width + dx)),
-          height: Math.min(1 - state.origin.y, Math.max(.018, state.origin.height + dy)),
-          autoFit: false,
-      };
-    }
-    setLayout(state.current);
-  };
-
-  const finishInteraction = (event: React.PointerEvent<HTMLElement>) => {
-    const state = interactionRef.current;
-    if (!state || state.pointerId !== event.pointerId) return;
-    interactionRef.current = null;
-    if (!state.moved) return;
-    if (state.mode === "anchor" && state.currentAnchor) onEdit(excerpt.id, { callout: state.currentAnchor });
-    else onMove(excerpt.id, state.current);
-  };
-
-  const changeContentScale = (step: number) => {
-    const next = { ...layout, contentScale: Math.min(2.4, Math.max(.65, Number((layout.contentScale + step).toFixed(2)))) };
-    setLayout(next);
-    onMove(excerpt.id, next);
-  };
-
-  const changeOpacity = (opacity: number) => {
-    const next = { ...layout, opacity: Math.min(1, Math.max(.1, opacity)) };
-    setLayout(next);
-    onMove(excerpt.id, next);
-  };
-
-  const rotateBy = (degrees: number) => {
-    const rotation = (((layout.rotation + degrees + 180) % 360) + 360) % 360 - 180;
-    const next = { ...layout, rotation };
-    setLayout(next);
-    onMove(excerpt.id, next);
-  };
-
-  const fitTextBoxToContent = (keepAutoFit = true) => {
-    const article = articleRef.current;
-    const host = article?.parentElement;
-    const editor = article?.querySelector<HTMLElement>(".excerpt-rich-editor");
-    if (!article || !host || !editor) return;
-    const hostRect = host.getBoundingClientRect();
-    if (!hostRect.width || !hostRect.height) return;
-    const probe = editor.cloneNode(true) as HTMLElement;
-    probe.removeAttribute("data-rich-editor-id");
-    probe.removeAttribute("contenteditable");
-    probe.classList.add("excerpt-fit-probe");
-    article.appendChild(probe);
-    probe.style.maxWidth = `${hostRect.width * .86}px`;
-    const measured = probe.getBoundingClientRect();
-    probe.remove();
-    const width = Math.min(1 - layout.x, Math.max(.025, (measured.width + 18) / hostRect.width));
-    const height = Math.min(1 - layout.y, Math.max(.018, (measured.height + 16) / hostRect.height));
-    const next = { ...layout, width, height, autoFit: keepAutoFit };
-    setLayout(next);
-    onEdit(excerpt.id, { layout: next });
-  };
-
-  useEffect(() => {
-    if (excerpt.kind !== "text" || !savedLayout.autoFit || !(excerpt.text ?? "").trim()) return;
-    const frame = window.requestAnimationFrame(() => fitTextBoxToContent(true));
-    return () => window.cancelAnimationFrame(frame);
-    // Refit only when the saved text changes; layout updates are the result.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [excerpt.richText, excerpt.text, savedLayout.autoFit]);
-
-  const calloutTargetX = calloutAnchor ? (calloutAnchor.anchorX - layout.x) / layout.width * 100 : 50;
-  const calloutTargetY = calloutAnchor ? (calloutAnchor.anchorY - layout.y) / layout.height * 100 : 50;
-  const calloutDeltaX = calloutTargetX - 50;
-  const calloutDeltaY = calloutTargetY - 50;
-  const calloutEdgeRatio = Math.max(Math.abs(calloutDeltaX) / 50, Math.abs(calloutDeltaY) / 50);
-  const calloutStartX = calloutEdgeRatio > 1 ? 50 + calloutDeltaX / calloutEdgeRatio : 50;
-  const calloutStartY = calloutEdgeRatio > 1 ? 50 + calloutDeltaY / calloutEdgeRatio : 50;
-  const calloutLineColor = appearance?.borderColor && appearance.borderColor !== "transparent" ? appearance.borderColor : "#1b7184";
-  const sourceTitle = source
-    ? source.available
-      ? `Nguồn: ${source.displayName}${source.page ? ` · trang ${source.page}` : ""}. Nhấp đúp để quay lại PDF`
-      : `Nguồn PDF không còn trong thư viện: ${source.displayName}`
-    : undefined;
-  const imageSourceName = source?.displayName ?? (excerpt.sourceKind === "manual" ? excerpt.documentName ?? "Hình ảnh" : "PDF");
-
-  return (
-    <article
-      ref={articleRef}
-      className={`note-excerpt excerpt-${excerpt.kind} ${isCallout ? "excerpt-callout" : ""} ${excerpt.sourceKind === "manual" ? "excerpt-manual" : "excerpt-pdf"} ${excerpt.kind === "image" ? "excerpt-frameless" : ""} ${movable ? "movable" : ""} ${editable ? "editable" : ""} ${selected ? "selected" : ""}`}
-      style={{
-        left: `${layout.x * 100}%`,
-        top: `${layout.y * 100}%`,
-        width: `${layout.width * 100}%`,
-        height: `${layout.height * 100}%`,
-        zIndex: index + 1,
-        transform: `rotate(${layout.rotation}deg)`,
-        "--excerpt-content-scale": layout.contentScale,
-        "--excerpt-border-style": appearance?.borderStyle,
-        "--excerpt-border-width": appearance ? `${appearance.borderWidth}px` : undefined,
-        "--excerpt-border-color": appearance?.borderColor,
-        "--excerpt-background": appearance?.backgroundColor,
-        "--callout-line-color": calloutLineColor,
-        "--callout-line-width": `${Math.max(1.5, appearance?.borderWidth ?? 1.5)}px`,
-      } as React.CSSProperties}
-      onPointerDown={(event) => {
-        if (!selectable) return;
-        event.stopPropagation();
-        onSelect(excerpt.id);
-        if (excerpt.kind === "image" && movable && !(event.target as HTMLElement).closest("button,input")) startInteraction(event, "move");
-      }}
-      onPointerMove={updateInteraction}
-      onPointerUp={finishInteraction}
-      onPointerCancel={finishInteraction}
-      onDoubleClick={(event) => {
-        if (!source?.available || !source.documentId || !source.page) return;
-        event.preventDefault();
-        event.stopPropagation();
-        onOpenSource(excerpt);
-      }}
-      title={sourceTitle}
-      aria-selected={selected}
-    >
-      {isCallout && calloutAnchor && <svg className="callout-leader" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        <defs><marker id={`callout-arrow-${excerpt.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={calloutLineColor} /></marker></defs>
-        <line x1={calloutStartX} y1={calloutStartY} x2={calloutTargetX} y2={calloutTargetY} markerEnd={`url(#callout-arrow-${excerpt.id})`} />
-      </svg>}
-      {selected && (movable || editable) && (
-        <div className="excerpt-object-controls">
-          <button
-            className="excerpt-drag-handle"
-            disabled={!movable}
-            onPointerDown={(event) => startInteraction(event, "move")}
-            onPointerMove={updateInteraction}
-            onPointerUp={finishInteraction}
-            onPointerCancel={finishInteraction}
-            aria-label="Kéo để di chuyển khung"
-            title={movable ? "Kéo để di chuyển" : "Dùng công cụ Chọn để di chuyển"}
-          ><Move size={13} /></button>
-          {excerpt.kind === "text" && <span className="excerpt-scale-controls" aria-label="Kích thước nội dung">
-            <button onClick={() => changeContentScale(-.12)} disabled={!movable || layout.contentScale <= .65} title="Thu nhỏ nội dung" aria-label="Thu nhỏ nội dung"><Minus size={12} /></button>
-            <b>{Math.round(layout.contentScale * 100)}%</b>
-            <button onClick={() => changeContentScale(.12)} disabled={!movable || layout.contentScale >= 2.4} title="Phóng to nội dung" aria-label="Phóng to nội dung"><Plus size={12} /></button>
-          </span>}
-          {excerpt.kind === "text" && <button className={`excerpt-fit-control ${layout.autoFit ? "active" : ""}`} onClick={() => fitTextBoxToContent(true)} title="Ôm sát nội dung và tự co giãn khi nhập" aria-label="Cho hộp chữ ôm sát nội dung">Ôm chữ</button>}
-          {excerpt.kind === "image" && <span className="excerpt-opacity-controls" aria-label="Độ trong suốt của ảnh">
-            <Blend size={12} />
-            <input type="range" min=".1" max="1" step=".05" value={layout.opacity} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => changeOpacity(Number(event.target.value))} aria-label="Độ trong suốt của ảnh" />
-            <b>{Math.round(layout.opacity * 100)}%</b>
-          </span>}
-          {excerpt.kind === "image" && <span className="excerpt-rotation-controls" aria-label="Xoay ảnh">
-            <button onClick={() => rotateBy(-15)} title="Xoay trái 15°" aria-label="Xoay trái 15 độ"><RotateCcw size={12} /></button>
-            <b>{Math.round(layout.rotation)}°</b>
-            <button onClick={() => rotateBy(15)} title="Xoay phải 15°" aria-label="Xoay phải 15 độ"><RotateCw size={12} /></button>
-          </span>}
-          {excerpt.kind === "text" && <span className="excerpt-edit-indicator"><Pencil size={11} />{editable ? "Đang sửa" : isCallout ? "Callout" : "Chữ"}</span>}
-          <button className="excerpt-delete-control" onClick={() => onDelete(excerpt.id)} aria-label="Xóa khung" title="Xóa khung"><Trash2 size={12} /></button>
-        </div>
-      )}
-      <div className="excerpt-content">
-        {excerpt.kind === "text" ? (
-          <RichTextEditor
-            editorId={`excerpt:${excerpt.id}`}
-            className="excerpt-rich-editor"
-            html={excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}
-            editable={editable}
-            autoFocus={editable}
-            placeholder={isCallout ? "Nhập chú thích…" : excerpt.sourceKind === "manual" ? "Nhập nội dung…" : undefined}
-            ariaLabel={isCallout ? "Nội dung callout" : excerpt.sourceKind === "manual" ? "Nội dung hộp chữ" : "Nội dung đoạn chữ đưa từ PDF"}
-            onChange={(richText, text) => onEdit(excerpt.id, { richText, text })}
-            onActivate={onTextActivate}
-            onNormalizeInput={onNormalizeTextInput}
-          />
-        ) : excerpt.assetId ? (
-          <div className="excerpt-image-viewport" style={{ opacity: layout.opacity }}><div style={{ transform: `scale(${layout.contentScale})` }}><StoredAssetImage assetId={excerpt.assetId} alt={`Hình từ ${imageSourceName}, trang ${source?.page ?? excerpt.page ?? 1}${source && !source.available ? ", nguồn không còn trong thư viện" : ""}`} /></div></div>
-        ) : <span>Không tìm thấy ảnh</span>}
-      </div>
-      {selected && movable && isCallout && calloutAnchor && <button
-        className="callout-anchor-handle"
-        style={{ left: `${calloutTargetX}%`, top: `${calloutTargetY}%` }}
-        onPointerDown={(event) => startInteraction(event, "anchor")}
-        onPointerMove={updateInteraction}
-        onPointerUp={finishInteraction}
-        onPointerCancel={finishInteraction}
-        aria-label="Kéo đầu mũi tên callout"
-        title="Kéo để đổi điểm mà callout chỉ tới"
-      ><Move size={11} /></button>}
-      {selected && movable && excerpt.kind === "image" && <button
-        className="excerpt-rotate-handle"
-        onPointerDown={(event) => startInteraction(event, "rotate")}
-        onPointerMove={updateInteraction}
-        onPointerUp={finishInteraction}
-        onPointerCancel={finishInteraction}
-        aria-label="Kéo để xoay ảnh"
-        title="Kéo để xoay ảnh"
-      ><RotateCw size={13} /></button>}
-      {selected && movable && <button
-        className="excerpt-resize-handle"
-        onPointerDown={(event) => startInteraction(event, "resize")}
-        onPointerMove={updateInteraction}
-        onPointerUp={finishInteraction}
-        onPointerCancel={finishInteraction}
-        aria-label="Kéo để đổi kích thước khung"
-        title="Kéo để đổi kích thước khung"
-      ><Maximize2 size={11} /></button>}
-    </article>
-  );
 }
 
 function DemoDocument({ page }: { page: number }) {
@@ -1144,496 +722,6 @@ function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocume
   return <button ref={buttonRef} className={`pdf-thumb ${active ? "active" : ""}`} onClick={onClick}><span className="mini-paper pdf-mini">{visible ? <canvas ref={canvasRef} /> : <i className="thumb-placeholder" />}</span><span>{page}</span></button>;
 }
 
-function drawStroke(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stroke: Stroke) {
-  if (!stroke.points.length) return;
-  const canvasWidth = canvas.clientWidth;
-  const canvasHeight = canvas.clientHeight;
-  const first = stroke.points[0];
-  const last = stroke.points.at(-1)!;
-  const startX = first.x * canvasWidth;
-  const startY = first.y * canvasHeight;
-  const endX = last.x * canvasWidth;
-  const endY = last.y * canvasHeight;
-  context.save();
-  const penStyle = stroke.penStyle ?? "ballpoint";
-  context.globalAlpha = stroke.tool === "highlight" ? 0.3 : penStyle === "pencil" ? 0.58 : 1;
-  context.strokeStyle = stroke.color;
-  context.fillStyle = stroke.color;
-  context.lineWidth = stroke.width;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-
-  if (stroke.tool === "shape") {
-    context.beginPath();
-    if (stroke.shape === "rectangle") {
-      context.rect(startX, startY, endX - startX, endY - startY);
-    } else if (stroke.shape === "ellipse" || stroke.shape === "circle") {
-      context.ellipse((startX + endX) / 2, (startY + endY) / 2, Math.abs(endX - startX) / 2, Math.abs(endY - startY) / 2, 0, 0, Math.PI * 2);
-    } else {
-      context.moveTo(startX, startY);
-      context.lineTo(endX, endY);
-    }
-    context.stroke();
-    if (stroke.shape === "arrow") {
-      const angle = Math.atan2(endY - startY, endX - startX);
-      const head = Math.max(10, stroke.width * 4.5);
-      context.beginPath();
-      context.moveTo(endX, endY);
-      context.lineTo(endX - head * Math.cos(angle - Math.PI / 7), endY - head * Math.sin(angle - Math.PI / 7));
-      context.moveTo(endX, endY);
-      context.lineTo(endX - head * Math.cos(angle + Math.PI / 7), endY - head * Math.sin(angle + Math.PI / 7));
-      context.stroke();
-    }
-    context.restore();
-    return;
-  }
-
-  if (stroke.points.length === 1) {
-    context.beginPath();
-    context.arc(startX, startY, Math.max(1, stroke.width / 2), 0, Math.PI * 2);
-    context.fill();
-    context.restore();
-    return;
-  }
-
-  const widthForPoint = (point: Point) => {
-    if (stroke.tool === "highlight") return stroke.width;
-    if (penStyle === "fountain") return stroke.width * (0.48 + point.pressure * 1.02);
-    if (penStyle === "brush") return stroke.width * (0.35 + point.pressure * 1.5);
-    if (penStyle === "pencil") return stroke.width * (0.72 + point.pressure * 0.28);
-    return stroke.width * (0.9 + point.pressure * 0.18);
-  };
-  for (let index = 1; index < stroke.points.length; index += 1) {
-    const point = stroke.points[index];
-    const previous = stroke.points[index - 1];
-    context.beginPath();
-    context.moveTo(previous.x * canvasWidth, previous.y * canvasHeight);
-    context.lineWidth = widthForPoint(point);
-    context.lineTo(point.x * canvasWidth, point.y * canvasHeight);
-    context.stroke();
-  }
-  context.restore();
-}
-
-function pointsForStroke(stroke: Stroke): Point[] {
-  if (stroke.tool !== "shape" || stroke.points.length < 2) return stroke.points;
-  const start = stroke.points[0];
-  const end = stroke.points.at(-1)!;
-  if (stroke.shape === "rectangle") {
-    return [start, { x: end.x, y: start.y, pressure: .5 }, end, { x: start.x, y: end.y, pressure: .5 }, start];
-  }
-  if (stroke.shape === "ellipse" || stroke.shape === "circle") {
-    return Array.from({ length: 41 }, (_, index) => {
-      const angle = (index / 40) * Math.PI * 2;
-      return {
-        x: (start.x + end.x) / 2 + Math.cos(angle) * Math.abs(end.x - start.x) / 2,
-        y: (start.y + end.y) / 2 + Math.sin(angle) * Math.abs(end.y - start.y) / 2,
-        pressure: .5,
-      };
-    });
-  }
-  return [start, end];
-}
-
-function boundsForStrokes(strokes: Stroke[]) {
-  const points = strokes.flatMap(pointsForStroke);
-  if (!points.length) return null;
-  return {
-    left: Math.min(...points.map((point) => point.x)),
-    right: Math.max(...points.map((point) => point.x)),
-    top: Math.min(...points.map((point) => point.y)),
-    bottom: Math.max(...points.map((point) => point.y)),
-  };
-}
-
-function pointInPolygon(point: Point, polygon: Point[]) {
-  let inside = false;
-  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
-    const a = polygon[current];
-    const b = polygon[previous];
-    const crosses = (a.y > point.y) !== (b.y > point.y)
-      && point.x < ((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || Number.EPSILON) + a.x;
-    if (crosses) inside = !inside;
-  }
-  return inside;
-}
-
-function distanceToSegmentPixels(point: Point, start: Point, end: Point, canvas: HTMLCanvasElement) {
-  const px = point.x * canvas.clientWidth;
-  const py = point.y * canvas.clientHeight;
-  const ax = start.x * canvas.clientWidth;
-  const ay = start.y * canvas.clientHeight;
-  const bx = end.x * canvas.clientWidth;
-  const by = end.y * canvas.clientHeight;
-  const dx = bx - ax;
-  const dy = by - ay;
-  const lengthSquared = dx * dx + dy * dy;
-  const ratio = lengthSquared ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)) : 0;
-  return Math.hypot(px - (ax + ratio * dx), py - (ay + ratio * dy));
-}
-
-function eraseStrokeAtPoint(stroke: Stroke, point: Point, canvas: HTMLCanvasElement, radius: number): Stroke[] {
-  const samples = pointsForStroke(stroke);
-  if (stroke.tool === "shape") {
-    const hit = samples.length === 1
-      ? Math.hypot((samples[0].x - point.x) * canvas.clientWidth, (samples[0].y - point.y) * canvas.clientHeight) <= radius
-      : samples.slice(1).some((sample, index) => distanceToSegmentPixels(point, samples[index], sample, canvas) <= radius + stroke.width / 2);
-    return hit ? [] : [stroke];
-  }
-  if (stroke.points.length === 1) {
-    return Math.hypot((stroke.points[0].x - point.x) * canvas.clientWidth, (stroke.points[0].y - point.y) * canvas.clientHeight) <= radius ? [] : [stroke];
-  }
-
-  const parts: Point[][] = [];
-  let currentPart: Point[] = [];
-  let touched = false;
-  for (let index = 0; index < stroke.points.length - 1; index += 1) {
-    const start = stroke.points[index];
-    const end = stroke.points[index + 1];
-    if (distanceToSegmentPixels(point, start, end, canvas) <= radius + stroke.width / 2) {
-      touched = true;
-      if (currentPart.length > 1) parts.push(currentPart);
-      currentPart = [];
-    } else {
-      if (!currentPart.length) currentPart.push(start);
-      currentPart.push(end);
-    }
-  }
-  if (currentPart.length > 1) parts.push(currentPart);
-  if (!touched) return [stroke];
-  return parts.map((points, index) => ({ ...stroke, id: index === 0 ? stroke.id : uid("stroke-part"), points }));
-}
-
-type InkCanvasProps = {
-  tool: Tool;
-  color: string;
-  width: number;
-  penStyle: PenStyle;
-  shape: ShapeKind;
-  strokes: Stroke[];
-  onCommit: (next: Stroke[], previous: Stroke[]) => void;
-};
-
-function InkCanvas({ tool, color, width, penStyle, shape, strokes, onCommit }: InkCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const strokesRef = useRef(strokes);
-  const workingStrokes = useRef(strokes);
-  const currentStroke = useRef<Stroke | null>(null);
-  const beforeStrokes = useRef<Stroke[]>(strokes);
-  const lassoPath = useRef<Point[]>([]);
-  const interaction = useRef<"idle" | "draw" | "erase" | "lasso" | "move" | "resize">("idle");
-  const gestureStart = useRef<Point | null>(null);
-  const lastEraserPoint = useRef<Point | null>(null);
-  const baseSelectionBounds = useRef<ReturnType<typeof boundsForStrokes>>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const selectedIdsRef = useRef(selectedIds);
-
-  const renderCanvas = useCallback((displayStrokes: Stroke[] = workingStrokes.current) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    if (canvas.width !== Math.floor(canvas.clientWidth * ratio) || canvas.height !== Math.floor(canvas.clientHeight * ratio)) {
-      canvas.width = Math.floor(canvas.clientWidth * ratio);
-      canvas.height = Math.floor(canvas.clientHeight * ratio);
-    }
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    displayStrokes.forEach((stroke) => drawStroke(context, canvas, stroke));
-
-    const selected = displayStrokes.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
-    const bounds = boundsForStrokes(selected);
-    if (bounds) {
-      const left = bounds.left * canvas.clientWidth;
-      const top = bounds.top * canvas.clientHeight;
-      const boxWidth = Math.max(12, (bounds.right - bounds.left) * canvas.clientWidth);
-      const boxHeight = Math.max(12, (bounds.bottom - bounds.top) * canvas.clientHeight);
-      context.save();
-      context.strokeStyle = "#0e6b70";
-      context.fillStyle = "#ffffff";
-      context.lineWidth = 1.5;
-      context.setLineDash([6, 4]);
-      context.strokeRect(left - 5, top - 5, boxWidth + 10, boxHeight + 10);
-      context.setLineDash([]);
-      context.fillRect(left + boxWidth + 1, top + boxHeight + 1, 9, 9);
-      context.strokeRect(left + boxWidth + 1, top + boxHeight + 1, 9, 9);
-      context.restore();
-    }
-
-    if (lassoPath.current.length > 1) {
-      context.save();
-      context.strokeStyle = "#0e6b70";
-      context.fillStyle = "rgba(14,107,112,.06)";
-      context.lineWidth = 1.5;
-      context.setLineDash([6, 4]);
-      context.beginPath();
-      context.moveTo(lassoPath.current[0].x * canvas.clientWidth, lassoPath.current[0].y * canvas.clientHeight);
-      lassoPath.current.slice(1).forEach((point) => context.lineTo(point.x * canvas.clientWidth, point.y * canvas.clientHeight));
-      context.closePath();
-      context.fill();
-      context.stroke();
-      context.restore();
-    }
-  }, []);
-
-  useEffect(() => {
-    strokesRef.current = strokes;
-    workingStrokes.current = strokes;
-    selectedIdsRef.current = selectedIdsRef.current.filter((id) => strokes.some((stroke) => stroke.id === id));
-    if (selectedIdsRef.current.length !== selectedIds.length) setSelectedIds(selectedIdsRef.current);
-    renderCanvas(strokes);
-  }, [renderCanvas, selectedIds.length, strokes]);
-
-  useEffect(() => {
-    if (tool !== "lasso" && selectedIdsRef.current.length) {
-      selectedIdsRef.current = [];
-      setSelectedIds([]);
-      renderCanvas();
-    }
-  }, [renderCanvas, tool]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    renderCanvas();
-    const observer = new ResizeObserver(() => renderCanvas());
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [renderCanvas]);
-
-  const pointFromClient = (clientX: number, clientY: number, pressure = .5): Point => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
-      pressure: pressure || .5,
-    };
-  };
-
-  const replaceSelection = (ids: string[]) => {
-    selectedIdsRef.current = ids;
-    setSelectedIds(ids);
-  };
-
-  const eraseBetween = (from: Point, to: Point) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const distance = Math.hypot((to.x - from.x) * canvas.clientWidth, (to.y - from.y) * canvas.clientHeight);
-    const steps = Math.max(1, Math.ceil(distance / 6));
-    for (let step = 1; step <= steps; step += 1) {
-      const sample: Point = {
-        x: from.x + (to.x - from.x) * step / steps,
-        y: from.y + (to.y - from.y) * step / steps,
-        pressure: .5,
-      };
-      workingStrokes.current = workingStrokes.current.flatMap((stroke) => eraseStrokeAtPoint(stroke, sample, canvas, 13));
-    }
-    renderCanvas(workingStrokes.current);
-  };
-
-  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!["pen", "highlight", "eraser", "lasso", "shape"].includes(tool)) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const point = pointFromClient(event.clientX, event.clientY, event.pressure);
-    beforeStrokes.current = strokesRef.current;
-    workingStrokes.current = strokesRef.current;
-    gestureStart.current = point;
-
-    if (tool === "eraser") {
-      interaction.current = "erase";
-      lastEraserPoint.current = point;
-      eraseBetween(point, point);
-      return;
-    }
-
-    if (tool === "lasso") {
-      const selected = strokesRef.current.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
-      const bounds = boundsForStrokes(selected);
-      if (bounds && canvasRef.current) {
-        const handleDistance = Math.hypot((point.x - bounds.right) * canvasRef.current.clientWidth, (point.y - bounds.bottom) * canvasRef.current.clientHeight);
-        if (handleDistance <= 22) {
-          interaction.current = "resize";
-          baseSelectionBounds.current = bounds;
-          return;
-        }
-        const paddingX = 10 / canvasRef.current.clientWidth;
-        const paddingY = 10 / canvasRef.current.clientHeight;
-        if (point.x >= bounds.left - paddingX && point.x <= bounds.right + paddingX && point.y >= bounds.top - paddingY && point.y <= bounds.bottom + paddingY) {
-          interaction.current = "move";
-          baseSelectionBounds.current = bounds;
-          return;
-        }
-      }
-      interaction.current = "lasso";
-      replaceSelection([]);
-      lassoPath.current = [point];
-      renderCanvas();
-      return;
-    }
-
-    interaction.current = "draw";
-    currentStroke.current = {
-      id: uid("stroke"),
-      tool: tool === "shape" ? "shape" : tool === "highlight" ? "highlight" : "pen",
-      penStyle: tool === "pen" ? penStyle : undefined,
-      shape: tool === "shape" ? shape : undefined,
-      color,
-      width: tool === "highlight" ? width * 4 : width,
-      points: [point],
-    };
-  };
-
-  const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (interaction.current === "idle") return;
-    event.preventDefault();
-    let point = pointFromClient(event.clientX, event.clientY, event.pressure);
-
-    if (interaction.current === "erase") {
-      const previous = lastEraserPoint.current ?? point;
-      eraseBetween(previous, point);
-      lastEraserPoint.current = point;
-      return;
-    }
-
-    if (interaction.current === "lasso") {
-      lassoPath.current.push(point);
-      renderCanvas();
-      return;
-    }
-
-    if (interaction.current === "move" && gestureStart.current && baseSelectionBounds.current) {
-      const bounds = baseSelectionBounds.current;
-      const dx = Math.max(-bounds.left, Math.min(1 - bounds.right, point.x - gestureStart.current.x));
-      const dy = Math.max(-bounds.top, Math.min(1 - bounds.bottom, point.y - gestureStart.current.y));
-      workingStrokes.current = beforeStrokes.current.map((stroke) => selectedIdsRef.current.includes(stroke.id)
-        ? { ...stroke, points: stroke.points.map((item) => ({ ...item, x: item.x + dx, y: item.y + dy })) }
-        : stroke);
-      renderCanvas(workingStrokes.current);
-      return;
-    }
-
-    if (interaction.current === "resize" && baseSelectionBounds.current) {
-      const bounds = baseSelectionBounds.current;
-      const baseDistance = Math.hypot(bounds.right - bounds.left, bounds.bottom - bounds.top) || .01;
-      const nextDistance = Math.hypot(point.x - bounds.left, point.y - bounds.top);
-      const maxScaleX = (1 - bounds.left) / Math.max(.001, bounds.right - bounds.left);
-      const maxScaleY = (1 - bounds.top) / Math.max(.001, bounds.bottom - bounds.top);
-      const scale = Math.max(.2, Math.min(4, maxScaleX, maxScaleY, nextDistance / baseDistance));
-      workingStrokes.current = beforeStrokes.current.map((stroke) => selectedIdsRef.current.includes(stroke.id)
-        ? { ...stroke, points: stroke.points.map((item) => ({ ...item, x: bounds.left + (item.x - bounds.left) * scale, y: bounds.top + (item.y - bounds.top) * scale })) }
-        : stroke);
-      renderCanvas(workingStrokes.current);
-      return;
-    }
-
-    if (!currentStroke.current) return;
-    if (currentStroke.current.tool === "shape") {
-      if (currentStroke.current.shape === "circle" && canvasRef.current) {
-        const start = currentStroke.current.points[0];
-        const dx = (point.x - start.x) * canvasRef.current.clientWidth;
-        const dy = (point.y - start.y) * canvasRef.current.clientHeight;
-        const side = Math.min(Math.abs(dx), Math.abs(dy));
-        point = {
-          ...point,
-          x: start.x + Math.sign(dx || 1) * side / canvasRef.current.clientWidth,
-          y: start.y + Math.sign(dy || 1) * side / canvasRef.current.clientHeight,
-        };
-      }
-      currentStroke.current.points = [currentStroke.current.points[0], point];
-    } else {
-      const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
-      coalesced.forEach((sample) => currentStroke.current?.points.push(pointFromClient(sample.clientX, sample.clientY, sample.pressure)));
-    }
-    renderCanvas([...beforeStrokes.current, currentStroke.current]);
-  };
-
-  const finishInteraction = () => {
-    const mode = interaction.current;
-    interaction.current = "idle";
-    if (mode === "draw" && currentStroke.current) {
-      const minimumPoints = currentStroke.current.tool === "shape" ? 2 : 1;
-      if (currentStroke.current.points.length >= minimumPoints) {
-        const next = [...beforeStrokes.current, currentStroke.current];
-        strokesRef.current = next;
-        workingStrokes.current = next;
-        onCommit(next, beforeStrokes.current);
-      }
-      currentStroke.current = null;
-    } else if (mode === "erase" || mode === "move" || mode === "resize") {
-      const next = workingStrokes.current;
-      if (next !== beforeStrokes.current) {
-        strokesRef.current = next;
-        onCommit(next, beforeStrokes.current);
-      }
-    } else if (mode === "lasso") {
-      const polygon = lassoPath.current;
-      const ids = polygon.length > 2
-        ? strokesRef.current.filter((stroke) => pointsForStroke(stroke).some((point) => pointInPolygon(point, polygon))).map((stroke) => stroke.id)
-        : [];
-      lassoPath.current = [];
-      replaceSelection(ids);
-      workingStrokes.current = strokesRef.current;
-      renderCanvas();
-    }
-    lastEraserPoint.current = null;
-    gestureStart.current = null;
-    baseSelectionBounds.current = null;
-    renderCanvas();
-  };
-
-  const selectionBounds = useMemo(() => boundsForStrokes(strokes.filter((stroke) => selectedIds.includes(stroke.id))), [selectedIds, strokes]);
-
-  const duplicateSelection = () => {
-    const selected = strokesRef.current.filter((stroke) => selectedIdsRef.current.includes(stroke.id));
-    if (!selected.length) return;
-    const copies = selected.map((stroke) => ({
-      ...stroke,
-      id: uid("stroke-copy"),
-      points: stroke.points.map((point) => ({ ...point, x: Math.min(1, point.x + .025), y: Math.min(1, point.y + .025) })),
-    }));
-    const next = [...strokesRef.current, ...copies];
-    onCommit(next, strokesRef.current);
-    strokesRef.current = next;
-    workingStrokes.current = next;
-    replaceSelection(copies.map((stroke) => stroke.id));
-    renderCanvas(next);
-  };
-
-  const deleteSelection = () => {
-    if (!selectedIdsRef.current.length) return;
-    const previous = strokesRef.current;
-    const next = previous.filter((stroke) => !selectedIdsRef.current.includes(stroke.id));
-    onCommit(next, previous);
-    strokesRef.current = next;
-    workingStrokes.current = next;
-    replaceSelection([]);
-    renderCanvas(next);
-  };
-
-  return (
-    <div className={`ink-surface tool-${tool}`}>
-      <canvas
-        ref={canvasRef}
-        className="ink-canvas"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={finishInteraction}
-        onPointerCancel={finishInteraction}
-        aria-label="Lớp viết tay"
-      />
-      {tool === "lasso" && selectionBounds && (
-        <div className="lasso-menu" style={{ left: `${Math.min(.82, Math.max(.18, (selectionBounds.left + selectionBounds.right) / 2)) * 100}%`, top: `${Math.max(.1, selectionBounds.top) * 100}%` }}>
-          <span>Kéo để di chuyển · nút vuông để đổi cỡ</span>
-          <button onPointerDown={(event) => event.stopPropagation()} onClick={duplicateSelection}><Copy size={14} /> Nhân đôi</button>
-          <button className="danger" onPointerDown={(event) => event.stopPropagation()} onClick={deleteSelection}><Trash2 size={14} /> Xóa</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function NoteSheetPreview({
   note,
   sheetNumber,
@@ -1667,27 +755,9 @@ function NoteSheetPreview({
           <div className={`typed-layer ${note.excerpts.length ? "has-excerpts" : ""}`} style={presentation.textLayerStyle}>
             <div className="note-title-input">{note.title}</div>
             <div className="note-editor rich-text-editor" dangerouslySetInnerHTML={{ __html: note.bodyHtml ?? plainTextToRichHtml(note.body) }} />
-            <div className="note-excerpts" aria-hidden="true">
-              {note.excerpts.map((excerpt, index) => <DraggableExcerpt
-                key={excerpt.id}
-                excerpt={excerpt}
-                source={resolveSource(excerpt)}
-                index={index}
-                selected={false}
-                selectable={false}
-                movable={false}
-                editable={false}
-                onSelect={() => undefined}
-                onMove={() => undefined}
-                onEdit={() => undefined}
-                onTextActivate={() => undefined}
-                onNormalizeTextInput={() => undefined}
-                onOpenSource={() => undefined}
-                onDelete={() => undefined}
-              />)}
-            </div>
+            <NoteObjectLayer excerpts={note.excerpts} resolveSource={resolveSource} selectedId={null} activeTool="pointer" interactive={false} onSelect={() => undefined} onMove={() => undefined} onEdit={() => undefined} onTextActivate={() => undefined} onNormalizeTextInput={() => undefined} onOpenSource={() => undefined} onDelete={() => undefined} />
           </div>
-          <InkCanvas tool="pointer" color="#2465a8" width={2} penStyle="ballpoint" shape="rectangle" strokes={note.strokes} onCommit={() => undefined} />
+          <NoteInkCanvas tool="pointer" color="#2465a8" width={2} penStyle="ballpoint" shape="rectangle" strokes={note.strokes} onCommit={() => undefined} />
         </> : <div className="note-sheet-preview-loading" role="status">Đang tải nội dung tờ…</div>}
       </article>
       <div className="paper-size">{presentation.selectedSize.label} ({presentation.selectedSize.dimensions}) · {note.paper.orientation === "portrait" ? "Dọc" : "Ngang"}</div>
@@ -1736,7 +806,8 @@ export default function Home() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
-  const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});
+  const noteInkSession = useMemo(() => new NoteInkSession(60), []);
+  const [inkHistoryVersion, setInkHistoryVersion] = useState(0);
   const pdfReader = useMemo(() => new PdfReaderController({
     readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
   }), []);
@@ -1773,8 +844,9 @@ export default function Home() {
   const [tableRows, setTableRows] = useState(3);
   const [tableColumns, setTableColumns] = useState(3);
   const [tableBorder, setTableBorder] = useState<TableBorderSettings>({ style: "solid", width: 1, color: "#60737d" });
-  const activeTextEditorRef = useRef<{ id: string; editor: HTMLElement } | null>(null);
-  const savedTextRangeRef = useRef<Range | null>(null);
+  const richTextController = noteRichTextController;
+  const activeTextEditorRef = richTextController.activeEditorRef;
+  const savedTextRangeRef = richTextController.savedRangeRef;
   const pendingFontSizeRef = useRef(new Map<string, number>());
   const textCharacterToolbarRef = useRef<HTMLDivElement | null>(null);
   const textParagraphToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -1913,19 +985,19 @@ export default function Home() {
       setToast("Bấm vào nội dung hoặc bôi chọn chữ trước khi định dạng");
       return;
     }
-    document.execCommand("styleWithCSS", false, "true");
+    richTextController.execCommand("styleWithCSS", false, "true");
     if (command === "font") {
       const font = TEXT_FONTS.find((option) => option.id === value) ?? TEXT_FONTS[0];
-      document.execCommand("fontName", false, font.family);
+      richTextController.execCommand("fontName", false, font.family);
     } else if (command === "size") {
       const size = Number(value);
       pendingFontSizeRef.current.set(target.id, size);
-      document.execCommand("fontSize", false, "7");
+      richTextController.execCommand("fontSize", false, "7");
       normalizeTextEditorInput(target.id, target.editor);
     } else if (command === "color") {
-      document.execCommand("foreColor", false, String(value));
+      richTextController.execCommand("foreColor", false, String(value));
     } else if (command === "background") {
-      document.execCommand("backColor", false, String(value));
+      richTextController.execCommand("backColor", false, String(value));
     } else {
       const browserCommand = {
         bold: "bold",
@@ -1942,7 +1014,7 @@ export default function Home() {
         numbering: "insertOrderedList",
         clear: "removeFormat",
       }[command];
-      document.execCommand(browserCommand, false);
+      richTextController.execCommand(browserCommand, false);
     }
     finishTextCommand(target, "Đã định dạng phần chữ đang chọn");
   }, [finishTextCommand, normalizeTextEditorInput, restoreTextSelection]);
@@ -1960,7 +1032,7 @@ export default function Home() {
       try { return range!.intersectsNode(element); } catch { return false; }
     });
     if (!blocks.length) {
-      document.execCommand("formatBlock", false, "div");
+      richTextController.execCommand("formatBlock", false, "div");
       selection = window.getSelection();
       range = selection?.rangeCount ? selection.getRangeAt(0) : null;
       const block = closestWithin<HTMLElement>(range?.startContainer ?? null, "div,p,li,td,th", target.editor);
@@ -1980,7 +1052,7 @@ export default function Home() {
     let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
     let lists = range ? [closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor)].filter(Boolean) as HTMLUListElement[] : [];
     if (bulletStyle === "none" && lists.length) {
-      document.execCommand("insertUnorderedList", false);
+      richTextController.execCommand("insertUnorderedList", false);
       finishTextCommand(target, "Đã bỏ dấu đầu dòng");
       setTextInsertPopover(null);
       return;
@@ -1990,7 +1062,7 @@ export default function Home() {
       return;
     }
     if (!lists.length) {
-      document.execCommand("insertUnorderedList", false);
+      richTextController.execCommand("insertUnorderedList", false);
       selection = window.getSelection();
       range = selection?.rangeCount ? selection.getRangeAt(0) : null;
       const list = range ? closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor) : null;
@@ -2026,7 +1098,7 @@ export default function Home() {
     let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
     let lists = range ? [closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor)].filter(Boolean) as HTMLOListElement[] : [];
     if (!lists.length) {
-      document.execCommand("insertOrderedList", false);
+      richTextController.execCommand("insertOrderedList", false);
       selection = window.getSelection();
       range = selection?.rangeCount ? selection.getRangeAt(0) : null;
       const list = range ? closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor) : null;
@@ -2055,7 +1127,7 @@ export default function Home() {
       setToast("Nút này chỉ dùng cho bullet hoặc numbering");
       return;
     }
-    document.execCommand(direction === "increase" ? "indent" : "outdent", false);
+    richTextController.execCommand(direction === "increase" ? "indent" : "outdent", false);
     finishTextCommand(target, direction === "increase" ? "Đã tăng một cấp danh sách" : "Đã giảm một cấp danh sách");
   }, [finishTextCommand, restoreTextSelection]);
 
@@ -2065,7 +1137,7 @@ export default function Home() {
       setToast("Bấm vào vị trí cần chèn trước");
       return;
     }
-    document.execCommand("insertText", false, text);
+    richTextController.execCommand("insertText", false, text);
     finishTextCommand(target, message);
   }, [finishTextCommand, restoreTextSelection]);
 
@@ -2076,7 +1148,7 @@ export default function Home() {
       setToast(target ? "Nhập công thức trước khi chèn" : "Bấm vào vị trí cần chèn công thức trước");
       return;
     }
-    document.execCommand("insertHTML", false, `${equationMarkup(equationTemplate, parts)}&nbsp;`);
+    richTextController.execCommand("insertHTML", false, `${equationMarkup(equationTemplate, parts)}&nbsp;`);
     finishTextCommand(target, "Đã chèn công thức");
     setTextInsertPopover(null);
   }, [equationDraft, equationParts, equationTemplate, finishTextCommand, restoreTextSelection]);
@@ -2089,7 +1161,7 @@ export default function Home() {
     }
     const cellStyle = `border-style:${tableBorder.style};border-width:${tableBorder.width}px;border-color:${tableBorder.color};padding:6px;min-width:44px;vertical-align:top`;
     const rows = Array.from({ length: tableRows }, () => `<tr>${Array.from({ length: tableColumns }, () => `<td style="${cellStyle}">&nbsp;</td>`).join("")}</tr>`).join("");
-    document.execCommand("insertHTML", false, `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table><div><br></div>`);
+    richTextController.execCommand("insertHTML", false, `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table><div><br></div>`);
     finishTextCommand(target, `Đã chèn bảng ${tableRows} × ${tableColumns}`);
     setTextInsertPopover(null);
   }, [finishTextCommand, restoreTextSelection, tableBorder, tableColumns, tableRows]);
@@ -2772,6 +1844,31 @@ export default function Home() {
     setActiveTool("text");
     setNotePanel("text");
     setToast("Đã tạo hộp chữ — nhập nội dung ngay");
+  };
+
+  const addSticker = (presetId: StickerPresetId) => {
+    const preset = STICKER_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    const slot = activeNote.excerpts.length % 6;
+    const x = Math.min(1 - preset.width - .03, .13 + (slot % 3) * .045);
+    const y = Math.min(1 - preset.height - .04, .16 + (slot % 4) * .055);
+    const excerpt: NoteExcerpt = {
+      id: uid("sticker"),
+      kind: "text",
+      sourceKind: "manual",
+      text: "",
+      richText: "",
+      stickerStyle: preset.id,
+      createdAt: Date.now(),
+      layout: { x, y, width: preset.width, height: preset.height, contentScale: 1, rotation: preset.rotation, opacity: 1, autoFit: false },
+      appearance: { borderStyle: "solid", borderWidth: 0, borderColor: "transparent", backgroundColor: "transparent" },
+    };
+    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
+    setSelectedExcerptId(excerpt.id);
+    setActiveTool("text");
+    setNotePanel("text");
+    setTextInsertPopover(null);
+    setToast(`Đã chèn ${preset.label} — nhập chữ trực tiếp, dùng Chọn để kéo và đổi kích thước`);
   };
 
   const addCalloutAt = (event: React.PointerEvent<HTMLElement>) => {
@@ -3467,35 +2564,23 @@ export default function Home() {
   };
 
   const commitStrokes = (next: Stroke[], previous: Stroke[]) => {
-    const unchanged = next.length === previous.length && next.every((stroke, index) => stroke === previous[index]);
-    if (unchanged) return;
-    setStrokeHistory((state) => {
-      const history = state[activeNote.id] ?? { undo: [], redo: [] };
-      return { ...state, [activeNote.id]: { undo: [...history.undo, previous].slice(-60), redo: [] } };
-    });
+    if (!noteInkSession.commit(activeNote.id, next, previous)) return;
     updateActiveNote({ strokes: next });
+    setInkHistoryVersion((value) => value + 1);
   };
 
   const undo = () => {
-    const history = strokeHistory[activeNote.id];
-    const previous = history?.undo.at(-1);
+    const previous = noteInkSession.undo(activeNote.id, activeNote.strokes);
     if (!previous) return;
     updateActiveNote({ strokes: previous });
-    setStrokeHistory((state) => ({
-      ...state,
-      [activeNote.id]: { undo: history.undo.slice(0, -1), redo: [...history.redo, activeNote.strokes].slice(-60) },
-    }));
+    setInkHistoryVersion((value) => value + 1);
   };
 
   const redo = () => {
-    const history = strokeHistory[activeNote.id];
-    const next = history?.redo.at(-1);
+    const next = noteInkSession.redo(activeNote.id, activeNote.strokes);
     if (!next) return;
     updateActiveNote({ strokes: next });
-    setStrokeHistory((state) => ({
-      ...state,
-      [activeNote.id]: { undo: [...history.undo, activeNote.strokes].slice(-60), redo: history.redo.slice(0, -1) },
-    }));
+    setInkHistoryVersion((value) => value + 1);
   };
 
   const updatePaper = (changes: Partial<PaperSettings>) => {
@@ -3588,6 +2673,7 @@ export default function Home() {
     const available = (noteStageRef.current?.clientWidth ?? basePaperMaxWidth) - 72;
     setNoteViewZoom(available / basePaperMaxWidth);
   };
+  useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
   const lineStep = activeNote.paper.template === "ruled-dense" ? 5 : 8;
   const defaultTextFont = TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? TEXT_FONTS[0];
   const selectedToolbarFont = TEXT_FONTS.find((font) => font.id === textToolbar.font) ?? TEXT_FONTS[0];
@@ -3946,8 +3032,8 @@ export default function Home() {
                 <button onClick={fitNoteToView} aria-label="Vừa chiều rộng khung note" title="Vừa chiều rộng khung note"><Maximize2 size={14} /></button>
               </div>
               <div className="toolbar-cluster history-cluster">
-                <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!(strokeHistory[activeNote.id]?.undo.length)}><Undo2 size={19} /></button>
-                <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!(strokeHistory[activeNote.id]?.redo.length)}><Redo2 size={19} /></button>
+                <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!noteInkSession.canUndo(activeNote.id)} data-ink-history-version={inkHistoryVersion}><Undo2 size={19} /></button>
+                <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!noteInkSession.canRedo(activeNote.id)} data-ink-history-version={inkHistoryVersion}><Redo2 size={19} /></button>
               </div>
               <button className={`paper-button ${notePanel === "paper" ? "active" : ""}`} onClick={() => setNotePanel((panel) => panel === "paper" ? null : "paper")} aria-expanded={notePanel === "paper"}><NotebookTabs size={17} /><span>Giấy</span><ChevronDown size={11} /></button>
             </div>
@@ -3958,6 +3044,7 @@ export default function Home() {
                   const shortLabel = id === "text" ? "Type" : id === "textbox" ? "Text box" : id === "callout" ? "Callout" : label;
                   return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active show-label" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox" || id === "callout") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{activeTool === id && <span className="tool-label">{shortLabel}</span>}{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
                 })}
+                <button className={`tool-button expandable sticker-primary-button ${textInsertPopover === "stickers" ? "active show-label" : ""}`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} />{textInsertPopover === "stickers" && <span className="tool-label">Sticker</span>}<ChevronDown className="tool-chevron" size={11} /></button>
               </div>
               <span className="toolbar-spacer" />
               <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">
@@ -4001,6 +3088,7 @@ export default function Home() {
                   <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeListLevel("increase")} title="Tăng một cấp danh sách" aria-label="Tăng một cấp danh sách"><IndentIncrease size={16} /></button>
                   <span className="toolbar-mini-divider" />
                   <button className={`word-command-button labeled ${textInsertPopover === "symbols" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("symbols", event.currentTarget)} title="Chèn ký hiệu"><Omega size={16} /><span>Ký hiệu</span></button>
+                  <button className={`word-command-button labeled sticker-menu-trigger ${textInsertPopover === "stickers" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("stickers", event.currentTarget)} title="Chèn sticker note" aria-label="Mở thư viện sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={16} /><span>Sticker</span></button>
                   <button className={`word-command-button labeled ${textInsertPopover === "equation" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("equation", event.currentTarget)} title="Chèn công thức"><Sigma size={16} /><span>Công thức</span></button>
                   <button className={`word-command-button labeled ${textInsertPopover === "table" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("table", event.currentTarget)} title="Chèn bảng"><Table2 size={16} /><span>Bảng</span></button>
                   <button className={`word-command-button line-menu-trigger ${textInsertPopover === "tableLines" ? "selected" : ""}`} onPointerDown={(event) => event.preventDefault()} onClick={(event) => openTextPopover("tableLines", event.currentTarget)} title="Kiểu đường kẻ bảng" aria-label="Mở thư viện đường kẻ bảng" aria-expanded={textInsertPopover === "tableLines"}><Table2 size={14} /><i style={{ borderTopStyle: tableBorder.style, borderTopWidth: `${Math.max(1, Math.min(tableBorder.width, 4))}px`, borderTopColor: tableBorder.color }} /><ChevronDown size={10} /></button>
@@ -4069,6 +3157,16 @@ export default function Home() {
               </div>
               <section className="appearance-color-section"><span>Viền</span><div className="popover-color-strip">{BORDER_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${selectedTextBoxAppearance.borderColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateSelectedTextBoxAppearance({ borderColor: color })} title={color === "transparent" ? "Viền trong suốt" : color} aria-label={color === "transparent" ? "Viền trong suốt" : `Màu viền ${color}`} />)}<label className="popover-custom-color" title="Màu viền tùy chỉnh"><input type="color" value={selectedTextBoxAppearance.borderColor === "transparent" ? "#60737d" : selectedTextBoxAppearance.borderColor} onChange={(event) => updateSelectedTextBoxAppearance({ borderColor: event.target.value })} /><span>+</span></label></div></section>
               <section className="appearance-color-section"><span>Nền</span><div className="popover-color-strip">{TEXT_BOX_BACKGROUND_COLORS.map((color) => <button key={color} className={`popover-color-swatch ${selectedTextBoxAppearance.backgroundColor === color ? "selected" : ""} ${color === "transparent" ? "transparent" : ""}`} style={color === "transparent" ? undefined : { "--swatch": color } as React.CSSProperties} onPointerDown={(event) => event.preventDefault()} onClick={() => updateSelectedTextBoxAppearance({ backgroundColor: color })} title={color === "transparent" ? "Nền trong suốt" : color} aria-label={color === "transparent" ? "Nền hộp chữ trong suốt" : `Màu nền hộp chữ ${color}`} />)}<label className="popover-custom-color" title="Màu nền tùy chỉnh"><input type="color" value={selectedTextBoxAppearance.backgroundColor === "transparent" ? "#ffffff" : selectedTextBoxAppearance.backgroundColor} onChange={(event) => updateSelectedTextBoxAppearance({ backgroundColor: event.target.value })} /><span>+</span></label></div></section>
+            </div>
+          )}
+
+          {notePanel === "text" && textInsertPopover === "stickers" && (
+            <div className="text-insert-popover note-sticker-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện sticker note">
+              <header><div><strong>Sticker note</strong><small>Mỗi mẫu là một textbox có thể kéo và đổi kích thước</small></div><button className="icon-button compact" onClick={() => setTextInsertPopover(null)} aria-label="Đóng"><X size={15} /></button></header>
+              <div className="note-sticker-grid">
+                {STICKER_PRESETS.map((preset) => <button key={preset.id} type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => addSticker(preset.id)} title={preset.description}><span className={`note-sticker-preview sticker-${preset.id}`}><i>Ghi chú…</i></span><b>{preset.label}</b><small>{preset.description}</small></button>)}
+              </div>
+              <footer>Chèn xong có thể gõ ngay · chuyển sang Chọn để kéo, co giãn và sắp xếp lớp</footer>
             </div>
           )}
 
@@ -4177,17 +3275,11 @@ export default function Home() {
                   }}
                   onError={(message) => setToast(message)}
                 />
-                <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />
-                <div className="note-excerpts" aria-label="Khung chữ và ảnh trên trang note">
-                  {activeNote.excerpts.map((excerpt, index) => {
-                    const selected = excerpt.id === selectedExcerptId;
-                    const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
-                    return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveExcerptSource(excerpt)} index={index} selected={selected} selectable={activeTool === "pointer" || activeTool === "text"} movable={activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && excerpt.kind === "text")} editable={activeTool === "text" && selected && excerpt.kind === "text"} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />;
-                  })}
-                </div>
+                {activeNote.paper.template === "first-aid" ? <FirstAidBlockEditor key={activeNote.id} html={activeNote.bodyHtml ?? ""} plainText={activeNote.body} mode={activeTool === "text" || activeTool === "pointer" ? "edit" : "view"} onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onInsertImage={addFirstAidImage} onRemoveImage={deleteExcerpt} onRequestPdfCrop={requestFirstAidPdfCrop} pdfCropResult={firstAidCropResult} onPdfCropHandled={finishFirstAidPdfCrop} pageObjectIds={activeNote.excerpts.map((excerpt) => excerpt.id)} pageObjectLayouts={Object.fromEntries(activeNote.excerpts.map((excerpt) => [excerpt.id, { height: excerpt.layout?.height ?? 0 }]))} pageHeightCss={basePaperMaxWidth * (paperHeight / paperWidth)} onTextActivate={(editorId, editor, range) => { if (activeTool === "pointer") { setActiveTool("text"); setNotePanel("text"); } activateTextEditor(editorId, editor, range); }} onNormalizeTextInput={normalizeTextEditorInput} /> : <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />}
+                <NoteObjectLayer excerpts={activeNote.excerpts} resolveSource={resolveExcerptSource} selectedId={selectedExcerptId} activeTool={activeTool} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />
                 {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
-              <InkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
+              <NoteInkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
               {activeTool === "textbox" && <div className="mode-hint">Bấm vị trí muốn đặt hộp chữ</div>}
               {activeTool === "callout" && <div className="mode-hint">Bấm đúng vị trí muốn callout chỉ tới</div>}

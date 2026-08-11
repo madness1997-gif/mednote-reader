@@ -11,8 +11,6 @@ import "../app/note-zoom-fixes.css";
 import "../app/note-pdf-export.css";
 import "../app/note-symbol-library.css";
 import "../app/note-stickers.css";
-import "../app/note-zoom-runtime";
-import "../app/note-symbol-library";
 import { installDesktopLifecycle } from "../app/desktop-lifecycle";
 
 installDesktopLifecycle();

@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import "./first-aid-block-editor.css";
+import { RichTextEditor } from "./rich-text-editor";
+import { localBinaryStorage } from "./local-binary-storage";
 
 type EditorMode = "edit" | "arrange" | "view";
 type BlockType = "heading" | "label" | "text" | "figure" | "figure-text" | "table" | "flow" | "pearl";
@@ -72,6 +74,8 @@ type FirstAidBlockEditorProps = {
   pdfCropResult: PdfCropResultLink | null;
   onPdfCropHandled: (token: string) => void;
   pageObjectIds: string[];
+  pageObjectLayouts: Record<string, { height: number }>;
+  pageHeightCss: number;
   onTextActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
   onNormalizeTextInput: (editorId: string, editor: HTMLElement) => void;
 };
@@ -328,7 +332,7 @@ function openAssetDb() {
   });
 }
 
-async function readAsset(id: string) {
+async function readLegacyAsset(id: string) {
   const database = await openAssetDb();
   const blob = await new Promise<Blob | undefined>((resolve, reject) => {
     const request = database.transaction(ASSET_STORE, "readonly").objectStore(ASSET_STORE).get(id);
@@ -337,6 +341,14 @@ async function readAsset(id: string) {
   });
   database.close();
   return blob;
+}
+
+async function readAsset(id: string) {
+  const canonical = await localBinaryStorage.readAsset(id);
+  if (canonical) return canonical;
+  const legacy = await readLegacyAsset(id);
+  if (legacy) await localBinaryStorage.saveAsset(id, legacy);
+  return legacy;
 }
 
 async function compressImage(file: File) {
@@ -360,77 +372,10 @@ async function compressImage(file: File) {
 }
 
 function BlockRichEditor({ editorId, className = "", html, text, textStyle = "paragraph", editable, singleLine = false, placeholder, ariaLabel, onChange, onActivate, onNormalizeInput }: {
-  editorId: string;
-  className?: string;
-  html?: string;
-  text?: string;
-  textStyle?: TextStyle;
-  editable: boolean;
-  singleLine?: boolean;
-  placeholder?: string;
-  ariaLabel: string;
-  onChange: (html: string, text: string) => void;
-  onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void;
-  onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
+  editorId: string; className?: string; html?: string; text?: string; textStyle?: TextStyle; editable: boolean; singleLine?: boolean; placeholder?: string; ariaLabel: string;
+  onChange: (html: string, text: string) => void; onActivate: (editorId: string, editor: HTMLElement, range: Range | null) => void; onNormalizeInput: (editorId: string, editor: HTMLElement) => void;
 }) {
-  const editorRef = useRef<HTMLDivElement>(null);
-  const resolvedHtml = richBlockHtml(html, text, textStyle);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || editor.innerHTML === resolvedHtml || document.activeElement === editor) return;
-    editor.innerHTML = resolvedHtml;
-  }, [resolvedHtml]);
-
-  const captureSelection = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const belongs = range && (range.commonAncestorContainer === editor || editor.contains(range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentNode));
-    onActivate(editorId, editor, belongs && range ? range.cloneRange() : null);
-  };
-
-  const emitChange = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    onNormalizeInput(editorId, editor);
-    onChange(sanitizeBlockRichTextHtml(editor.innerHTML), editor.innerText.replace(/\u00a0/g, " "));
-    captureSelection();
-  };
-
-  return <div
-    ref={editorRef}
-    className={`fa-rich-editor rich-text-editor ${className}`}
-    data-rich-editor-id={editorId}
-    data-placeholder={placeholder}
-    contentEditable={editable}
-    suppressContentEditableWarning
-    role="textbox"
-    aria-multiline={!singleLine}
-    aria-label={ariaLabel}
-    spellCheck={false}
-    onFocus={captureSelection}
-    onMouseUp={captureSelection}
-    onKeyUp={captureSelection}
-    onKeyDown={(event) => {
-      if (singleLine && event.key === "Enter") event.preventDefault();
-    }}
-    onInput={emitChange}
-    onPaste={(event) => {
-      if (!editable) return;
-      event.preventDefault();
-      const pasted = event.clipboardData.getData("text/plain");
-      document.execCommand("insertText", false, singleLine ? pasted.replace(/\s*\r?\n\s*/g, " ") : pasted);
-    }}
-    onDrop={(event) => {
-      if (!editable) return;
-      const dropped = event.dataTransfer.getData("text/plain");
-      if (!dropped) return;
-      event.preventDefault();
-      document.execCommand("insertText", false, singleLine ? dropped.replace(/\s*\r?\n\s*/g, " ") : dropped);
-    }}
-  />;
+  return <RichTextEditor editorId={editorId} className={`fa-rich-editor ${className}`} html={richBlockHtml(html, text, textStyle)} editable={editable} singleLine={singleLine} placeholder={placeholder} ariaLabel={ariaLabel} onChange={(nextHtml, nextText) => onChange(sanitizeBlockRichTextHtml(nextHtml), nextText)} onActivate={onActivate} onNormalizeInput={onNormalizeInput} />;
 }
 
 function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void; onClose: () => void }) {
@@ -444,7 +389,7 @@ function InsertMenu({ onInsert, onClose }: { onInsert: (type: BlockType) => void
   );
 }
 
-export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage, onRemoveImage, onRequestPdfCrop, pdfCropResult, onPdfCropHandled, pageObjectIds, onTextActivate, onNormalizeTextInput }: FirstAidBlockEditorProps) {
+export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertImage, onRemoveImage, onRequestPdfCrop, pdfCropResult, onPdfCropHandled, pageObjectIds, pageObjectLayouts, pageHeightCss, onTextActivate, onNormalizeTextInput }: FirstAidBlockEditorProps) {
   const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => parseBlocks(html, plainText));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -456,6 +401,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   const canManage = mode !== "view";
   const canEdit = mode === "edit";
   const pageObjectKey = [...pageObjectIds].sort().join("|");
+  const pageObjectLayoutKey = pageObjectIds.map((id) => `${id}:${pageObjectLayouts[id]?.height ?? 0}`).join("|");
   const assetIds = useMemo(() => Array.from(new Set(blocks.map((block) => block.imageAssetId).filter((value): value is string => Boolean(value)))).sort(), [blocks]);
 
   useEffect(() => {
@@ -650,7 +596,9 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
 
   const renderImageZone = (block: FirstAidBlock) => {
     if (block.imageObjectId) {
-      return <div className="fa-linked-image-space" style={{ aspectRatio: String(Math.max(.05, block.imageAspectRatio ?? 1.5)) }} aria-label="Ảnh là đối tượng có thể chọn và thao tác trên trang"><span>Ảnh đã là đối tượng trên trang</span></div>;
+      const objectHeight = pageObjectLayouts[block.imageObjectId]?.height;
+      const linkedHeight = objectHeight && pageHeightCss > 0 ? Math.max(28, Math.round(objectHeight * pageHeightCss)) : undefined;
+      return <div className="fa-linked-image-space" data-layout-key={pageObjectLayoutKey} style={linkedHeight ? { height: `${linkedHeight}px` } : { aspectRatio: String(Math.max(.05, block.imageAspectRatio ?? 1.5)) }} aria-label="Ảnh là đối tượng có thể chọn và thao tác trên trang"><span>Ảnh đã là đối tượng trên trang</span></div>;
     }
     const url = block.imageAssetId ? assetUrls[block.imageAssetId] : undefined;
     return (

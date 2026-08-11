@@ -1,10 +1,10 @@
-type LibraryKind = "icon" | "emoji";
-type LibraryItem = { value: string; name: string; keywords: string };
-type LibraryGroup = { label: string; kind: LibraryKind; items: LibraryItem[] };
+export type NoteSymbolLibraryKind = "icon" | "emoji";
+export type NoteSymbolLibraryItem = { value: string; name: string; keywords: string };
+export type NoteSymbolLibraryGroup = { label: string; kind: NoteSymbolLibraryKind; items: NoteSymbolLibraryItem[] };
 
 const RECENT_KEY = "mednote-recent-note-symbols";
 
-const GROUPS: LibraryGroup[] = [
+export const NOTE_SYMBOL_GROUPS: NoteSymbolLibraryGroup[] = [
   {
     label: "Đánh dấu",
     kind: "icon",
@@ -114,225 +114,14 @@ const GROUPS: LibraryGroup[] = [
   },
 ];
 
-const allItems = GROUPS.flatMap((group) => group.items.map((item) => ({ ...item, kind: group.kind })));
-const itemByValue = new Map(allItems.map((item) => [item.value, item]));
-
-let savedRange: Range | null = null;
-let savedInput: { element: HTMLInputElement | HTMLTextAreaElement; start: number; end: number } | null = null;
-
-function insideNotes(element: Element | null) {
-  return Boolean(element?.closest(".notes-pane, .note-paper"));
-}
-
-function rememberTextInput(element: HTMLInputElement | HTMLTextAreaElement) {
-  if (!insideNotes(element)) return;
-  savedInput = {
-    element,
-    start: element.selectionStart ?? element.value.length,
-    end: element.selectionEnd ?? element.value.length,
-  };
-  savedRange = null;
-}
-
-document.addEventListener("selectionchange", () => {
-  const selection = window.getSelection();
-  if (!selection?.rangeCount) return;
-  const range = selection.getRangeAt(0);
-  const node = range.commonAncestorContainer;
-  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-  if (!insideNotes(element) || !element?.closest("[contenteditable='true']")) return;
-  savedRange = range.cloneRange();
-  savedInput = null;
-});
-
-for (const eventName of ["focusin", "select", "keyup", "mouseup"] as const) {
-  document.addEventListener(eventName, (event) => {
-    const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) rememberTextInput(target);
-  }, true);
-}
-
-function dispatchInput(element: HTMLElement, value: string) {
-  try {
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-  } catch {
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-}
-
-function insertAtSavedSelection(value: string) {
-  if (savedInput?.element.isConnected && insideNotes(savedInput.element)) {
-    const { element, start, end } = savedInput;
-    element.focus();
-    element.setRangeText(value, start, end, "end");
-    rememberTextInput(element);
-    dispatchInput(element, value);
-    return true;
-  }
-
-  if (savedRange) {
-    const node = savedRange.commonAncestorContainer;
-    const origin = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-    const editable = origin?.closest<HTMLElement>("[contenteditable='true']");
-    if (editable?.isConnected && insideNotes(editable)) {
-      editable.focus();
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(savedRange);
-      const inserted = document.execCommand("insertText", false, value);
-      if (!inserted) {
-        savedRange.deleteContents();
-        const text = document.createTextNode(value);
-        savedRange.insertNode(text);
-        savedRange.setStartAfter(text);
-        savedRange.collapse(true);
-        selection?.removeAllRanges();
-        selection?.addRange(savedRange);
-      }
-      if (selection?.rangeCount) savedRange = selection.getRangeAt(0).cloneRange();
-      dispatchInput(editable, value);
-      return true;
-    }
-  }
-
-  const fallback = document.querySelector<HTMLElement>(".notes-pane .note-paper [contenteditable='true']");
-  if (!fallback) return false;
-  fallback.focus();
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(fallback);
-  range.collapse(false);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  savedRange = range.cloneRange();
-  return insertAtSavedSelection(value);
-}
-
-function normalize(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function readRecent() {
+export function readRecentNoteSymbols() {
   try {
     const values = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
     return Array.isArray(values) ? values.filter((value): value is string => typeof value === "string").slice(0, 16) : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-function rememberRecent(value: string) {
-  const next = [value, ...readRecent().filter((item) => item !== value)].slice(0, 16);
+export function rememberRecentNoteSymbol(value: string) {
+  const next = [value, ...readRecentNoteSymbols().filter((item) => item !== value)].slice(0, 16);
   localStorage.setItem(RECENT_KEY, JSON.stringify(next));
 }
-
-function makeSymbolButton(item: LibraryItem, onInsert: (value: string) => void) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "note-symbol-item";
-  button.textContent = item.value;
-  button.title = item.name;
-  button.setAttribute("aria-label", `${item.name}: ${item.value}`);
-  button.addEventListener("pointerdown", (event) => event.preventDefault());
-  button.addEventListener("click", () => onInsert(item.value));
-  return button;
-}
-
-function enhancePopover(popover: HTMLElement) {
-  if (popover.querySelector(".note-symbol-library")) return;
-  popover.classList.add("symbol-library-ready");
-
-  const library = document.createElement("div");
-  library.className = "note-symbol-library";
-  library.innerHTML = `
-    <div class="note-symbol-tabs" role="tablist">
-      <button type="button" class="active" data-kind="icon" role="tab" aria-selected="true">Icon</button>
-      <button type="button" data-kind="emoji" role="tab" aria-selected="false">Emoji</button>
-    </div>
-    <label class="note-symbol-search">
-      <span>⌕</span>
-      <input type="search" placeholder="Tìm icon hoặc emoji…" autocomplete="off" />
-    </label>
-    <div class="note-symbol-results"></div>
-    <footer>Bấm để chèn tại vị trí con trỏ · Icon và emoji sẽ theo cỡ chữ của note</footer>
-  `;
-  popover.appendChild(library);
-
-  const tabs = Array.from(library.querySelectorAll<HTMLButtonElement>(".note-symbol-tabs button"));
-  const search = library.querySelector<HTMLInputElement>("input")!;
-  const results = library.querySelector<HTMLElement>(".note-symbol-results")!;
-  let activeKind: LibraryKind = "icon";
-  let query = "";
-
-  const render = () => {
-    results.replaceChildren();
-    const normalizedQuery = normalize(query);
-    const recent = readRecent()
-      .map((value) => itemByValue.get(value))
-      .filter((item): item is (LibraryItem & { kind: LibraryKind }) => Boolean(item && item.kind === activeKind))
-      .filter((item) => !normalizedQuery || normalize(`${item.value} ${item.name} ${item.keywords}`).includes(normalizedQuery));
-
-    const insert = (value: string) => {
-      if (!insertAtSavedSelection(value)) return;
-      rememberRecent(value);
-      render();
-    };
-
-    if (recent.length) {
-      const section = document.createElement("section");
-      section.innerHTML = "<label>Gần đây</label>";
-      const grid = document.createElement("div");
-      grid.className = "note-symbol-grid";
-      recent.forEach((item) => grid.appendChild(makeSymbolButton(item, insert)));
-      section.appendChild(grid);
-      results.appendChild(section);
-    }
-
-    let visibleCount = 0;
-    GROUPS.filter((group) => group.kind === activeKind).forEach((group) => {
-      const items = group.items.filter((item) => !normalizedQuery || normalize(`${item.value} ${item.name} ${item.keywords}`).includes(normalizedQuery));
-      if (!items.length) return;
-      visibleCount += items.length;
-      const section = document.createElement("section");
-      const label = document.createElement("label");
-      label.textContent = group.label;
-      const grid = document.createElement("div");
-      grid.className = "note-symbol-grid";
-      items.forEach((item) => grid.appendChild(makeSymbolButton(item, insert)));
-      section.append(label, grid);
-      results.appendChild(section);
-    });
-
-    if (!visibleCount) {
-      const empty = document.createElement("div");
-      empty.className = "note-symbol-empty";
-      empty.textContent = "Không tìm thấy biểu tượng phù hợp.";
-      results.appendChild(empty);
-    }
-  };
-
-  tabs.forEach((tab) => tab.addEventListener("click", () => {
-    activeKind = tab.dataset.kind as LibraryKind;
-    tabs.forEach((item) => {
-      const active = item === tab;
-      item.classList.toggle("active", active);
-      item.setAttribute("aria-selected", String(active));
-    });
-    render();
-  }));
-  search.addEventListener("input", () => {
-    query = search.value;
-    render();
-  });
-  render();
-}
-
-function scan() {
-  document.querySelectorAll<HTMLElement>(".symbol-popover").forEach(enhancePopover);
-}
-
-const observer = new MutationObserver(scan);
-observer.observe(document.documentElement, { childList: true, subtree: true });
-scan();
-
-export {};
