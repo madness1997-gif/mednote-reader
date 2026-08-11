@@ -24,7 +24,7 @@ jobs:
           p=Path('app/pdf-reader.tsx'); t=p.read_text()
           start=t.index('export type PdfTool =')
           end=t.index('type PageViewport =')
-          block='import type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfMarkupAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\nexport type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfInkAnnotation, PdfMarkupAnnotation, PdfObjectAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\n\n'
+          block='import type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfInkAnnotation, PdfMarkupAnnotation, PdfObjectAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\nexport type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfInkAnnotation, PdfMarkupAnnotation, PdfObjectAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\n\n'
           p.write_text(t[:start]+block+t[end:])
           p=Path('app/document-runtime-adapter.ts'); t=p.read_text(); p.write_text(t.replace('import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-reader";','import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-domain";'))
           p=Path('package.json'); t=p.read_text();
