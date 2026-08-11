@@ -32,7 +32,7 @@ test("First Aid variables travel with previews and standalone export HTML", () =
   const variables = firstAidThemeVariables("dark");
   assert.equal(variables["--fa-ink"], FIRST_AID_THEMES.dark.ink);
   assert.equal(variables["--fa-block-bg"], FIRST_AID_THEMES.dark.block);
-  assert.match(firstAidThemeInlineStyle("mint"), /--fa-band-primary:#176d5c/);
+  assert.match(firstAidThemeInlineStyle("mint"), new RegExp(`--fa-band-primary:${FIRST_AID_THEMES.mint.bandPrimary}`));
   assert.match(firstAidThemeInlineStyle("mint"), /--fa-pearl-ink:#40370f/);
 });
 
