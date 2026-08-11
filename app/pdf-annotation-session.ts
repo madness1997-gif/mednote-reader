@@ -37,19 +37,19 @@ export function undoPdfAnnotations(current: PdfAnnotation[], history: PdfAnnotat
     annotations: previous,
     history: {
       undo: history.undo.slice(0, -1),
-      redo: [current, ...history.redo].slice(0, PDF_ANNOTATION_HISTORY_LIMIT),
+      redo: [...history.redo, current].slice(-PDF_ANNOTATION_HISTORY_LIMIT),
     },
   };
 }
 
 export function redoPdfAnnotations(current: PdfAnnotation[], history: PdfAnnotationHistory) {
-  const next = history.redo[0];
+  const next = history.redo.at(-1);
   if (!next) return { annotations: current, history };
   return {
     annotations: next,
     history: {
       undo: [...history.undo, current].slice(-PDF_ANNOTATION_HISTORY_LIMIT),
-      redo: history.redo.slice(1),
+      redo: history.redo.slice(0, -1),
     },
   };
 }

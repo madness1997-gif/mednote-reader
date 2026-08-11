@@ -48,10 +48,10 @@ test("opening another ready PDF disposes previous PDF.js proxy", async () => {
   assert.equal(one.destroyed, 1);
 });
 
-test("page, zoom, continuous navigation and anchored zoom are clamped", () => {
+test("page, zoom, continuous navigation and Ctrl+wheel anchor are clamped", () => {
   assert.equal(clampPdfPage(99, 3), 3);
   assert.equal(clampPdfPage(-2, 3), 1);
-  assert.equal(clampPdfZoom(99), 4);
+  assert.equal(clampPdfZoom(99), 2.5);
   assert.equal(nextContinuousPage(2, 1, 3), 3);
   assert.equal(nextContinuousPage(3, 1, 3), 3);
   assert.deepEqual(zoomAroundAnchor(1, 2, { contentX: 100, contentY: 80, localX: 20, localY: 10 }), { left: 180, top: 150 });

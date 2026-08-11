@@ -1,5 +1,4 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdfDocument } from "./pdf-document-loader";
 import type { PDFiumDocument } from "./pdfium-renderer";
 
 export type PdfReaderStatus = "idle" | "loading" | "ready" | "error";
@@ -28,14 +27,17 @@ export type PdfSearchResult = {
   occurrences: number;
 };
 
+type LoadPdf = (source: Uint8Array | Blob) => Promise<PDFDocumentProxy>;
 type LoadPdfium = (data: Uint8Array) => Promise<PDFiumDocument>;
+type PdfReaderListener = (state: ReturnType<PdfReaderController["getState"]>) => void;
 
 export type PdfReaderControllerDependencies = {
-  loadPdf?: typeof loadPdfDocument;
+  loadPdf?: LoadPdf;
   loadPdfium?: LoadPdfium;
   readBlob?: (id: string) => Promise<Blob | null>;
 };
 
+const defaultLoadPdf: LoadPdf = async (source) => (await import("./pdf-document-loader")).loadPdfDocument(source);
 const defaultLoadPdfium: LoadPdfium = async (data) => (await import("./pdfium-renderer")).loadPdfiumDocument(data);
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
 
@@ -44,7 +46,7 @@ export function clampPdfPage(page: number, numPages: number) {
 }
 
 export function clampPdfZoom(zoom: number) {
-  return clamp(zoom, .35, 4);
+  return clamp(zoom, .55, 2.5);
 }
 
 export function nextContinuousPage(current: number, direction: -1 | 1, numPages: number) {
@@ -109,7 +111,7 @@ function countOccurrences(haystack: string, needle: string) {
 }
 
 export class PdfReaderController {
-  private readonly loadPdf: typeof loadPdfDocument;
+  private readonly loadPdf: LoadPdf;
   private readonly loadPdfium: LoadPdfium;
   private readonly readBlob?: (id: string) => Promise<Blob | null>;
   private generation = 0;
@@ -117,9 +119,10 @@ export class PdfReaderController {
   private status: PdfReaderStatus = "idle";
   private error: Error | null = null;
   private readonly textCache = new Map<string, Map<number, string>>();
+  private readonly listeners = new Set<PdfReaderListener>();
 
   constructor(dependencies: PdfReaderControllerDependencies = {}) {
-    this.loadPdf = dependencies.loadPdf || loadPdfDocument;
+    this.loadPdf = dependencies.loadPdf || defaultLoadPdf;
     this.loadPdfium = dependencies.loadPdfium || defaultLoadPdfium;
     this.readBlob = dependencies.readBlob;
   }
@@ -128,12 +131,30 @@ export class PdfReaderController {
     return { status: this.status, error: this.error, session: this.session };
   }
 
+  subscribe(listener: PdfReaderListener) {
+    this.listeners.add(listener);
+    listener(this.getState());
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private emit() {
+    const state = this.getState();
+    this.listeners.forEach((listener) => listener(state));
+  }
+
+  selectDocumentTarget<T extends { id: string; reader?: { page?: number } }>(documents: T[], documentId: string, requestedPage?: number) {
+    const document = documents.find((item) => item.id === documentId);
+    if (!document) return null;
+    return { document, page: Math.max(1, Math.round(requestedPage ?? document.reader?.page ?? 1)) };
+  }
+
   async close() {
     this.generation += 1;
     const old = this.session;
     this.session = null;
     this.status = "idle";
     this.error = null;
+    this.emit();
     if (old) await Promise.allSettled([old.pdf.destroy(), old.pdfium?.destroy?.()]);
   }
 
@@ -141,6 +162,7 @@ export class PdfReaderController {
     const generation = ++this.generation;
     this.status = "loading";
     this.error = null;
+    this.emit();
     const bytes = new Uint8Array(await input.blob.arrayBuffer());
 
     let pdf: PDFDocumentProxy;
@@ -150,6 +172,7 @@ export class PdfReaderController {
       if (generation === this.generation) {
         this.status = "error";
         this.error = error instanceof Error ? error : new Error(String(error));
+        this.emit();
       }
       throw error;
     }
@@ -169,13 +192,14 @@ export class PdfReaderController {
     };
     this.session = session;
     this.status = "ready";
+    this.emit();
 
     if (previous && previous.pdf !== pdf) {
       await Promise.allSettled([previous.pdf.destroy(), previous.pdfium?.destroy?.()]);
     }
 
     void resolveOutline(pdf).then((outline) => {
-      if (generation === this.generation && this.session === session) session.outline = outline;
+      if (generation === this.generation && this.session === session) { session.outline = outline; this.emit(); }
     }).catch(() => undefined);
 
     void this.loadPdfium(bytes.slice()).then((pdfium) => {
@@ -184,6 +208,7 @@ export class PdfReaderController {
         return;
       }
       session.pdfium = pdfium;
+      this.emit();
     }).catch(() => undefined);
 
     return session;
@@ -236,9 +261,11 @@ export class PdfReaderController {
             if (options.signal?.aborted) throw new DOMException("Search aborted", "AbortError");
             let text = cache.get(page);
             if (text === undefined) {
-              text = textOf(await (await proxy.getPage(page)).getTextContent());
-              cache.set(page, text);
+              const loadedText = textOf(await (await proxy.getPage(page)).getTextContent());
+              cache.set(page, loadedText);
+              text = loadedText;
             }
+            if (text === undefined) continue;
             const occurrences = countOccurrences(text, trimmed);
             if (!occurrences) continue;
             const lowered = text.toLocaleLowerCase();
