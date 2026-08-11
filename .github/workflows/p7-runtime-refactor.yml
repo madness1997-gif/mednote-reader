@@ -1,9 +1,0 @@
-name: P7 placeholder
-on:
-  push:
-    branches: [p7-pdf-runtime]
-jobs:
-  noop:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo P7
