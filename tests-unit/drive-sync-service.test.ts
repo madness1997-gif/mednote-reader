@@ -477,3 +477,11 @@ test("Drive v2 preserves the note runtime as active even when documents exist", 
     await desktop.close();
   }
 });
+
+test("Drive auto-sync watches canonical NoteStore content and hierarchy changes", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(
+    page,
+    /\[activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces, noteState\.activeSheetContent, noteState\.structure\]/,
+  );
+});

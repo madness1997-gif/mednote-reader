@@ -134,6 +134,14 @@ export class DocumentLibraryController {
     return `session-${this.now()}-${this.random().toString(16).slice(2)}`;
   }
 
+  private noteTargetExists(target: LinkedNoteTarget | undefined) {
+    const structure = this.notes.getSnapshot().structure;
+    if (!structure || !target) return false;
+    return target.targetType === "page"
+      ? structure.pages.some((page) => page.id === target.targetId)
+      : structure.sheets.some((sheet) => sheet.id === target.targetId);
+  }
+
   private persist(
     workspaces: WorkspaceItem[],
     activeWorkspaceId: string,
@@ -334,17 +342,32 @@ export class DocumentLibraryController {
       : `collection-${stableId(documents.map((document) => document.id).sort().join(":"))}`;
     const existing = input.workspaces.find((workspace) => workspace.id === workspaceId);
     if (existing) {
+      const reconnectTarget = pendingNoteTarget
+        && pendingNoteTarget.notebookId === temporary.noteNotebookId
+        && this.noteTargetExists(pendingNoteTarget.target)
+        ? pendingNoteTarget.target
+        : null;
+      if (reconnectTarget && existing.documents.length) {
+        await this.notes.saveDocumentWorkspace(documentWorkspaceInput(existing, reconnectTarget, {
+          workspaceMode: "split",
+          readerShare: input.readerShare,
+          noteZoom: input.noteZoom,
+        }));
+      }
       await this.notes.remapDocumentReferences(idMap);
       const workspaces = input.workspaces.filter((workspace) => workspace.id !== temporary.id);
       this.temporaryPdfs.clear();
       this.temporaryNoteTargets.delete(temporary.id);
-      const savedAt = this.persist(workspaces, existing.id, input);
+      const workspaceMode: WorkspaceMode = reconnectTarget ? "split" : input.workspaceMode;
+      const savedAt = this.persist(workspaces, existing.id, { ...input, workspaceMode });
       return {
         workspaces,
         activeWorkspaceId: existing.id,
-        workspaceMode: input.workspaceMode,
+        workspaceMode,
         savedAt,
-        message: "PDF này đã có trong thư viện; nguồn note đã được nối lại",
+        message: reconnectTarget
+          ? "PDF này đã có trong thư viện; nguồn note và liên kết đã được nối lại"
+          : "PDF này đã có trong thư viện; nguồn note đã được nối lại",
       };
     }
 
@@ -370,9 +393,7 @@ export class DocumentLibraryController {
       activeNotebookId: placeholder.id,
     };
     const structure = this.notes.getSnapshot().structure;
-    const pendingTargetExists = Boolean(structure && pendingNoteTarget && (pendingNoteTarget.target.targetType === "page"
-      ? structure.pages.some((page) => page.id === pendingNoteTarget.target.targetId)
-      : structure.sheets.some((sheet) => sheet.id === pendingNoteTarget.target.targetId)));
+    const pendingTargetExists = this.noteTargetExists(pendingNoteTarget?.target);
     const fallbackLinkedPageId = structure && savedWorkspace.noteNotebookId
       ? structure.pages.find((page) => structure.sections.find((section) => section.id === page.sectionId)?.notebookId === savedWorkspace.noteNotebookId)?.id
       : null;

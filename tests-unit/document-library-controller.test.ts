@@ -346,3 +346,35 @@ test("temporary Save Library preserves the exact Page or Sheet destination", asy
     } finally { await context.close(); }
   }
 });
+
+test("temporary duplicate PDF merges its new exact note link into the existing DocumentGraph", async () => {
+  const context = await harness();
+  try {
+    context.controller.activate();
+    const file = pdf("Existing.pdf", "same-body", 77);
+    const persisted = await context.controller.importPdfFiles(baseInput([file]));
+    const second = await context.notes.createPage("sec", "Second target", {});
+    const target = { targetType: "sheet" as const, targetId: second.active.activeSheetId };
+    const temporary = await context.controller.importPdfFiles({
+      ...baseInput([file], persisted.workspaces),
+      saveToLibrary: false,
+      activeWorkspaceId: persisted.activeWorkspaceId,
+      destination: { mode: "existing", notebookId: "nb", target },
+    });
+    const saved = await context.controller.saveTemporaryWorkspace({
+      workspaceId: temporary.activeWorkspaceId,
+      workspaces: temporary.workspaces,
+      activeWorkspaceId: temporary.activeWorkspaceId,
+      hasActiveNote: true,
+      readerShare: 46,
+      workspaceMode: temporary.workspaceMode,
+      noteZoom: 1.15,
+    });
+    assert.equal(saved.activeWorkspaceId, persisted.activeWorkspaceId);
+    assert.equal(saved.workspaceMode, "split");
+    const graph = await context.repository.loadDocumentGraph();
+    assert.ok(graph?.links.some((link) => link.targetType === target.targetType && link.targetId === target.targetId));
+    assert.equal(graph?.documents.length, 1);
+    assert.equal(graph?.contexts.length, 1);
+  } finally { await context.close(); }
+});

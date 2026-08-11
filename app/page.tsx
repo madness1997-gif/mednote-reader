@@ -3038,7 +3038,7 @@ export default function Home() {
     if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
     const timer = window.setTimeout(() => { void syncToDrive(driveToken, true); }, 2200);
     return () => window.clearTimeout(timer);
-  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces]);
+  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces, noteState.activeSheetContent, noteState.structure]);
 
   const performSearch = async () => {
     const query = searchQuery.trim();
