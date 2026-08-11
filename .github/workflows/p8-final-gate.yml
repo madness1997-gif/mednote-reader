@@ -1,0 +1,68 @@
+name: P8 final gate
+
+on:
+  push:
+    branches: [p8-note-editor-engine]
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: p8-note-editor-engine
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: P8 boundary audit
+        shell: bash
+        run: |
+          ! grep -nE 'function RichTextEditor|function InkCanvas|function DraggableExcerpt|document\.execCommand\(' app/page.tsx
+          ! grep -R -nE 'noteStickersPlugin|firstAidBlocksPlugin' vite.github.config.ts vite.desktop.config.ts
+          test ! -e vite.note-stickers.ts
+          test ! -e vite.first-aid-blocks.ts
+          test ! -e app/note-zoom-runtime.ts
+          grep -q 'from "./pdf-domain"' app/note-runtime-adapter.ts
+          grep -q 'StickerPresetId' app/note-runtime-adapter.ts
+          grep -q 'noteRichTextController' app/equation-composer.tsx
+          ! grep -nE 'selectionchange|document\.execCommand' app/note-symbol-library.ts
+          grep -q 'SERIALIZATION_VERSION = 4' app/first-aid-block-editor.tsx
+          grep -q 'localBinaryStorage.readAsset' app/first-aid-block-editor.tsx
+      - name: Typecheck
+        run: npm run typecheck
+      - name: P3 gate
+        run: npm run test:p3
+      - name: P4 gate
+        run: npm run test:p4
+      - name: P5 gate
+        run: npm run test:p5
+      - name: P6 gate
+        run: npm run test:p6
+      - name: P6.5 gate
+        run: npm run test:p65
+      - name: P7 gate
+        run: npm run test:p7
+      - name: P8 gate
+        run: npm run test:p8
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright regression gate
+        run: npm run test:all
+      - name: Web build
+        run: npm run build:pages
+      - name: Desktop build
+        run: npm run build:desktop
+      - name: Remove final gate workflow
+        run: |
+          git config user.name "Dũng"
+          git config user.email "61448424+madness1997-gif@users.noreply.github.com"
+          git rm .github/workflows/p8-final-gate.yml
+          git commit -m "P8 complete validation gate"
+          git push origin HEAD:p8-note-editor-engine
