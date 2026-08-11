@@ -1,0 +1,37 @@
+name: P8 finalize source
+
+on:
+  push:
+    branches: [p8-note-editor-engine]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message != 'P8 finalized source ownership'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: p8-note-editor-engine
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/p8-finalize.cjs
+      - run: npm run typecheck
+      - run: npm run test:p8
+      - name: Commit finalized sources
+        run: |
+          git config user.name "Dũng"
+          git config user.email "61448424+madness1997-gif@users.noreply.github.com"
+          git add app package.json src tests-unit
+          if git diff --cached --quiet; then
+            echo "No final source changes"
+          else
+            git commit -m "P8 finalized source ownership"
+            git push origin HEAD:p8-note-editor-engine
+          fi
