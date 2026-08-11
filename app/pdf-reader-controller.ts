@@ -1,6 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdfDocument } from "./pdf-document-loader";
-import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
+import type { PDFiumDocument } from "./pdfium-renderer";
 
 export type PdfReaderStatus = "idle" | "loading" | "ready" | "error";
 export type PdfOutlineEntry = { title: string; page: number | null; depth: number };
@@ -28,12 +28,15 @@ export type PdfSearchResult = {
   occurrences: number;
 };
 
+type LoadPdfium = (data: Uint8Array) => Promise<PDFiumDocument>;
+
 export type PdfReaderControllerDependencies = {
   loadPdf?: typeof loadPdfDocument;
-  loadPdfium?: typeof loadPdfiumDocument;
+  loadPdfium?: LoadPdfium;
   readBlob?: (id: string) => Promise<Blob | null>;
 };
 
+const defaultLoadPdfium: LoadPdfium = async (data) => (await import("./pdfium-renderer")).loadPdfiumDocument(data);
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
 
 export function clampPdfPage(page: number, numPages: number) {
@@ -107,7 +110,7 @@ function countOccurrences(haystack: string, needle: string) {
 
 export class PdfReaderController {
   private readonly loadPdf: typeof loadPdfDocument;
-  private readonly loadPdfium: typeof loadPdfiumDocument;
+  private readonly loadPdfium: LoadPdfium;
   private readonly readBlob?: (id: string) => Promise<Blob | null>;
   private generation = 0;
   private session: PdfReaderSession | null = null;
@@ -117,7 +120,7 @@ export class PdfReaderController {
 
   constructor(dependencies: PdfReaderControllerDependencies = {}) {
     this.loadPdf = dependencies.loadPdf || loadPdfDocument;
-    this.loadPdfium = dependencies.loadPdfium || loadPdfiumDocument;
+    this.loadPdfium = dependencies.loadPdfium || defaultLoadPdfium;
     this.readBlob = dependencies.readBlob;
   }
 
