@@ -33,24 +33,24 @@ function runScenario(name: string): ScenarioResult {
   return JSON.parse(child.stdout) as ScenarioResult;
 }
 
-test("P4 fresh install returns a persistent empty workspace", () => {
+test("P6.5 fresh install returns the stable note runtime shell", () => {
   const { result } = runScenario("fresh");
-  assert.deepEqual(result.workspaceIds, ["empty-workspace"]);
+  assert.deepEqual(result.workspaceIds, ["note-runtime-v6"]);
   assert.deepEqual(result.workspaceKinds, ["empty"]);
-  assert.equal(result.activeWorkspaceId, "empty-workspace");
+  assert.equal(result.activeWorkspaceId, "note-runtime-v6");
   assert.equal(result.workspaceMode, "note");
 });
 
-test("P4 restores v6 NoteStructure and DocumentGraph", () => {
+test("P6.5 restores v6 NoteStructure and DocumentGraph plus one note runtime shell", () => {
   const restored = runScenario("v6");
-  assert.deepEqual(restored.result.workspaceIds, ["v6-workspace"]);
+  assert.deepEqual(restored.result.workspaceIds, ["v6-workspace", "note-runtime-v6"]);
   assert.deepEqual(restored.result.documentNames, ["v6-workspace.pdf"]);
   assert.equal(restored.activeBody, "from v6");
 });
 
-test("P4 v6 documents use document-runtime preference for active context and UI settings", () => {
+test("P6.5 v6 documents keep document-runtime preference for active context and UI settings", () => {
   const { result } = runScenario("v6-runtime");
-  assert.deepEqual(result.workspaceIds, ["context-a", "context-b"]);
+  assert.deepEqual(result.workspaceIds, ["context-a", "context-b", "note-runtime-v6"]);
   assert.equal(result.activeWorkspaceId, "context-b");
   assert.equal(result.readerShare, 72);
   assert.equal(result.workspaceMode, "note");
@@ -58,9 +58,9 @@ test("P4 v6 documents use document-runtime preference for active context and UI 
   assert.equal(result.savedAt, 777);
 });
 
-test("P4 incremental v5 wins over localStorage v2 for note migration and runtime fallback", () => {
+test("P6.5 incremental v5 wins over localStorage v2 for note migration and runtime fallback", () => {
   const restored = runScenario("v5-precedence");
-  assert.deepEqual(restored.result.workspaceIds, ["v5-workspace"]);
+  assert.deepEqual(restored.result.workspaceIds, ["v5-workspace", "note-runtime-v6"]);
   assert.equal(restored.result.activeWorkspaceId, "v5-workspace");
   assert.equal(restored.activeBody, "from v5");
   assert.equal(restored.result.readerShare, 61);
@@ -69,21 +69,22 @@ test("P4 incremental v5 wins over localStorage v2 for note migration and runtime
   assert.equal(restored.result.savedAt, 505);
 });
 
-test("P4 corrupt legacy storage produces warnings without aborting bootstrap", () => {
+test("P6.5 corrupt legacy storage produces warnings without aborting bootstrap", () => {
   const { result } = runScenario("corrupt");
-  assert.deepEqual(result.workspaceIds, ["empty-workspace"]);
+  assert.deepEqual(result.workspaceIds, ["note-runtime-v6"]);
   assert.ok(result.warnings.length >= 4);
 });
 
-test("P4 migrates legacy notebook v1 into v6 Sheet content", () => {
+test("P6.5 migrates legacy notebook v1 into canonical v6 Sheet content before shell fallback", () => {
   const restored = runScenario("legacy-notebook");
   assert.equal(restored.activeBody, "legacy notebook body");
   assert.equal(restored.result.readerShare, 43);
   assert.equal(restored.result.workspaceMode, "note");
+  assert.deepEqual(restored.result.workspaceIds, ["note-runtime-v6"]);
   assert.deepEqual(restored.result.workspaceKinds, ["empty"]);
 });
 
-test("P4 migrates current-pdf once and preserves the legacy blob and name", () => {
+test("P6.5 migrates current-pdf once and preserves the legacy blob and name", () => {
   const restored = runScenario("legacy-pdf");
   assert.deepEqual(restored.result.documentNames, ["Legacy Harrison.pdf"]);
   assert.deepEqual(restored.libraryDocumentNames, ["Legacy Harrison.pdf"]);
@@ -91,18 +92,19 @@ test("P4 migrates current-pdf once and preserves the legacy blob and name", () =
   assert.equal(restored.pdf?.text, "legacy-one");
   assert.equal(restored.pdf?.textAfterSecondBootstrap, "legacy-one");
   assert.equal(restored.result.workspaceMode, "split");
+  assert.equal(restored.result.workspaceIds.at(-1), "note-runtime-v6");
 });
 
-test("P4 never restores temporary runtime workspaces", () => {
+test("P6.5 never restores temporary runtime workspaces", () => {
   const { result } = runScenario("temporary");
-  assert.deepEqual(result.workspaceIds, ["persistent-workspace"]);
+  assert.deepEqual(result.workspaceIds, ["persistent-workspace", "note-runtime-v6"]);
   assert.equal(result.activeWorkspaceId, "persistent-workspace");
   assert.equal(result.readerShare, 58);
   assert.equal(result.workspaceMode, "reader");
   assert.equal(result.noteZoom, 1.2);
 });
 
-test("P4 page.tsx only applies BootstrapResult and has no legacy bootstrap knowledge", () => {
+test("P4 boundary remains: page.tsx only applies BootstrapResult and has no legacy bootstrap knowledge", () => {
   const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
   const bootstrapSource = readFileSync(new URL("../app/app-bootstrap.ts", import.meta.url), "utf8");
   assert.match(pageSource, /bootstrapMedNote\(\)/);
