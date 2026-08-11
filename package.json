@@ -15,7 +15,7 @@
     "test:p3": "node --import tsx --test tests-unit/local-binary-storage.test.ts",
     "test:p4": "node --import tsx --test tests-unit/app-bootstrap.test.ts",
     "test:p5": "node --import tsx --test tests-unit/document-library-controller.test.ts",
-    "test:p6": "node --import tsx --test tests-unit/drive-sync-service.test.ts",
+    "test:p6": "node --import tsx --test tests-unit/drive-sync-service.test.ts tests-unit/drive-backup-compat.test.ts",
     "test:p65": "node --import tsx --test tests-unit/library-projection.test.ts",
     "test:all": "playwright test",
     "build:pages": "vite build --config vite.github.config.ts",
