@@ -31,11 +31,11 @@ export function LibraryPanel({ scope }: { scope: LibraryPanelScope }) {
   const { activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
   return (<><div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
           <aside className="library-panel" aria-label="Thư viện tài liệu và ghi chú" onPointerDown={(event) => event.stopPropagation()}>
-            <div className="library-header"><div><strong>Thư viện</strong><span>PDF và Note nằm ở hai cột riêng; liên kết giữa chúng vẫn được giữ nguyên</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
+            <div className="library-header"><div><strong>Thư viện</strong><span>Tài liệu bên trái, ghi chú bên phải; liên kết giữa chúng vẫn được giữ nguyên</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
             <button className="library-import" disabled={!ready} onClick={() => libraryPdfInputRef.current?.click()}><FolderOpen size={18} /><span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>PDF được quản lý độc lập với cấu trúc Notebook / Section / Page</small></span></button>
             <div className="library-list library-two-column">
-              <section className="library-domain library-pdf-domain" aria-label="PDF">
-                <div className="library-domain-heading"><div><strong>PDF</strong><span>{libraryProjection.documents.length} mục</span></div><small>DocumentGraph</small></div>
+              <section className="library-domain library-pdf-domain" aria-label="Tài liệu">
+                <div className="library-domain-heading"><div><strong>Tài liệu</strong><span>{libraryProjection.documents.length} mục</span></div><small>DocumentGraph</small></div>
                 <div className="library-domain-scroll">
                   {libraryProjection.documents.length ? libraryProjection.documents.map((item) => {
                     const workspace = workspaces.find((candidate) => candidate.id === item.id);
@@ -76,8 +76,8 @@ export function LibraryPanel({ scope }: { scope: LibraryPanelScope }) {
                 </div>
               </section>
 
-              <section className="library-domain library-note-domain" aria-label="Note">
-                <div className="library-domain-heading"><div><strong>Note</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>NoteStructure</small></div>
+              <section className="library-domain library-note-domain" aria-label="Ghi chú">
+                <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>NoteStructure</small></div>
                 <div className="library-domain-scroll">
                   {libraryProjection.notes.length ? libraryProjection.notes.map((notebook) => (
                     <div className="library-row library-row-single" key={`note:${notebook.id}`}>

@@ -63,6 +63,16 @@ test("P9 Library and Drive panels are render consumers only", async () => {
   assert.match(library, /libraryProjection/);
 });
 
+test("Library keeps documents on the left and notes on the right", async () => {
+  const library = await source("app/ui/library-panel.tsx");
+  const layout = await source("app/library-two-column.css");
+  const documents = library.indexOf('aria-label="Tài liệu"');
+  const notes = library.indexOf('aria-label="Ghi chú"');
+  assert.ok(documents >= 0 && notes > documents);
+  assert.match(library, /className="library-list library-two-column"/);
+  assert.match(layout, /grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+});
+
 test("P9 note UI is split into toolbar, stage, preview and toolbar view model", async () => {
   const page = await source("app/page.tsx");
   const pane = await source("app/ui/note-pane.tsx");
