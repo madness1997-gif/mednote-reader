@@ -1,0 +1,177 @@
+/* Signature polish for the First Aid note template.
+   Keep the reading surface clean; controls only surface during direct interaction. */
+
+.template-first-aid {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .paper-background {
+  background: var(--fa-paper-bg) !important;
+}
+
+.template-first-aid .typed-layer {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .note-title-input {
+  min-height: 38px;
+  margin: 0 0 9px;
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: linear-gradient(90deg, var(--fa-band-primary) 0 74%, var(--fa-band-secondary) 74% 100%) !important;
+  color: var(--fa-title-ink) !important;
+  box-shadow: none !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 850 !important;
+  line-height: 1.15 !important;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.template-first-aid .note-title-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--fa-band-secondary) 66%, white);
+  outline-offset: 2px;
+}
+
+.template-first-aid .fa-block-editor {
+  margin-top: 8px;
+  color: var(--fa-ink);
+}
+
+.template-first-aid .fa-block {
+  background: var(--fa-block-bg);
+}
+
+.template-first-aid .fa-block-heading {
+  background: linear-gradient(90deg, var(--fa-heading-bg), color-mix(in srgb, var(--fa-heading-bg) 82%, var(--fa-secondary)));
+  border-bottom: 1px solid color-mix(in srgb, var(--fa-heading-bg) 72%, black);
+}
+
+.template-first-aid .fa-heading-input {
+  min-height: 32px;
+  padding: 7px 10px !important;
+  letter-spacing: .055em;
+}
+
+.template-first-aid .fa-label-layout {
+  background: linear-gradient(90deg, var(--fa-label-bg) 0 22%, var(--fa-block-bg) 22% 100%);
+  border-bottom-color: var(--fa-border);
+}
+
+.template-first-aid .fa-label-input {
+  color: var(--fa-label-ink, var(--fa-primary)) !important;
+  background: transparent !important;
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--fa-primary) 42%, var(--fa-block-bg));
+}
+
+.template-first-aid .fa-content-input,
+.template-first-aid .fa-rich-editor {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .fa-text-block,
+.template-first-aid .fa-block-figure,
+.template-first-aid .fa-table-block {
+  background: var(--fa-block-bg);
+  border-bottom-color: var(--fa-border);
+}
+
+.template-first-aid .fa-table-grid {
+  border-color: var(--fa-border);
+  background: var(--fa-block-bg);
+}
+
+.template-first-aid .fa-table-head {
+  background: var(--fa-table-head-bg) !important;
+  color: var(--fa-table-head-ink, var(--fa-primary)) !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-weight: 800 !important;
+}
+
+.template-first-aid .fa-table-cell {
+  background: var(--fa-block-bg) !important;
+  color: var(--fa-ink) !important;
+}
+
+.template-first-aid .fa-caption-input {
+  background: var(--fa-caption-bg) !important;
+  color: var(--fa-caption-ink) !important;
+}
+
+.template-first-aid .fa-pearl-layout {
+  background: var(--fa-pearl-bg);
+  color: var(--fa-pearl-ink);
+  border-color: var(--fa-pearl-border);
+}
+
+/* Table row/column controls are intentionally invisible at rest. The block toolbar
+   remains available, while +/- controls appear only while the selected table is
+   directly hovered (or when keyboard focus is already inside the group). */
+.fa-table-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: max-width .14s ease, opacity .12s ease, transform .12s ease;
+}
+
+.fa-block.selected:hover .fa-table-toolbar-group,
+.fa-table-toolbar-group:focus-within {
+  width: auto;
+  max-width: 112px;
+  opacity: 1;
+  overflow: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.fa-table-toolbar-action {
+  position: relative;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px;
+  display: inline-grid !important;
+  grid-template-columns: 8px 12px;
+  place-content: center;
+  gap: 0;
+  padding: 0 !important;
+  border-radius: 5px !important;
+  color: var(--fa-toolbar-ink) !important;
+}
+
+.fa-table-toolbar-action:hover:not(:disabled) {
+  background: var(--fa-focus-bg) !important;
+  color: var(--fa-primary) !important;
+}
+
+.fa-table-toolbar-action:disabled {
+  opacity: .28 !important;
+}
+
+/* Make editing chrome subordinate to note content. */
+.template-first-aid .fa-block-toolbar {
+  min-height: 26px;
+  background: color-mix(in srgb, var(--fa-toolbar-bg) 96%, transparent);
+  border-bottom-color: var(--fa-soft-border);
+}
+
+.template-first-aid .fa-block.selected {
+  outline-width: 1.5px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--fa-primary) 13%, transparent);
+}
+
+.template-first-aid .fa-insert-slot:not(.last) .fa-insert-button {
+  opacity: 0;
+}
+
+.template-first-aid .fa-insert-slot:not(.last):hover .fa-insert-button,
+.template-first-aid .fa-insert-slot:not(.last) .fa-insert-button:focus-visible {
+  opacity: 1;
+}
