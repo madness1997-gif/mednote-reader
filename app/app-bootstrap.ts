@@ -1,6 +1,6 @@
 import { loadIncrementalLibrary } from "./incremental-library-store";
 import { localBinaryStorage, type StoredPdf } from "./local-binary-storage";
-import { noteStore } from "./note-store";
+import { noteRepository, noteStore } from "./note-store";
 import type { LegacyRelationV2 } from "./note-migration";
 import {
   createBlankPage,
@@ -137,6 +137,15 @@ async function readLegacySnapshots(warnings: string[]): Promise<BootstrapSnapsho
 
 function readPreferredRuntimeSnapshot(snapshots: BootstrapSnapshots) {
   return snapshots.documentSnapshot || snapshots.incrementalSnapshot || snapshots.localSnapshot;
+}
+
+async function hasCanonicalV6Library(warnings: string[]) {
+  try {
+    return Boolean(await noteRepository.loadLibrary());
+  } catch {
+    warnings.push("Không thể kiểm tra library v6 trước bootstrap; sẽ thử các nguồn migration cũ.");
+    return false;
+  }
 }
 
 async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: string[]) {
@@ -293,11 +302,13 @@ export async function bootstrapMedNote(): Promise<BootstrapResult> {
   const warnings: string[] = [];
   const snapshots = await readLegacySnapshots(warnings);
   const preferred = readPreferredRuntimeSnapshot(snapshots);
+  const hadCanonicalLibrary = await hasCanonicalV6Library(warnings);
 
   await initializeV6Library(snapshots, warnings);
 
   const v6Runtime = restoreV6DocumentRuntime(preferred, warnings);
-  if (v6Runtime) return v6Runtime;
+  const v6HasDocuments = Boolean(v6Runtime?.workspaces.some((workspace) => workspace.documents.length > 0));
+  if (v6Runtime && (hadCanonicalLibrary || v6HasDocuments)) return v6Runtime;
 
   const legacyRuntime = restoreLegacyRuntime(preferred, warnings);
   if (legacyRuntime) return legacyRuntime;
@@ -306,6 +317,8 @@ export async function bootstrapMedNote(): Promise<BootstrapResult> {
   if (snapshots.legacyNotebook || pdfMigration) {
     return migrateLegacyNotebook(snapshots.legacyNotebook, pdfMigration, warnings);
   }
+
+  if (v6Runtime) return v6Runtime;
 
   const workspace = noteOnlyWorkspace();
   return resultWithWarnings({
