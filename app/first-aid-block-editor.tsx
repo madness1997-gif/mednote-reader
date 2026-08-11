@@ -11,7 +11,9 @@ import {
   LayoutList,
   Lightbulb,
   List,
+  Minus,
   Plus,
+  Rows3,
   Table2,
   Trash2,
   Type,
@@ -213,33 +215,33 @@ function blockPlainText(block: FirstAidBlock) {
 }
 
 function blockStaticHtml(block: FirstAidBlock) {
-  const border = "border-bottom:1px solid #b8c3c7;";
-  const content = "font-family:'Times New Roman',serif;font-size:12px;line-height:1.32;color:#26343a;";
+  const border = "border-bottom:1px solid var(--fa-border,#b8c3c7);";
+  const content = "font-family:'Times New Roman',serif;font-size:12px;line-height:1.32;color:var(--fa-ink,#26343a);";
   const rich = (html: string | undefined, text = "", textStyle: TextStyle = "paragraph") => sanitizeBlockRichTextHtml(richBlockHtml(html, text, textStyle));
   if (block.type === "heading") {
-    return `<div style="margin:0;padding:5px 8px;background:#1b7184;color:#fff;font:800 11px/1.2 'Segoe UI',Arial,sans-serif;letter-spacing:.04em;text-transform:uppercase">${rich(block.titleHtml, block.title)}</div>`;
+    return `<div style="margin:0;padding:5px 8px;background-color:var(--fa-heading-bg,#1b7184);color:var(--fa-heading-ink,#fff);font-family:'Segoe UI',Arial,sans-serif;font-size:11px;font-weight:800;line-height:1.2">${rich(block.titleHtml, block.title)}</div>`;
   }
   if (block.type === "label") {
-    return `<div style="display:grid;grid-template-columns:22% 1fr;background:linear-gradient(90deg,#eff7f8 0 22%,transparent 22%);${border}"><div style="padding:5px 6px;color:#1b7184;border-right:1px solid #d3e1e4;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:22% 1fr;background-color:var(--fa-block-bg,#fff);${border}"><div style="padding:5px 6px;background-color:var(--fa-label-bg,#eff7f8);color:var(--fa-primary,#1b7184);border-right:1px solid var(--fa-soft-border,#d3e1e4);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.25">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div></div>`;
   }
   if (block.type === "text") {
-    return `<div style="padding:4px 6px;${border}${content}">${rich(block.textHtml, block.text, block.textStyle)}</div>`;
+    return `<div style="padding:4px 6px;background-color:var(--fa-block-bg,#fff);${border}${content}">${rich(block.textHtml, block.text, block.textStyle)}</div>`;
   }
   if (block.type === "figure" || block.type === "figure-text") {
     const objectAttribute = block.imageObjectId ? ` data-mednote-image-object-id="${escapeHtml(block.imageObjectId)}"` : "";
-    const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;place-items:center;background:#eef3f4;color:#72828a;font:700 10px/1.3 'Segoe UI',Arial,sans-serif">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:3px 6px;background:#edf1f2;color:#43545d;font:600 9px/1.3 'Segoe UI',Arial,sans-serif">${rich(block.captionHtml, block.caption)}</div>`;
-    if (block.type === "figure") return `<div style="padding:6px;${border}">${figure}</div>`;
+    const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId)}" style="min-height:92px;display:grid;align-items:center;background-color:var(--fa-muted-bg,#eef3f4);color:var(--fa-muted-ink,#72828a);font-family:'Segoe UI',Arial,sans-serif;font-size:10px;font-weight:700;line-height:1.3;text-align:center">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:3px 6px;background-color:var(--fa-caption-bg,#edf1f2);color:var(--fa-caption-ink,#43545d);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:600;line-height:1.3">${rich(block.captionHtml, block.caption)}</div>`;
+    if (block.type === "figure") return `<div style="padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${figure}</div>`;
     const text = `<div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div>`;
-    return `<div style="display:grid;grid-template-columns:44% 1fr;gap:8px;padding:6px;${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
+    return `<div style="display:grid;grid-template-columns:44% 1fr;column-gap:8px;padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
   }
   if (block.type === "table") {
-    return `<div style="padding:5px;${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell, columnIndex) => `<${rowIndex === 0 ? "th" : "td"} style="padding:4px 5px;border:1px solid #b9c4c8;${rowIndex === 0 ? "color:#1b7184;font:800 9px/1.2 'Segoe UI',Arial,sans-serif;text-align:left;background:#f2f6f7" : ""}">${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
+    return `<div style="padding:5px;background-color:var(--fa-block-bg,#fff);${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell, columnIndex) => `<${rowIndex === 0 ? "th" : "td"} style="padding:4px 5px;border-style:solid;border-width:1px;border-color:var(--fa-border,#b9c4c8);${rowIndex === 0 ? "color:var(--fa-primary,#1b7184);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.2;text-align:left;background-color:var(--fa-table-head-bg,#f2f6f7)" : "background-color:var(--fa-block-bg,#fff)"}">${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
   }
   if (block.type === "flow") {
-    const flow = `<div style="display:flex;align-items:stretch;gap:4px;padding:5px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="flex:1;padding:5px;border:1px solid #b7c4c8;border-radius:4px;text-align:center;background:#fff">${rich(block.stepsHtml?.[index], step)}</div>${index < all.length - 1 ? '<div style="display:grid;place-items:center;color:#8b2c58;font-weight:800">→</div>' : ""}`).join("")}</div>`;
-    return `<div style="display:grid;grid-template-columns:22% 1fr;background:linear-gradient(90deg,#eff7f8 0 22%,transparent 22%);${border}"><div style="padding:5px 6px;color:#1b7184;border-right:1px solid #d3e1e4;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;
+    const flow = `<div style="display:flex;align-items:stretch;column-gap:4px;padding:5px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="padding:5px;border-style:solid;border-width:1px;border-color:var(--fa-border,#b7c4c8);text-align:center;background-color:var(--fa-flow-step-bg,#fff)">${rich(block.stepsHtml?.[index], step)}</div>${index < all.length - 1 ? '<div style="display:grid;align-items:center;color:var(--fa-secondary,#8b2c58);font-weight:800">→</div>' : ""}`).join("")}</div>`;
+    return `<div style="display:grid;grid-template-columns:22% 1fr;background-color:var(--fa-block-bg,#fff);${border}"><div style="padding:5px 6px;background-color:var(--fa-label-bg,#eff7f8);color:var(--fa-primary,#1b7184);border-right:1px solid var(--fa-soft-border,#d3e1e4);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.25">${rich(block.labelHtml, block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;
   }
-  return `<div style="display:grid;grid-template-columns:22% 1fr;margin:2px 0;border:1px solid #e0c96e;background:#fff7c7"><div style="padding:5px 6px;color:#8b2c58;border-right:1px solid #e7d98d;font:800 9px/1.25 'Segoe UI',Arial,sans-serif;text-transform:uppercase">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;${content}"><b>${rich(block.textHtml, block.text)}</b></div></div>`;
+  return `<div style="display:grid;grid-template-columns:22% 1fr;margin:2px 0;border-style:solid;border-width:1px;border-color:var(--fa-pearl-border,#e0c96e);background-color:var(--fa-pearl-bg,#fff7c7);color:var(--fa-pearl-ink,#3b3111)"><div style="padding:5px 6px;color:var(--fa-secondary,#8b2c58);border-right:1px solid var(--fa-pearl-border,#e7d98d);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.25">${rich(block.labelHtml, block.label)}</div><div style="padding:5px 6px;font-family:'Times New Roman',serif;font-size:12px;line-height:1.32"><b>${rich(block.textHtml, block.text)}</b></div></div>`;
 }
 
 function serializeBlocks(blocks: FirstAidBlock[]) {
@@ -482,7 +484,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   const duplicateBlock = (id: string) => {
     const index = blocks.findIndex((block) => block.id === id);
     if (index < 0) return;
-    const copy = { ...blocks[index], id: uid(), imageObjectId: undefined, imageAssetId: undefined, imageName: undefined, imageAspectRatio: undefined, rows: blocks[index].rows?.map((row) => [...row]), steps: blocks[index].steps ? [...blocks[index].steps] : undefined };
+    const copy = { ...blocks[index], id: uid(), imageObjectId: undefined, imageAssetId: undefined, imageName: undefined, imageAspectRatio: undefined, rows: blocks[index].rows?.map((row) => [...row]), rowsHtml: blocks[index].rowsHtml?.map((row) => [...row]), steps: blocks[index].steps ? [...blocks[index].steps] : undefined, stepsHtml: blocks[index].stepsHtml ? [...blocks[index].stepsHtml] : undefined };
     const next = [...blocks];
     next.splice(index + 1, 0, copy);
     commit(next);
@@ -577,6 +579,57 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     updateBlock(block.id, { rows, rowsHtml });
   };
 
+  const tableRows = (block: FirstAidBlock) => block.rows?.length ? block.rows : [["", ""]];
+
+  const tableRowsHtml = (block: FirstAidBlock) => tableRows(block).map((row, rowIndex) => row.map((cell, columnIndex) => (
+    block.rowsHtml?.[rowIndex]?.[columnIndex] ?? plainTextToRichHtml(cell)
+  )));
+
+  const addTableRow = (block: FirstAidBlock) => {
+    const rows = tableRows(block);
+    const columns = Math.max(1, rows[0]?.length ?? 2);
+    updateBlock(block.id, {
+      rows: [...rows, Array.from({ length: columns }, () => "Nội dung")],
+      rowsHtml: [...tableRowsHtml(block), Array.from({ length: columns }, () => plainTextToRichHtml("Nội dung"))],
+    });
+  };
+
+  const addTableColumn = (block: FirstAidBlock) => {
+    const rows = tableRows(block);
+    const columns = Math.max(1, rows[0]?.length ?? 2);
+    updateBlock(block.id, {
+      rows: rows.map((row, rowIndex) => [...row, rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung"]),
+      rowsHtml: tableRowsHtml(block).map((row, rowIndex) => [...row, plainTextToRichHtml(rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung")]),
+    });
+  };
+
+  const removeTableRow = (block: FirstAidBlock) => {
+    const rows = tableRows(block);
+    if (rows.length <= 1) return;
+    updateBlock(block.id, { rows: rows.slice(0, -1), rowsHtml: tableRowsHtml(block).slice(0, -1) });
+  };
+
+  const removeTableColumn = (block: FirstAidBlock) => {
+    const rows = tableRows(block);
+    const columns = Math.max(1, rows[0]?.length ?? 2);
+    if (columns <= 1) return;
+    updateBlock(block.id, {
+      rows: rows.map((row) => row.slice(0, -1)),
+      rowsHtml: tableRowsHtml(block).map((row) => row.slice(0, -1)),
+    });
+  };
+
+  const renderTableToolbar = (block: FirstAidBlock) => {
+    const rows = tableRows(block);
+    const columns = Math.max(1, rows[0]?.length ?? 2);
+    return <div className="fa-table-toolbar-group" role="group" aria-label="Chỉnh hàng và cột">
+      <button type="button" className="fa-table-toolbar-action" disabled={!canEdit} onClick={() => addTableRow(block)} aria-label="Thêm hàng" title="Thêm hàng"><Plus size={9} /><Rows3 size={13} /></button>
+      <button type="button" className="fa-table-toolbar-action" disabled={!canEdit} onClick={() => addTableColumn(block)} aria-label="Thêm cột" title="Thêm cột"><Plus size={9} /><Columns2 size={13} /></button>
+      <button type="button" className="fa-table-toolbar-action" disabled={!canEdit || rows.length <= 1} onClick={() => removeTableRow(block)} aria-label="Bớt hàng" title="Bớt hàng"><Minus size={9} /><Rows3 size={13} /></button>
+      <button type="button" className="fa-table-toolbar-action" disabled={!canEdit || columns <= 1} onClick={() => removeTableColumn(block)} aria-label="Bớt cột" title="Bớt cột"><Minus size={9} /><Columns2 size={13} /></button>
+    </div>;
+  };
+
   const renderRichField = (block: FirstAidBlock, field: "title" | "label" | "text" | "caption", htmlField: "titleHtml" | "labelHtml" | "textHtml" | "captionHtml", className: string, ariaLabel: string, options?: { singleLine?: boolean; placeholder?: string; textStyle?: TextStyle }) => (
     <BlockRichEditor
       editorId={`first-aid:${block.id}:${field}`}
@@ -621,9 +674,9 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     if (block.type === "figure") return <div className="fa-figure-block">{renderImageZone(block)}{renderRichField(block, "caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Nhập chú thích hình…" })}</div>;
     if (block.type === "figure-text") return <div className={`fa-figure-text ${block.imageSide === "right" ? "image-right" : ""}`}><div className="fa-figure-block">{renderImageZone(block)}{renderRichField(block, "caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Chú thích hình…" })}</div><div className="fa-figure-copy"><button className="fa-side-toggle" disabled={!canEdit} onClick={() => updateBlock(block.id, { imageSide: block.imageSide === "right" ? "left" : "right" })}>{block.imageSide === "right" ? "Đưa hình sang trái" : "Đưa hình sang phải"}</button>{renderRichField(block, "text", "textHtml", "fa-content-input", "Nội dung cạnh hình", { placeholder: "Nhập nội dung liên quan…" })}</div></div>;
     if (block.type === "table") {
-      const rows = block.rows ?? [["", ""]];
+      const rows = tableRows(block);
       const columns = Math.max(1, rows[0]?.length ?? 2);
-      return <div className="fa-table-block"><div className="fa-table-actions"><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: [...rows, Array.from({ length: columns }, () => "Nội dung")], rowsHtml: [...(block.rowsHtml ?? []), Array.from({ length: columns }, () => plainTextToRichHtml("Nội dung"))] })}>+ Hàng</button><button disabled={!canEdit} onClick={() => updateBlock(block.id, { rows: rows.map((row, index) => [...row, index === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung"]), rowsHtml: rows.map((row, rowIndex) => [...row.map((cell, columnIndex) => block.rowsHtml?.[rowIndex]?.[columnIndex] ?? plainTextToRichHtml(cell)), plainTextToRichHtml(rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung")]) })}>+ Cột</button><button disabled={!canEdit || rows.length <= 1} onClick={() => updateBlock(block.id, { rows: rows.slice(0, -1), rowsHtml: block.rowsHtml?.slice(0, -1) })}>− Hàng</button><button disabled={!canEdit || columns <= 1} onClick={() => updateBlock(block.id, { rows: rows.map((row) => row.slice(0, -1)), rowsHtml: block.rowsHtml?.map((row) => row.slice(0, -1)) })}>− Cột</button></div><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <BlockRichEditor key={`${rowIndex}-${columnIndex}`} editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`} className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"} html={block.rowsHtml?.[rowIndex]?.[columnIndex]} text={cell} editable={canEdit} ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`} onChange={(cellHtml, value) => updateTableCellRich(block, rowIndex, columnIndex, cellHtml, value)} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />))}</div></div>;
+      return <div className="fa-table-block"><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <BlockRichEditor key={`${rowIndex}-${columnIndex}`} editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`} className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"} html={block.rowsHtml?.[rowIndex]?.[columnIndex]} text={cell} editable={canEdit} ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`} onChange={(cellHtml, value) => updateTableCellRich(block, rowIndex, columnIndex, cellHtml, value)} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />))}</div></div>;
     }
     if (block.type === "flow") {
       const steps = block.steps ?? ["Bước 1"];
@@ -647,6 +700,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
               {canManage && <div className="fa-block-toolbar" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
                 <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedId(block.id); }} onDragEnd={() => setDraggedId(null)} aria-label="Kéo để đổi thứ tự" title="Kéo để đổi thứ tự"><GripVertical size={15} /></button>
                 <select value={block.type} onChange={(event) => convertBlock(block.id, event.target.value as BlockType)} aria-label="Đổi loại block">{BLOCK_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}</select>
+                {block.type === "table" && renderTableToolbar(block)}
                 <button type="button" disabled={index === 0} onClick={() => moveBlock(block.id, -1)} aria-label="Đưa block lên"><ArrowUp size={14} /></button>
                 <button type="button" disabled={index === blocks.length - 1} onClick={() => moveBlock(block.id, 1)} aria-label="Đưa block xuống"><ArrowDown size={14} /></button>
                 <button type="button" onClick={() => duplicateBlock(block.id)} aria-label="Nhân bản block"><Copy size={14} /></button>

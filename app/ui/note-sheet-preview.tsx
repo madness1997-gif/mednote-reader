@@ -1,6 +1,7 @@
 import { NoteInkCanvas } from "../note-ink-canvas";
 import { NoteObjectLayer } from "../note-object-layer";
 import { plainTextToRichHtml, type NoteExcerpt, type NotePage, type PaperSize, type TextFont } from "../note-runtime-adapter";
+import { firstAidThemeVariables } from "../first-aid-theme";
 import type { PdfRect } from "../pdf-domain";
 import type { ResolvedDocumentSource } from "../note-document-source";
 
@@ -31,6 +32,7 @@ function notePagePresentation(page: NotePage, zoom: number) {
     paperStyle: {
       "--paper-ratio": `${width} / ${height}`, "--paper-max-width": `${maxWidth}px`, "--note-view-zoom": zoom,
       "--paper-line-step": `${(lineStep / height) * 100}%`, "--paper-cell-x": `${(8 / width) * 100}%`, "--paper-cell-y": `${(8 / height) * 100}%`, "--cornell-header": `${(40 / height) * 100}%`,
+      ...(page.paper.template === "first-aid" ? firstAidThemeVariables(page.paper.color) : {}),
     } as React.CSSProperties,
     textLayerStyle: {
       "--text-font": TEXT_FAMILIES[page.text.font] ?? TEXT_FAMILIES.times, "--text-size": `${page.text.size}px`,

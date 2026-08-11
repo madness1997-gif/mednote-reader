@@ -59,6 +59,7 @@ import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
+import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -1902,7 +1903,9 @@ export default function Home() {
     for (const [index, page] of exportNotebook.pages.entries()) {
       const text = normalizeText(page.text);
       const font = TEXT_FONTS.find((option) => option.id === text.font) ?? TEXT_FONTS[0];
-      const textStyle = `font-family:${font.family};font-size:${text.size}px;color:${text.color === "auto" ? "#24343c" : text.color};font-weight:${text.bold ? 700 : 400};font-style:${text.italic ? "italic" : "normal"};text-decoration:${text.underline ? "underline" : "none"};text-align:${text.align}`;
+      const firstAidStyle = page.paper.template === "first-aid" ? `${firstAidThemeInlineStyle(page.paper.color)};background:var(--fa-paper-bg);padding:12px` : "";
+      const autoTextColor = page.paper.template === "first-aid" ? "var(--fa-ink,#24343c)" : "#24343c";
+      const textStyle = `${firstAidStyle};font-family:${font.family};font-size:${text.size}px;color:${text.color === "auto" ? autoTextColor : text.color};font-weight:${text.bold ? 700 : 400};font-style:${text.italic ? "italic" : "normal"};text-decoration:${text.underline ? "underline" : "none"};text-align:${text.align}`;
       const excerptsHtml: string[] = [];
       for (const excerpt of page.excerpts) {
         let content = excerpt.kind === "text" ? `<blockquote>${excerpt.richText ?? plainTextToRichHtml(excerpt.text ?? "")}</blockquote>` : "";
@@ -2377,6 +2380,7 @@ export default function Home() {
     "--paper-cell-x": `${(8 / paperWidth) * 100}%`,
     "--paper-cell-y": `${(8 / paperHeight) * 100}%`,
     "--cornell-header": `${(40 / paperHeight) * 100}%`,
+    ...(activeNote.paper.template === "first-aid" ? firstAidThemeVariables(activeNote.paper.color) : {}),
   } as React.CSSProperties;
   const textLayerStyle = {
     "--text-font": defaultTextFont.family,
