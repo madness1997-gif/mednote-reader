@@ -1,6 +1,9 @@
 import type { Plugin } from "vite";
 
-const IMPORT_ANCHOR = 'import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";';
+const IMPORT_ANCHORS = [
+  'import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";',
+  'import type { PDFiumDocument } from "./pdfium-renderer";',
+];
 const IMPORT_LINE = 'import { FirstAidBlockEditor } from "./first-aid-block-editor";';
 const EDITOR_ANCHOR = '<RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />';
 const EDITOR_REPLACEMENT = '{activeNote.paper.template === "first-aid" ? <FirstAidBlockEditor key={activeNote.id} html={activeNote.bodyHtml ?? ""} plainText={activeNote.body} mode={activeTool === "text" || activeTool === "pointer" ? "edit" : "view"} onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onInsertImage={addFirstAidImage} onRemoveImage={deleteExcerpt} onRequestPdfCrop={requestFirstAidPdfCrop} pdfCropResult={firstAidCropResult} onPdfCropHandled={finishFirstAidPdfCrop} pageObjectIds={activeNote.excerpts.map((excerpt) => excerpt.id)} pageObjectLayouts={Object.fromEntries(activeNote.excerpts.map((excerpt) => [excerpt.id, { height: excerpt.layout?.height ?? 0 }]))} pageHeightCss={basePaperMaxWidth * (paperHeight / paperWidth)} onTextActivate={(editorId, editor, range) => { if (activeTool === "pointer") { setActiveTool("text"); setNotePanel("text"); } activateTextEditor(editorId, editor, range); }} onNormalizeTextInput={normalizeTextEditorInput} /> : <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml, body })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />}';
@@ -122,8 +125,9 @@ export function firstAidBlocksPlugin(): Plugin {
 
       let next = code;
       if (!next.includes(IMPORT_LINE)) {
-        if (!next.includes(IMPORT_ANCHOR)) throw new Error("Không tìm thấy vị trí import để gắn First Aid block editor.");
-        next = next.replace(IMPORT_ANCHOR, `${IMPORT_ANCHOR}\n${IMPORT_LINE}`);
+        const importAnchor = IMPORT_ANCHORS.find((anchor) => next.includes(anchor));
+        if (!importAnchor) throw new Error("Không tìm thấy vị trí import để gắn First Aid block editor.");
+        next = next.replace(importAnchor, `${importAnchor}\n${IMPORT_LINE}`);
       }
 
       if (!next.includes("<FirstAidBlockEditor")) {
