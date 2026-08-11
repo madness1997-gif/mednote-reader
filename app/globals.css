@@ -809,3 +809,12 @@ body {
   .ink-flow { font-size: 11px; gap: 4px; }
   .citation-chip { bottom: 18px; right: 20px; }
 }
+
+
+/* P6.5 canonical Library domains */
+.library-domain + .library-domain { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border, #d8e1e5); }
+.library-domain-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 4px 8px; }
+.library-domain-heading > div { display: flex; align-items: baseline; gap: 8px; }
+.library-domain-heading strong { font-size: 13px; letter-spacing: .01em; }
+.library-domain-heading span, .library-domain-heading small, .library-domain-empty { color: #6c7b82; font-size: 12px; }
+.library-domain-empty { padding: 14px 10px; }

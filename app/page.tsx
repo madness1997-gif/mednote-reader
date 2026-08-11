@@ -109,6 +109,7 @@ import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
+import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
 import PageTitleEditor from "./page-title-editor";
@@ -125,7 +126,7 @@ import {
   type TextFont, type TextSettings,
 } from "./note-runtime-adapter";
 import {
-  DEFAULT_READER, createDemoWorkspace, createEmptyWorkspace, documentRuntimeWorkspace,
+  DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createDemoWorkspace, createEmptyWorkspace, documentRuntimeWorkspace,
   isReaderPlaceholder, normalizeReader, type ReaderState,
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
@@ -1833,23 +1834,21 @@ export default function Home() {
   const activeSheetIndex = Math.max(0, activePageSheets.findIndex((sheet) => sheet.id === activeNote.id));
   const continuousNotes = activePageSheets.map((sheet) => notePages.find((page) => page.id === sheet.id)
     || notePageFromSheet(sheet.id, activeLogicalPage?.title || "Page mới", noteState.pageSheetContents[sheet.id], !noteState.pageSheetContents[sheet.id]));
-  const hasActiveNote = Boolean(noteState.structure?.active.activeSheetId)
-    && (activeWorkspace.kind === "empty" || activeWorkspace.kind === "demo"
-      || Boolean(activeWorkspace.noteNotebookId && noteState.structure?.notebooks.some((notebook) => notebook.id === activeWorkspace.noteNotebookId)));
+  const hasActiveNote = Boolean(noteState.structure?.active.activeSheetId);
   const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
   const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
+  const libraryProjection = useMemo(() => noteState.structure
+    ? projectLibrary(noteState.structure, noteState.documents)
+    : { notes: [], documents: [] }, [noteState.documents, noteState.structure]);
+  const activeWorkspaceLinkedNotebookIds = activeWorkspace.kind === "temporary"
+    ? activeWorkspace.noteNotebookId ? [activeWorkspace.noteNotebookId] : []
+    : libraryProjection.documents.find((item) => item.id === activeWorkspace.id)?.linkedNotebookIds || [];
+  const activeWorkspaceHasLinkedNote = activeWorkspaceLinkedNotebookIds.length > 0;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const resolveExcerptSource = useCallback((excerpt: NoteExcerpt) => resolveDocumentSource(excerpt, noteState.documents, activeWorkspace.documents), [activeWorkspace.documents, noteState.documents]);
 
-  useEffect(() => {
-    const notebookId = activeWorkspace.noteNotebookId;
-    const structure = noteStore.getSnapshot().structure;
-    if (!notebookId || !structure?.notebooks.some((notebook) => notebook.id === notebookId)
-      || structure.active.activeNotebookId === notebookId) return;
-    void noteStore.openNotebook(notebookId).catch(() => undefined);
-  }, [activeWorkspace.id, activeWorkspace.noteNotebookId, noteState.status]);
 
   const activateTextEditor = useCallback((editorId: string, editor: HTMLElement, range: Range | null) => {
     activeTextEditorRef.current = { id: editorId, editor };
@@ -3480,7 +3479,11 @@ export default function Home() {
         localSavedAtRef.current = mutation.savedAt;
         setWorkspaces(mutation.workspaces);
       } else {
-        updateActiveWorkspace((workspace) => ({ ...workspace, noteNotebookId: result.active.activeNotebookId }));
+        const noteRuntime = workspacesRef.current.find((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID);
+        if (noteRuntime && activeWorkspaceIdRef.current !== noteRuntime.id) {
+          activeWorkspaceIdRef.current = noteRuntime.id;
+          setActiveWorkspaceId(noteRuntime.id);
+        }
       }
       setActiveTool("text");
       workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
@@ -3488,6 +3491,22 @@ export default function Home() {
       setToast(activeWorkspace.documents.length ? "Đã tạo Notebook cho tài liệu" : "Đã tạo sổ ghi chú mới");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể tạo Notebook");
+    }
+  };
+
+  const openLibraryNotebook = async (notebookId: string) => {
+    try {
+      await noteStore.openNotebook(notebookId);
+      const noteRuntime = workspacesRef.current.find((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID);
+      if (noteRuntime) {
+        activeWorkspaceIdRef.current = noteRuntime.id;
+        setActiveWorkspaceId(noteRuntime.id);
+      }
+      workspaceModeRef.current = "note";
+      setWorkspaceMode("note");
+      setLibraryOpen(false);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể mở Notebook");
     }
   };
 
@@ -3537,9 +3556,11 @@ export default function Home() {
   const deleteWorkspace = async (workspaceId: string) => {
     const target = workspaces.find((workspace) => workspace.id === workspaceId);
     if (!target) return;
-    const linkedNotebook = noteState.structure?.notebooks.find((notebook) => notebook.id === target.noteNotebookId);
+    const linkedNotebookCount = target.kind === "temporary"
+      ? target.noteNotebookId ? 1 : 0
+      : libraryProjection.documents.find((item) => item.id === target.id)?.linkedNotebookIds.length || 0;
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
-    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebook ? "Mọi note sẽ được giữ lại thành note độc lập." : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebookCount ? `Các Notebook đang liên kết (${linkedNotebookCount}) vẫn được giữ nguyên trong Ghi chú.` : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
     try {
       const result = await documentLibrary.deleteWorkspace({
         workspaceId,
@@ -3751,7 +3772,7 @@ export default function Home() {
             <span>{driveStatus === "syncing" ? "Đang đồng bộ" : driveToken ? "Drive" : "Kết nối Drive"}</span>
           </button>
           {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
-          {activeWorkspace.documents.length > 0 && !hasActiveNote && <button className="save-session-button" onClick={() => { void addNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}
+          {activeWorkspace.documents.length > 0 && !activeWorkspaceHasLinkedNote && <button className="save-session-button" onClick={() => { void addNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}
           <button className="primary-button" disabled={!ready} onClick={() => previewPdfInputRef.current?.click()}><FolderOpen size={16} /> Mở PDF</button>
         </div>
       </header>
@@ -3801,35 +3822,50 @@ export default function Home() {
             <div className="library-header"><div><strong>Thư viện</strong><span>PDF và note được lưu độc lập; chỉ liên kết khi bạn chọn</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
             <button className="library-import" disabled={!ready} onClick={() => libraryPdfInputRef.current?.click()}><FolderOpen size={18} /><span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>Chỉ thao tác này mới lưu tệp PDF trên thiết bị</small></span></button>
             <div className="library-list">
-              {workspaces.filter((workspace) => workspace.kind !== "temporary").map((workspace) => {
-                const linkedNotebookId = workspace.noteNotebookId || null;
-                const linkedSectionIds = linkedNotebookId && noteState.structure
-                  ? new Set(noteState.structure.sections.filter((section) => section.notebookId === linkedNotebookId).map((section) => section.id))
-                  : new Set<string>();
-                const pageCount = noteState.structure
-                  ? noteState.structure.pages.filter((page) => linkedSectionIds.has(page.sectionId)).length
-                  : 0;
-                const notebookCount = linkedNotebookId && noteState.structure?.notebooks.some((notebook) => notebook.id === linkedNotebookId) ? 1 : 0;
-                const isRenaming = renamingWorkspaceId === workspace.id;
-                return (
-                  <div className={`library-row ${workspace.kind === "empty" ? "library-row-single" : ""}`} key={workspace.id}>
-                    {isRenaming ? (
-                      <form className={`library-item library-rename-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onSubmit={(event) => { event.preventDefault(); commitWorkspaceRename(workspace.id); }}>
-                        <span className="library-icon"><FileText size={19} /></span>
-                        <span><input autoFocus value={renamingWorkspaceName} onChange={(event) => setRenamingWorkspaceName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelWorkspaceRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
-                      </form>
-                    ) : (
-                      <button className={`library-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} onClick={() => { setActiveWorkspaceId(workspace.id); setLibraryOpen(false); }}>
-                        <span className="library-icon"><FileText size={19} /></span>
-                        <span><strong>{workspace.name}</strong><small>{workspace.kind === "collection" ? `${workspace.documents.length} tài liệu` : workspace.kind === "demo" ? "Tài liệu mẫu" : workspace.kind === "empty" ? "Note độc lập" : "1 tài liệu"} · {notebookCount} sổ · {pageCount} trang note</small></span>
-                      </button>
-                    )}
-                    {workspace.kind !== "empty" && (isRenaming
-                      ? <><button className="library-action library-save" onClick={() => commitWorkspaceRename(workspace.id)} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" onClick={cancelWorkspaceRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
-                      : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${workspace.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(workspace.id); }} aria-label={`Xóa ${workspace.name}`} title="Xóa PDF; giữ note thành note độc lập"><Trash2 size={17} /></button></>)}
+              <section className="library-domain" aria-label="Ghi chú">
+                <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>Nguồn: NoteStructure</small></div>
+                {libraryProjection.notes.length ? libraryProjection.notes.map((notebook) => (
+                  <div className="library-row library-row-single" key={`note:${notebook.id}`}>
+                    <button className={`library-item ${noteState.structure?.active.activeNotebookId === notebook.id ? "active" : ""}`} onClick={() => { void openLibraryNotebook(notebook.id); }}>
+                      <span className="library-icon"><NotebookTabs size={19} /></span>
+                      <span><strong>{notebook.title}</strong><small>{notebook.sectionCount} section · {notebook.pageCount} page · {notebook.sheetCount} sheet{notebook.linkedDocuments.length ? ` · ${notebook.linkedDocuments.length} PDF liên kết` : " · độc lập"}</small></span>
+                    </button>
                   </div>
-                );
-              })}
+                )) : <div className="library-domain-empty">Chưa có Notebook.</div>}
+              </section>
+
+              <section className="library-domain" aria-label="Tài liệu">
+                <div className="library-domain-heading"><div><strong>Tài liệu</strong><span>{libraryProjection.documents.length} mục</span></div><small>Nguồn: DocumentGraph</small></div>
+                {libraryProjection.documents.length ? libraryProjection.documents.map((item) => {
+                  const workspace = workspaces.find((candidate) => candidate.id === item.id);
+                  const isRenaming = renamingWorkspaceId === item.id;
+                  return (
+                    <div className="library-row" key={`document:${item.id}`}>
+                      {isRenaming && workspace ? (
+                        <form className={`library-item library-rename-item ${item.id === activeWorkspace.id ? "active" : ""}`} onSubmit={(event) => { event.preventDefault(); commitWorkspaceRename(item.id); }}>
+                          <span className="library-icon"><FileText size={19} /></span>
+                          <span><input autoFocus value={renamingWorkspaceName} onChange={(event) => setRenamingWorkspaceName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelWorkspaceRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
+                        </form>
+                      ) : (
+                        <button className={`library-item ${item.id === activeWorkspace.id ? "active" : ""}`} disabled={!workspace} onClick={() => {
+                          if (!workspace) return setToast("Document runtime chưa sẵn sàng");
+                          activeWorkspaceIdRef.current = item.id;
+                          setActiveWorkspaceId(item.id);
+                          workspaceModeRef.current = "reader";
+                          setWorkspaceMode("reader");
+                          setLibraryOpen(false);
+                        }}>
+                          <span className="library-icon"><FileText size={19} /></span>
+                          <span><strong>{item.name}</strong><small>{item.kind === "collection" ? `${item.documents.length} tài liệu` : "1 tài liệu"} · {item.linkedNotebookIds.length ? `${item.linkedNotebookIds.length} Notebook liên kết` : "không liên kết note"}</small></span>
+                        </button>
+                      )}
+                      {workspace && (isRenaming
+                        ? <><button className="library-action library-save" onClick={() => commitWorkspaceRename(item.id)} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" onClick={cancelWorkspaceRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
+                        : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>)}
+                    </div>
+                  );
+                }) : <div className="library-domain-empty">Chưa có PDF đã lưu. PDF tạm không xuất hiện ở đây.</div>}
+              </section>
             </div>
           </aside>
         </div>

@@ -395,3 +395,55 @@ test("page delegates Drive algorithms and web/desktop request the same cross-pla
   assert.match(service, /sourceVersion:\s*"v2"/);
   assert.match(service, /sourceVersion:\s*"v1"/);
 });
+
+
+test("P6.5 preserves five notebooks and canonical hashes across web to desktop v2 restore", async () => {
+  const seed = library({ body: "seed" });
+  seed.notes.notebooks = Array.from({ length: 5 }, (_, index) => ({ id: `nb-${index + 1}`, title: `Notebook ${index + 1}`, order: index }));
+  seed.notes.sections = seed.notes.notebooks.map((notebook, index) => ({ id: `sec-${index + 1}`, notebookId: notebook.id, title: `Section ${index + 1}`, order: 0 }));
+  seed.notes.pages = seed.notes.sections.map((section, index) => ({ id: `page-${index + 1}`, sectionId: section.id, title: `Page ${index + 1}`, order: 0 }));
+  seed.notes.sheets = seed.notes.pages.map((page, index) => ({ id: `sheet-${index + 1}`, pageId: page.id, order: 0 }));
+  seed.notes.active = { activeNotebookId: "nb-5", activeSectionId: "sec-5", activePageId: "page-5", activeSheetId: "sheet-5" };
+  seed.sheetContents = Object.fromEntries(seed.notes.sheets.map((sheet, index) => [sheet.id, { body: `content-${index + 1}` }]));
+  seed.documents.documents = [
+    { id: "doc-one", name: "One.pdf", size: 3, lastModified: 1, available: true, payload: { reader: { ...DEFAULT_READER, page: 11 } } },
+    { id: "doc-two", name: "Two.pdf", size: 3, lastModified: 2, available: true, payload: { reader: { ...DEFAULT_READER, page: 22 } } },
+  ];
+  seed.documents.contexts = [
+    { id: "ctx-one", kind: "document", name: "One", documentIds: ["doc-one"], activeDocumentId: "doc-one", sourcePage: 11 },
+    { id: "ctx-two", kind: "document", name: "Two", documentIds: ["doc-two"], activeDocumentId: "doc-two", sourcePage: 22 },
+  ];
+  seed.documents.groups = [];
+  seed.documents.links = [
+    { id: "link-one", documentId: "doc-one", targetType: "page", targetId: "page-1" },
+    { id: "link-two", documentId: "doc-two", targetType: "sheet", targetId: "sheet-2" },
+  ];
+  seed.documents.linkRelations = [
+    { id: "relation-one", linkIds: ["link-one"], kind: "workspace", sourceType: "document", sourceId: "doc-one", createdAt: 1, updatedAt: 1 },
+    { id: "relation-two", linkIds: ["link-two"], kind: "workspace", sourceType: "document", sourceId: "doc-two", createdAt: 1, updatedAt: 1 },
+  ];
+  seed.preferences.activeDocumentContextId = "ctx-one";
+
+  const expected = createDriveBackup(seed);
+  const remote = new MemoryDrive();
+  const web = await harness(seed, remote);
+  const desktop = await harness(library({ body: "old desktop" }), remote);
+  try {
+    web.pdfs.set("doc-one", { name: "One.pdf", blob: new Blob(["one"], { type: "application/pdf" }) });
+    web.pdfs.set("doc-two", { name: "Two.pdf", blob: new Blob(["two"], { type: "application/pdf" }) });
+    await web.service.sync("web-token", web.snapshot);
+    const restored = await desktop.service.restore("desktop-token");
+    const actual = await desktop.notes.exportLibrary();
+    const actualBackup = createDriveBackup(actual);
+    assert.equal(restored.sourceVersion, "v2");
+    assert.equal(actual.notes.notebooks.length, 5);
+    assert.deepEqual(actual.notes.notebooks.map((item) => item.id).sort(), seed.notes.notebooks.map((item) => item.id).sort());
+    assert.deepEqual(actual.documents.documents.map((item) => item.id).sort(), ["doc-one", "doc-two"]);
+    assert.deepEqual(actual.documents.links.map((item) => item.id).sort(), ["link-one", "link-two"]);
+    assert.deepEqual(actualBackup.sheetContentHashes, expected.sheetContentHashes);
+    assert.equal(restored.snapshot.workspaces.filter((workspace) => workspace.id === "note-runtime-v6").length, 1);
+  } finally {
+    await web.close();
+    await desktop.close();
+  }
+});
