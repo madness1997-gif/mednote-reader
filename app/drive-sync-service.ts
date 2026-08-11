@@ -15,8 +15,7 @@ import {
 import { localBinaryStorage } from "./local-binary-storage";
 import { noteStore, type NoteStore } from "./note-store";
 import {
-  createEmptyWorkspace,
-  documentRuntimeWorkspace,
+  NOTE_RUNTIME_WORKSPACE_ID,
   documentWorkspaceInput,
   normalizeWorkspace,
   workspacesFromLibraryV6,
@@ -145,6 +144,14 @@ function parseJsonBlob(blob: Blob, invalidMessage: string) {
       throw new Error(invalidMessage);
     }
   });
+}
+
+function restoreRuntime(library: Awaited<ReturnType<NoteStore["exportLibrary"]>>, preferredContextId: string | null | undefined) {
+  const workspaces = workspacesFromLibraryV6(library);
+  const activeWorkspaceId = preferredContextId && workspaces.some((workspace) => workspace.id === preferredContextId && workspace.documents.length > 0)
+    ? preferredContextId
+    : NOTE_RUNTIME_WORKSPACE_ID;
+  return { workspaces, activeWorkspaceId };
 }
 
 export class DriveSyncService {
@@ -348,17 +355,16 @@ export class DriveSyncService {
           assets.push({ id: assetId, blob: await this.remote.downloadFile(token, remote.id) });
         }
         await this.commitRestore(pdfs, assets, () => this.notes.replaceFromLibrary(staged));
-        const restored = workspacesFromLibraryV6(staged);
-        const workspaces = restored.length ? restored : [documentRuntimeWorkspace(createEmptyWorkspace())];
-        const activeWorkspaceId = workspaces.some((workspace) => workspace.id === staged.preferences.activeDocumentContextId)
-          ? staged.preferences.activeDocumentContextId
-          : workspaces[0].id;
+        const runtime = restoreRuntime(staged, staged.preferences.activeDocumentContextId);
+        const restoredWorkspaceMode = runtime.activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID && staged.preferences.workspaceMode === "reader"
+          ? "note"
+          : staged.preferences.workspaceMode || "split";
         return {
           snapshot: {
-            workspaces,
-            activeWorkspaceId,
+            workspaces: runtime.workspaces,
+            activeWorkspaceId: runtime.activeWorkspaceId,
             readerShare: clamp(staged.preferences.readerShare, 20, 80, 50),
-            workspaceMode: staged.preferences.workspaceMode || "split",
+            workspaceMode: restoredWorkspaceMode,
             noteZoom: clamp(staged.preferences.noteZoom || 1, .5, 2, 1),
             savedAt: staged.savedAt,
           },
@@ -394,20 +400,18 @@ export class DriveSyncService {
         assets.push({ id: assetId, blob: await this.remote.downloadFile(token, remote.id) });
       }
       await this.commitRestore(pdfs, assets, () => this.notes.replaceFromLegacySnapshot(parsed));
-      const restored = persistentDocumentWorkspaces(normalized)
-        .filter((workspace) => workspace.id !== "note-runtime-v6")
-        .map(documentRuntimeWorkspace);
-      const workspaces = restored.length ? restored : [documentRuntimeWorkspace(createEmptyWorkspace())];
-      const activeWorkspaceId = workspaces.some((workspace) => workspace.id === parsed.activeWorkspaceId)
-        ? parsed.activeWorkspaceId
-        : workspaces[0].id;
+      const importedLibrary = await this.notes.exportLibrary();
+      const preferredDocumentContextId = persistentDocumentWorkspaces(normalized)
+        .find((workspace) => workspace.id === parsed.activeWorkspaceId && workspace.documents.length > 0)?.id || null;
+      const runtime = restoreRuntime(importedLibrary, preferredDocumentContextId);
       const savedAt = parsed.savedAt || (indexed.manifest.modifiedTime ? Date.parse(indexed.manifest.modifiedTime) : this.now());
+      const requestedMode = parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split";
       return {
         snapshot: {
-          workspaces,
-          activeWorkspaceId,
+          workspaces: runtime.workspaces,
+          activeWorkspaceId: runtime.activeWorkspaceId,
           readerShare: parsed.readerShare || 50,
-          workspaceMode: parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split",
+          workspaceMode: runtime.activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID && requestedMode === "reader" ? "note" : requestedMode,
           noteZoom: clamp(parsed.noteZoom || 1, .5, 2, 1),
           savedAt: Number.isFinite(savedAt) ? savedAt : this.now(),
         },
