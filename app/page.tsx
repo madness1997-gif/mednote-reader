@@ -4063,7 +4063,7 @@ export default function Home() {
           <div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
-                {!showNoteSidebar && <button className="icon-button compact" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện điều hướng ghi chú" title="Hiện điều hướng ghi chú"><PanelRightOpen size={17} /></button>}
+                {!showNoteSidebar && <button className="note-sidebar-show-button" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện thanh điều hướng Note" title="Hiện thanh điều hướng Note"><PanelRightOpen size={16} /><span>Điều hướng Note</span></button>}
                 <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
               </div>
               <span className="toolbar-spacer" />

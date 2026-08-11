@@ -67,7 +67,7 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
   const notebookSelect = bookbar.locator('select[aria-label="Notebook"]');
   const addNotebook = bookbar.getByRole('button', { name: 'Tạo Notebook' });
   const more = bookbar.getByRole('button', { name: 'Thao tác Notebook' });
-  const close = bookbar.getByRole('button', { name: 'Thu gọn điều hướng' });
+  const close = bookbar.getByRole('button', { name: 'Ẩn thanh điều hướng Note' });
   const search = nav.getByRole('textbox', { name: 'Tìm ghi chú' });
 
   await expect(notebookSelect).toHaveValue('e2e-notebook-1');
@@ -104,7 +104,7 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
   expect(notesBox).not.toBeNull();
   expect(notesBox.x + notesBox.width).toBeGreaterThanOrEqual(workspaceBox.x + workspaceBox.width - 1);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('1');
-  await notesPane.getByRole('button', { name: 'Hiện điều hướng ghi chú' }).click();
+  await notesPane.getByRole('button', { name: 'Hiện thanh điều hướng Note' }).click();
   await expect(page.locator('.note-sidebar-bookbar')).toBeVisible();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('0');
 });

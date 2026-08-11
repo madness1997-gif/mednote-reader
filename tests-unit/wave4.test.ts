@@ -73,6 +73,7 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
 
 test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const sidebar = await readFile(new URL("../app/note-sidebar.tsx", import.meta.url), "utf8");
   const start = page.indexOf('<div className={`note-toolbar');
   const end = page.indexOf('{notePanel === "text" && textInsertPopover === "bullets"', start);
   assert.ok(start >= 0 && end > start, "note toolbar source boundary must exist");
@@ -81,6 +82,11 @@ test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () =>
   assert.match(toolbar, /Từng trang/);
   assert.match(toolbar, /Liên tục/);
   assert.match(toolbar, /Xuất note/);
+  assert.match(toolbar, /note-sidebar-show-button/);
+  assert.match(toolbar, /Điều hướng Note/);
+  assert.match(sidebar, /note-sidebar-collapse-button/);
+  assert.match(sidebar, /<span>Ẩn<\/span><ChevronRight/);
+  assert.doesNotMatch(sidebar, /title="Thu gọn" aria-label="Thu gọn điều hướng"><X/);
 });
 
 test("obsolete imperative hierarchy runtimes are removed", async () => {

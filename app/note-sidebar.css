@@ -4,6 +4,9 @@
 .note-sidebar-bookbar { position: relative; min-height: 48px; display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-bottom: 1px solid #dedede; background: #fafafa; }
 .note-sidebar-bookbar > button { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #5f6368; cursor: pointer; }
 .note-sidebar-bookbar > button:hover { background: #ececef; color: #292929; }
+.note-sidebar-bookbar > .note-sidebar-collapse-button { width: auto; flex: 0 0 auto; display: inline-flex; grid-auto-flow: column; align-items: center; gap: 3px; padding: 0 7px; border: 1px solid #ddd0e6; background: #f7f2fa; color: #5c2d91; font-weight: 750; }
+.note-sidebar-bookbar > .note-sidebar-collapse-button:hover { border-color: #b59ac8; background: #eee5f4; color: #42145f; }
+.note-sidebar-collapse-button span { font-size: 10px; line-height: 1; }
 .note-sidebar-bookmark { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 6px; background: #7719aa; color: #fff; }
 .note-sidebar-bookbar select { min-width: 0; flex: 1; height: 32px; border: 0; border-radius: 5px; background: transparent; font-weight: 700; cursor: pointer; }
 .note-sidebar-menu { position: absolute; z-index: 20; top: 41px; right: 36px; min-width: 180px; display: grid; gap: 2px; padding: 5px; border: 1px solid #dfe4e6; border-radius: 9px; background: #fff; box-shadow: 0 8px 24px #24323a2b; }

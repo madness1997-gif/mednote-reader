@@ -167,7 +167,7 @@ export function NoteSidebar({ store = noteStore, onRequestClose }: NoteSidebarPr
         </select>
         <button type="button" onClick={() => run(createNotebook)} title="Tạo Notebook" aria-label="Tạo Notebook"><Plus size={16} /></button>
         <button type="button" onClick={() => setMenuOpen((open) => !open)} title="Thao tác Notebook" aria-label="Thao tác Notebook" aria-expanded={menuOpen}><Ellipsis size={17} /></button>
-        <button type="button" onClick={onRequestClose} title="Thu gọn" aria-label="Thu gọn điều hướng"><X size={16} /></button>
+        <button type="button" className="note-sidebar-collapse-button" onClick={onRequestClose} title="Ẩn thanh điều hướng Note" aria-label="Ẩn thanh điều hướng Note"><span>Ẩn</span><ChevronRight size={17} /></button>
         {menuOpen && <div className="note-sidebar-menu">
           <button type="button" onClick={() => { setMenuOpen(false); run(renameActiveNotebook); }}><Pencil size={14} />Đổi tên Notebook</button>
           <button type="button" className="danger" onClick={() => { setMenuOpen(false); run(deleteActiveNotebook); }}><Trash2 size={14} />Xóa Notebook</button>
