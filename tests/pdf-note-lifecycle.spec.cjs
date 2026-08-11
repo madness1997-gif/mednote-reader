@@ -43,12 +43,26 @@ async function pdfKeys(page) {
   });
 }
 
+async function waitForAppReady(page) {
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('mednote-document-runtime-v1');
+    if (!raw) return false;
+    try {
+      const snapshot = JSON.parse(raw);
+      return Array.isArray(snapshot?.workspaces) && snapshot.workspaces.length > 0;
+    } catch {
+      return false;
+    }
+  }), { timeout: 10000 }).toBe(true);
+}
+
 test('preview, PDF persistence, note creation, and PDF deletion remain independent', async ({ page }) => {
   const pdf = await PDFDocument.create();
   pdf.addPage([240, 320]);
   const bytes = await pdf.save();
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await waitForAppReady(page);
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({
     name: 'independent.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes),
   });
@@ -82,7 +96,7 @@ test('preview, PDF persistence, note creation, and PDF deletion remain independe
   })).toBe(linkedNotebookId);
 
   await page.getByRole('button', { name: 'Mở thư viện' }).click();
-  const pdfRow = page.locator('.library-row', { hasText: 'independent' }).first();
+  const pdfRow = page.locator('.library-domain[aria-label="Tài liệu"] .library-row', { hasText: 'independent' }).first();
   page.once('dialog', (dialog) => dialog.accept());
   await pdfRow.locator('.library-delete').click();
 
@@ -98,6 +112,7 @@ test('temporary PDF can create a persistent v6 Notebook without saving the PDF',
   const bytes = await pdf.save();
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await waitForAppReady(page);
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({
     name: 'temporary-study.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes),
   });
@@ -130,11 +145,12 @@ test('temporary PDF can create a v6 Page or Section in an existing Notebook', as
     localStorage.clear();
     sessionStorage.clear();
     const now = Date.now();
+    const paper = { size: 'a4', orientation: 'portrait', template: 'blank', color: 'white' };
+    const text = { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' };
     const notePage = {
       id: 'destination-page-1', title: 'Trang nền', titleHtml: 'Trang nền', body: '', bodyHtml: '',
       citationPage: null, strokes: [], excerpts: [],
-      paper: { size: 'a4', orientation: 'portrait', template: 'blank', color: 'white' },
-      text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
+      paper, text,
     };
     const notebook = { id: 'destination-notebook-1', title: 'Sổ nền', pages: [notePage], activePageId: notePage.id, createdAt: now };
     localStorage.setItem('mednote-library-v2', JSON.stringify({
