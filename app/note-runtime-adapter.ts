@@ -1,7 +1,9 @@
-import type { PdfRect } from "./pdf-reader";
+import type { PdfRect } from "./pdf-domain";
 import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
 
 export type InkTool = "pen" | "highlight" | "shape";
+
+export type StickerPresetId = "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";
 
 export type PenStyle = "ballpoint" | "fountain" | "pencil" | "brush";
 
@@ -103,6 +105,7 @@ export type NoteExcerpt = {
   createdAt: number;
   layout?: ExcerptLayout;
   appearance?: Partial<ExcerptAppearance>;
+  stickerStyle?: StickerPresetId;
 };
 
 export type ExcerptLayout = {
