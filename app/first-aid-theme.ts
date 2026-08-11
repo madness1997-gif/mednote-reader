@@ -1,5 +1,4 @@
 import type { PaperColor } from "./note-runtime-adapter";
-import "./first-aid-signature-polish.css";
 
 export type FirstAidTheme = {
   paper: string;
