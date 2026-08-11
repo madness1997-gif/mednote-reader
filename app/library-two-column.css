@@ -1,0 +1,120 @@
+.library-panel {
+  width: min(920px, 96vw);
+  max-width: 920px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.library-header,
+.library-import {
+  flex: 0 0 auto;
+}
+
+.library-list.library-two-column {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.library-two-column .library-domain {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.74);
+}
+
+.library-two-column .library-domain + .library-domain {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.library-two-column .library-domain-heading {
+  flex: 0 0 auto;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid #e2e9eb;
+}
+
+.library-two-column .library-domain-heading > div {
+  min-width: 0;
+}
+
+.library-two-column .library-domain-heading strong {
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.library-two-column .library-domain-heading span {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #eef3f4;
+  font-size: 10px;
+}
+
+.library-two-column .library-domain-heading small {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.library-domain-scroll {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow: auto;
+  padding: 9px 2px 2px;
+  scrollbar-width: thin;
+}
+
+.library-two-column .library-item {
+  min-height: 62px;
+}
+
+.library-two-column .library-row {
+  flex: 0 0 auto;
+}
+
+.library-two-column .library-domain-empty {
+  margin: auto 0;
+  padding: 28px 10px;
+  text-align: center;
+}
+
+.library-pdf-domain .library-icon {
+  background: #edf4f5;
+  color: var(--teal);
+}
+
+.library-note-domain .library-icon {
+  background: #f2edf7;
+  color: #69418b;
+}
+
+@media (max-width: 760px) {
+  .library-panel {
+    width: min(520px, 96vw);
+    overflow: auto;
+  }
+
+  .library-list.library-two-column {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .library-two-column .library-domain {
+    max-height: 46vh;
+  }
+}
