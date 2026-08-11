@@ -95,12 +95,12 @@ test("P6.5 migrates current-pdf once and preserves the legacy blob and name", ()
   assert.equal(restored.result.workspaceIds.at(-1), "note-runtime-v6");
 });
 
-test("P6.5 never restores temporary runtime workspaces", () => {
+test("P6.5 drops temporary runtime contexts and falls back to the note shell when the saved active context is invalid", () => {
   const { result } = runScenario("temporary");
   assert.deepEqual(result.workspaceIds, ["persistent-workspace", "note-runtime-v6"]);
-  assert.equal(result.activeWorkspaceId, "persistent-workspace");
+  assert.equal(result.activeWorkspaceId, "note-runtime-v6");
   assert.equal(result.readerShare, 58);
-  assert.equal(result.workspaceMode, "reader");
+  assert.equal(result.workspaceMode, "note");
   assert.equal(result.noteZoom, 1.2);
 });
 
