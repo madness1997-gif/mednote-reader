@@ -10,5 +10,8 @@ for (let i = 0; i < lines.length; i += 1) {
   fixed = true;
 }
 if (!fixed) throw new Error('P9 workspace shell generated line not found');
-fs.writeFileSync(path, lines.join('\n'));
-console.log('P9 workspace syntax fixed');
+code = lines.join('\n');
+code = code.replace(/\{showNoteSidebar && \{showNote && showNoteSidebar && (<NoteNavigationHost[^\n]+>)\}\}/g, '{showNote && showNoteSidebar && $1}');
+code = code.replace(/, icon,/g, ',');
+fs.writeFileSync(path, code);
+console.log('P9 generated composition fixed');
