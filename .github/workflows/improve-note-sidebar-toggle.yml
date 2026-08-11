@@ -73,6 +73,10 @@ jobs:
           new = "getByRole('button', { name: 'Ẩn thanh điều hướng Note' })"
           assert old in text
           text = text.replace(old, new, 1)
+          old = "getByRole('button', { name: 'Hiện điều hướng ghi chú' })"
+          new = "getByRole('button', { name: 'Hiện thanh điều hướng Note' })"
+          assert old in text
+          text = text.replace(old, new, 1)
           e2e.write_text(text)
           PY
       - name: Validate
