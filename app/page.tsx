@@ -85,18 +85,20 @@ import {
 } from "lucide-react";
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LazyPdfPageView, PdfPageView } from "./pdf-reader";
+import type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";
+import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
 import {
-  LazyPdfPageView,
-  PdfPageView,
-  type PdfAnnotation,
-  type PdfCropResult,
-  type PdfFitMode,
-  type PdfMarkupAnnotation,
-  type PdfRect,
-  type PdfSelection,
-  type PdfTool,
-  type PdfViewMode,
-} from "./pdf-reader";
+  addPdfMarkup as addPdfMarkupCommand,
+  commitPdfAnnotations as commitPdfAnnotationCommand,
+  deletePdfAnnotation as deletePdfAnnotationCommand,
+  emptyPdfAnnotationHistory,
+  redoPdfAnnotations as redoPdfAnnotationCommand,
+  replacePdfPageAnnotations as replacePdfPageAnnotationCommand,
+  undoPdfAnnotations as undoPdfAnnotationCommand,
+  type PdfAnnotationHistory,
+} from "./pdf-annotation-session";
+import { exportAnnotatedPdf as createAnnotatedPdf } from "./pdf-document-export";
 import { driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
 import { resolveDocumentSource, type ResolvedDocumentSource } from "./note-document-source";
 import {
@@ -104,8 +106,7 @@ import {
   oxfordLookupUrl,
   type EnglishVietnameseLookup,
 } from "./dictionary";
-import { loadPdfDocument } from "./pdf-document-loader";
-import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";
+import type { PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
@@ -167,7 +168,7 @@ type DictionaryLookupState = {
 };
 
 type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
-type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;
+type PdfHistory = Record<string, PdfAnnotationHistory>;
 
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
@@ -1736,7 +1737,13 @@ export default function Home() {
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});
-  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string } | null>(null);
+  const pdfReader = useMemo(() => new PdfReaderController({
+    readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
+  }), []);
+  const pdfSearchAbortRef = useRef<AbortController | null>(null);
+  const pdfWheelAccumulatorRef = useRef(0);
+  const pdfWheelZoomingRef = useRef(false);
+  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string; lastModified: number } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pdfiumDocument, setPdfiumDocument] = useState<PDFiumDocument | null>(null);
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
@@ -2169,7 +2176,7 @@ export default function Home() {
   };
 
   const setSourcePage = (value: number | ((page: number) => number)) => {
-    const next = Math.max(1, Math.min(totalPages, typeof value === "function" ? value(sourcePage) : value));
+    const next = pdfReader.clampPage(typeof value === "function" ? value(sourcePage) : value, totalPages);
     if (activeDocument) {
       updateActiveWorkspace((workspace) => ({
         ...workspace,
@@ -2185,11 +2192,11 @@ export default function Home() {
   };
 
   const setSourceZoom = (value: number | ((zoom: number) => number)) => {
-    updateReader((reader) => ({ ...reader, zoom: Math.max(.55, Math.min(2.5, typeof value === "function" ? value(reader.zoom) : value)) }));
+    updateReader((reader) => ({ ...reader, zoom: pdfReader.clampZoom(typeof value === "function" ? value(reader.zoom) : value) }));
   };
 
   const goToPage = (page: number, smooth = true) => {
-    const next = Math.max(1, Math.min(totalPages, page));
+    const next = pdfReader.clampPage(page, totalPages);
     setSourcePage(next);
     if (viewMode === "continuous") {
       window.requestAnimationFrame(() => {
@@ -2204,9 +2211,10 @@ export default function Home() {
   };
 
   const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {
-    const target = activeWorkspace.documents.find((document) => document.id === documentId);
-    if (!target) return;
-    const nextPage = Math.max(1, page ?? target.reader.page ?? 1);
+    const selection = pdfReader.selectDocumentTarget(activeWorkspace.documents, documentId, page);
+    if (!selection) return;
+    const target = selection.document;
+    const nextPage = selection.page;
     updateActiveWorkspace((workspace) => ({
       ...workspace,
       activeDocumentId: documentId,
@@ -2286,97 +2294,56 @@ export default function Home() {
         setPdfStatus("error");
         return;
       }
-      setPdfSource({ blob: stored.blob, documentId: activeDocument.id });
+      setPdfSource({ blob: stored.blob, documentId: activeDocument.id, lastModified: activeDocument.lastModified });
     }).catch(() => !cancelled && setPdfStatus("error"));
     return () => { cancelled = true; };
   }, [activeDocument?.id, ready]);
 
-  useEffect(() => {
-    if (!pdfSource) return undefined;
-    let disposed = false;
-    let document: PDFDocumentProxy | null = null;
-    let highFidelityDocument: PDFiumDocument | null = null;
-    void pdfSource.blob.arrayBuffer().then(async (buffer) => {
-      const bytes = new Uint8Array(buffer);
-      // Open with PDF.js first. PDFium is only a later quality upgrade: a
-      // blocked blob/module worker must never hold the document loading state.
-      document = await loadPdfDocument(bytes.slice());
-      if (disposed) {
-        void document.destroy();
-      } else {
-        setPdfDocument(document);
-        setLoadedDocumentId(pdfSource.documentId);
-        setWorkspaces((items) => items.map((workspace) => ({
-          ...workspace,
-          sourcePage: workspace.id === activeWorkspaceId
-            ? Math.min(Math.max(1, workspace.documents.find((item) => item.id === pdfSource.documentId)?.reader.page ?? workspace.sourcePage), document!.numPages)
-            : workspace.sourcePage,
-          documents: workspace.documents.map((item) => item.id === pdfSource.documentId
-            ? { ...item, reader: { ...normalizeReader(item.reader), page: Math.min(Math.max(1, item.reader?.page ?? 1), document!.numPages) } }
-            : item),
-        })));
-        setPdfStatus("idle");
-        setToast(`Đã mở ${document.numPages} trang`);
-        // Upgrade visible pages when PDFium becomes ready. A rejected or timed
-        // out worker quietly leaves the reliable PDF.js renderer in place.
-        void loadPdfiumDocument(bytes).then((candidate) => {
-          highFidelityDocument = candidate;
-          if (disposed) {
-            highFidelityDocument = null;
-            void candidate.destroy();
-          } else {
-            setPdfiumDocument(candidate);
-          }
-        }).catch(() => undefined);
-      }
-    }).catch(() => {
-      if (!disposed) {
-        setPdfStatus("error");
-        setToast("Không thể mở PDF này");
-      }
-    });
-    return () => {
-      disposed = true;
-      void document?.destroy();
-      // A PDFium render already in flight cannot be cancelled. Delay disposal
-      // slightly so a page being unmounted can finish its current bitmap pass.
-      if (highFidelityDocument) window.setTimeout(() => highFidelityDocument?.destroy(), 500);
-    };
-  }, [pdfSource]);
+  useEffect(() => pdfReader.subscribe(({ status, session }) => {
+    setPdfDocument(session?.pdf ?? null);
+    setPdfiumDocument(session?.pdfium ?? null);
+    setLoadedDocumentId(session?.documentId ?? null);
+    setPdfStatus(status === "loading" ? "loading" : status === "error" ? "error" : "idle");
+    if (session) setOutline(session.outline);
+  }), [pdfReader]);
+
+  useEffect(() => () => {
+    pdfSearchAbortRef.current?.abort();
+    void pdfReader.close();
+  }, [pdfReader]);
 
   useEffect(() => {
-    if (!currentPdfDocument) {
-      setOutline(activeDocument || activeWorkspace.kind !== "demo" ? [] : [
-        { title: "3.4 Diabetic Neuropathy", page: 123, depth: 0 },
-        { title: "Introduction", page: 123, depth: 1 },
-        { title: "Pathophysiology", page: 126, depth: 1 },
-        { title: "Clinical features", page: 127, depth: 1 },
-      ]);
+    if (!pdfSource) {
+      void pdfReader.close();
       return;
     }
-    let disposed = false;
-    type RawOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: RawOutlineItem[] };
-    const resolvePage = async (dest: RawOutlineItem["dest"]) => {
-      if (!dest) return null;
-      let explicit: string | unknown[] | null | undefined = dest;
-      if (typeof explicit === "string") explicit = await currentPdfDocument.getDestination(explicit) as unknown[] | null;
-      if (!Array.isArray(explicit) || !explicit.length) return null;
-      const reference = explicit[0] as number | { num: number; gen: number };
-      if (typeof reference === "number") return reference + 1;
-      try { return await currentPdfDocument.getPageIndex(reference) + 1; } catch { return null; }
-    };
-    void currentPdfDocument.getOutline().then(async (items) => {
-      const entries: PdfOutlineEntry[] = [];
-      const visit = async (nodes: RawOutlineItem[], depth: number) => {
-        for (const item of nodes) {
-          entries.push({ title: item.title?.trim() || "Mục không tên", page: await resolvePage(item.dest), depth });
-          if (item.items?.length) await visit(item.items, depth + 1);
-        }
-      };
-      await visit((items ?? []) as RawOutlineItem[], 0);
-      if (!disposed) setOutline(entries);
-    }).catch(() => !disposed && setOutline([]));
-    return () => { disposed = true; };
+    let cancelled = false;
+    void pdfReader.open({ documentId: pdfSource.documentId, lastModified: pdfSource.lastModified, blob: pdfSource.blob }).then((session) => {
+      if (!session || cancelled) return;
+      setWorkspaces((items) => items.map((workspace) => ({
+        ...workspace,
+        sourcePage: workspace.id === activeWorkspaceId
+          ? pdfReader.clampPage(workspace.documents.find((item) => item.id === pdfSource.documentId)?.reader.page ?? workspace.sourcePage, session.pdf.numPages)
+          : workspace.sourcePage,
+        documents: workspace.documents.map((item) => item.id === pdfSource.documentId
+          ? { ...item, reader: { ...normalizeReader(item.reader), page: pdfReader.clampPage(item.reader?.page ?? 1, session.pdf.numPages) } }
+          : item),
+      })));
+      setToast(`Đã mở ${session.pdf.numPages} trang`);
+    }).catch(() => {
+      if (!cancelled) setToast("Không thể mở PDF này");
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspaceId, pdfReader, pdfSource]);
+
+  useEffect(() => {
+    if (currentPdfDocument) return;
+    setOutline(activeDocument || activeWorkspace.kind !== "demo" ? [] : [
+      { title: "3.4 Diabetic Neuropathy", page: 123, depth: 0 },
+      { title: "Introduction", page: 123, depth: 1 },
+      { title: "Pathophysiology", page: 126, depth: 1 },
+      { title: "Clinical features", page: 127, depth: 1 },
+    ]);
   }, [activeDocument, activeWorkspace.kind, currentPdfDocument]);
 
   useEffect(() => {
@@ -2482,14 +2449,13 @@ export default function Home() {
 
   const pdfHistoryKey = activeDocument?.id ?? "demo";
 
+  const applyPdfAnnotationResult = (result: { annotations: PdfAnnotation[]; history: PdfAnnotationHistory }) => {
+    setPdfHistory((state) => ({ ...state, [pdfHistoryKey]: result.history }));
+    updateReader((reader) => ({ ...reader, annotations: result.annotations }));
+  };
+
   const commitPdfAnnotations = (next: PdfAnnotation[], previous = pdfAnnotations) => {
-    const unchanged = next.length === previous.length && next.every((annotation, index) => annotation === previous[index]);
-    if (unchanged) return;
-    setPdfHistory((state) => {
-      const history = state[pdfHistoryKey] ?? { undo: [], redo: [] };
-      return { ...state, [pdfHistoryKey]: { undo: [...history.undo, previous].slice(-60), redo: [] } };
-    });
-    updateReader((reader) => ({ ...reader, annotations: next }));
+    applyPdfAnnotationResult(commitPdfAnnotationCommand(previous, next, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
   };
 
   const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
@@ -2504,7 +2470,7 @@ export default function Home() {
       text: selection.text,
       createdAt: Date.now(),
     };
-    commitPdfAnnotations([...pdfAnnotations, annotation]);
+    applyPdfAnnotationResult(addPdfMarkupCommand(pdfAnnotations, annotation, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
     window.getSelection()?.removeAllRanges();
     setPdfSelection(null);
     setToast(kind === "highlight" ? "Đã tô sáng" : kind === "underline" ? "Đã gạch chân" : kind === "squiggly" ? "Đã gạch lượn sóng" : "Đã gạch ngang");
@@ -2582,38 +2548,25 @@ export default function Home() {
   };
 
   const commitPdfPageAnnotations = (page: number, nextPage: PdfAnnotation[], previousPage: PdfAnnotation[]) => {
-    const other = pdfAnnotations.filter((annotation) => annotation.page !== page);
-    const previous = [...other, ...previousPage];
-    const next = [...other, ...nextPage.map((annotation) => ({ ...annotation, page }))];
-    commitPdfAnnotations(next, previous);
+    applyPdfAnnotationResult(replacePdfPageAnnotationCommand(pdfAnnotations, page, nextPage, previousPage, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
   };
 
   const undoPdf = () => {
-    const history = pdfHistory[pdfHistoryKey];
-    const previous = history?.undo.at(-1);
-    if (!previous) return;
-    updateReader((reader) => ({ ...reader, annotations: previous }));
-    setPdfHistory((state) => ({
-      ...state,
-      [pdfHistoryKey]: { undo: history.undo.slice(0, -1), redo: [...history.redo, pdfAnnotations].slice(-60) },
-    }));
+    const result = undoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());
+    if (result.annotations === pdfAnnotations) return;
+    applyPdfAnnotationResult(result);
     setToast("Đã hoàn tác chú thích PDF");
   };
 
   const redoPdf = () => {
-    const history = pdfHistory[pdfHistoryKey];
-    const next = history?.redo.at(-1);
-    if (!next) return;
-    updateReader((reader) => ({ ...reader, annotations: next }));
-    setPdfHistory((state) => ({
-      ...state,
-      [pdfHistoryKey]: { undo: [...history.undo, pdfAnnotations].slice(-60), redo: history.redo.slice(0, -1) },
-    }));
+    const result = redoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());
+    if (result.annotations === pdfAnnotations) return;
+    applyPdfAnnotationResult(result);
     setToast("Đã làm lại chú thích PDF");
   };
 
   const removePdfAnnotation = (annotationId: string) => {
-    commitPdfAnnotations(pdfAnnotations.filter((annotation) => annotation.id !== annotationId));
+    applyPdfAnnotationResult(deletePdfAnnotationCommand(pdfAnnotations, annotationId, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
     setToast("Đã xóa chú thích PDF");
   };
 
@@ -3040,6 +2993,11 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces, noteState.activeSheetContent, noteState.structure]);
 
+  useEffect(() => {
+    pdfSearchAbortRef.current?.abort();
+    pdfSearchAbortRef.current = null;
+  }, [activeDocument?.id, searchQuery, searchWholeCollection]);
+
   const performSearch = async () => {
     const query = searchQuery.trim();
     if (!query) {
@@ -3047,13 +3005,15 @@ export default function Home() {
       setActiveSearchQuery("");
       return;
     }
+    pdfSearchAbortRef.current?.abort();
+    const abort = new AbortController();
+    pdfSearchAbortRef.current = abort;
     setSearching(true);
     setActiveSearchQuery(query);
     setSearchResults([]);
     const normalizedQuery = query.toLocaleLowerCase();
     if (!activeWorkspace.documents.length) {
       if (activeWorkspace.kind !== "demo") {
-        setSearchResults([]);
         setSearching(false);
         setToast("Chưa có PDF để tìm kiếm");
         return;
@@ -3062,51 +3022,30 @@ export default function Home() {
       const matches = demoText.toLocaleLowerCase().includes(normalizedQuery)
         ? [{ documentId: null, documentName: "Tài liệu mẫu", page: 126, snippet: demoText, occurrences: 1 }]
         : [];
-      setSearchResults(matches);
-      setSearching(false);
+      if (!abort.signal.aborted) { setSearchResults(matches); setSearching(false); }
       return;
     }
-    const targets = searchWholeCollection ? activeWorkspace.documents : activeDocument ? [activeDocument] : [];
-    const found: SearchResult[] = [];
-    for (const target of targets) {
-      let proxy: PDFDocumentProxy | null = target.id === loadedDocumentId ? currentPdfDocument : null;
-      const temporary = !proxy;
-      try {
-        if (!proxy) {
-          const stored = await documentLibrary.readPdf(target.id);
-          proxy = stored ? await loadPdfDocument(stored.blob) : null;
-        }
-        if (!proxy) continue;
-        for (let pageNumber = 1; pageNumber <= proxy.numPages && found.length < 300; pageNumber += 1) {
-          const page = await proxy.getPage(pageNumber);
-          const content = await page.getTextContent();
-          const text = content.items.map((item) => "str" in item ? item.str : "").join(" ").replace(/\s+/g, " ").trim();
-          const lower = text.toLocaleLowerCase();
-          if (pageNumber % 12 === 0) await new Promise((resolve) => window.setTimeout(resolve, 0));
-          let index = lower.indexOf(normalizedQuery);
-          if (index < 0) continue;
-          let occurrences = 0;
-          while (index >= 0) {
-            occurrences += 1;
-            index = lower.indexOf(normalizedQuery, index + Math.max(1, normalizedQuery.length));
-          }
-          const first = lower.indexOf(normalizedQuery);
-          const start = Math.max(0, first - 70);
-          const end = Math.min(text.length, first + query.length + 110);
-          found.push({
-            documentId: target.id,
-            documentName: target.name,
-            page: pageNumber,
-            snippet: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
-            occurrences,
-          });
-        }
-      } catch { /* keep results from the remaining documents */ }
-      finally { if (temporary) void proxy?.destroy(); }
+    const targets = (searchWholeCollection ? activeWorkspace.documents : activeDocument ? [activeDocument] : []).map((target) => ({
+      id: target.id,
+      name: target.name,
+      lastModified: target.lastModified,
+      proxy: target.id === loadedDocumentId ? currentPdfDocument : null,
+    }));
+    try {
+      const found = await pdfReader.search(query, targets, {
+        signal: abort.signal,
+        concurrency: window.matchMedia("(max-width: 820px)").matches ? 2 : 4,
+        maxResults: 300,
+      });
+      if (abort.signal.aborted) return;
+      setSearchResults(found);
+      setToast(found.length ? `Tìm thấy ở ${found.length} trang` : "Không tìm thấy kết quả");
+    } catch (error) {
+      if (!abort.signal.aborted && (error as Error).name !== "AbortError") setToast("Không thể tìm kiếm PDF");
+    } finally {
+      if (pdfSearchAbortRef.current === abort) pdfSearchAbortRef.current = null;
+      if (!abort.signal.aborted) setSearching(false);
     }
-    setSearchResults(found);
-    setSearching(false);
-    setToast(found.length ? `Tìm thấy ở ${found.length} trang` : "Không tìm thấy kết quả");
   };
 
   const openSearchResult = (result: SearchResult) => {
@@ -3125,112 +3064,7 @@ export default function Home() {
     try {
       const stored = await documentLibrary.readPdf(activeDocument.id);
       if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");
-      const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
-      const output = await PDFDocument.load(await stored.blob.arrayBuffer(), { ignoreEncryption: true });
-      const pages = output.getPages();
-      const regularFont = await output.embedFont(StandardFonts.Helvetica);
-      const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
-      const signatureFont = await output.embedFont(StandardFonts.HelveticaOblique);
-      const colorOf = (value: string) => {
-        const color = hexToRgb01(value);
-        return rgb(color.red, color.green, color.blue);
-      };
-      const drawText = (page: (typeof pages)[number], value: string, options: Parameters<(typeof page)["drawText"]>[1]) => {
-        try {
-          page.drawText(value, options);
-        } catch {
-          page.drawText(standardPdfText(value), options);
-        }
-      };
-
-      pdfAnnotations.forEach((annotation) => {
-        const target = pages[annotation.page - 1];
-        if (!target) return;
-        const color = colorOf(annotation.color);
-        if (annotation.kind === "ink") {
-          annotation.points.slice(1).forEach((point, index) => {
-            const previous = annotation.points[index];
-            target.drawLine({
-              start: { x: previous.x, y: previous.y },
-              end: { x: point.x, y: point.y },
-              color,
-              thickness: Math.max(.7, annotation.width),
-              opacity: .96,
-            });
-          });
-          return;
-        }
-        if ("rects" in annotation) {
-          annotation.rects.forEach((rect) => {
-            const x = Math.min(rect.x1, rect.x2);
-            const y = Math.min(rect.y1, rect.y2);
-            const width = Math.abs(rect.x2 - rect.x1);
-            const height = Math.abs(rect.y2 - rect.y1);
-            if (annotation.kind === "highlight" || annotation.kind === "area-highlight") {
-              target.drawRectangle({ x, y, width, height, color, opacity: .34 });
-            } else if (annotation.kind === "underline") {
-              target.drawLine({ start: { x, y: y + .6 }, end: { x: x + width, y: y + .6 }, color, thickness: 1.2 });
-            } else if (annotation.kind === "strikeout") {
-              target.drawLine({ start: { x, y: y + height * .52 }, end: { x: x + width, y: y + height * .52 }, color, thickness: 1.2 });
-            } else {
-              const step = Math.max(2.4, Math.min(4, height * .24));
-              for (let cursor = x; cursor < x + width; cursor += step) {
-                target.drawLine({
-                  start: { x: cursor, y: y + 1.2 },
-                  end: { x: Math.min(x + width, cursor + step / 2), y: y + 2.8 },
-                  color,
-                  thickness: 1,
-                });
-                target.drawLine({
-                  start: { x: Math.min(x + width, cursor + step / 2), y: y + 2.8 },
-                  end: { x: Math.min(x + width, cursor + step), y: y + 1.2 },
-                  color,
-                  thickness: 1,
-                });
-              }
-            }
-          });
-          return;
-        }
-
-        const rect = annotation.rect;
-        const x = Math.min(rect.x1, rect.x2);
-        const y = Math.min(rect.y1, rect.y2);
-        const width = Math.abs(rect.x2 - rect.x1);
-        const height = Math.abs(rect.y2 - rect.y1);
-        const thickness = Math.max(.8, annotation.width);
-        if (annotation.kind === "rectangle") {
-          target.drawRectangle({ x, y, width, height, borderColor: color, borderWidth: thickness });
-        } else if (annotation.kind === "ellipse") {
-          target.drawEllipse({ x: x + width / 2, y: y + height / 2, xScale: width / 2, yScale: height / 2, borderColor: color, borderWidth: thickness });
-        } else if (annotation.kind === "arrow") {
-          target.drawLine({ start: { x, y: y + height }, end: { x: x + width, y }, color, thickness });
-          const angle = Math.atan2(-height, width);
-          const head = Math.min(16, Math.max(7, Math.min(width, height) * .28));
-          [angle + Math.PI * .78, angle - Math.PI * .78].forEach((branch) => {
-            target.drawLine({
-              start: { x: x + width, y },
-              end: { x: x + width + Math.cos(branch) * head, y: y + Math.sin(branch) * head },
-              color,
-              thickness,
-            });
-          });
-        } else if (annotation.kind === "note") {
-          target.drawRectangle({ x, y, width, height, color, opacity: .84, borderColor: color, borderWidth: .8 });
-          drawText(target, "!", { x: x + width * .38, y: y + height * .24, size: Math.max(8, height * .48), font: boldFont, color: rgb(1, 1, 1) });
-        } else if (annotation.kind === "stamp") {
-          target.drawRectangle({ x, y, width, height, borderColor: color, borderWidth: Math.max(1.4, thickness) });
-          const value = annotation.text || "DA XEM";
-          drawText(target, value, { x: x + 6, y: y + Math.max(4, height * .32), size: Math.max(8, Math.min(18, height * .38)), font: boldFont, color });
-        } else {
-          const font = annotation.kind === "signature" ? signatureFont : regularFont;
-          const size = annotation.kind === "signature" ? Math.max(10, Math.min(24, height * .45)) : Math.max(8, Math.min(16, height * .28));
-          drawText(target, annotation.text || (annotation.kind === "signature" ? "Ky ten" : "Ghi chu"), { x: x + 3, y: y + Math.max(3, height - size - 4), size, font, color, maxWidth: Math.max(20, width - 6), lineHeight: size * 1.2 });
-        }
-      });
-
-      const bytes = await output.save();
-      const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" });
+      const blob = await createAnnotatedPdf({ blob: stored.blob, annotations: pdfAnnotations });
       const url = URL.createObjectURL(blob);
       if (mode === "download") {
         const link = document.createElement("a");
@@ -3249,15 +3083,9 @@ export default function Home() {
       frame.style.height = "1px";
       frame.style.opacity = "0";
       frame.src = url;
-      frame.onload = () => window.setTimeout(() => {
-        frame.contentWindow?.focus();
-        frame.contentWindow?.print();
-      }, 500);
+      frame.onload = () => window.setTimeout(() => { frame.contentWindow?.focus(); frame.contentWindow?.print(); }, 500);
       document.body.appendChild(frame);
-      window.setTimeout(() => {
-        frame.remove();
-        URL.revokeObjectURL(url);
-      }, 60_000);
+      window.setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60_000);
       setToast("Đã mở hộp thoại in");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể xuất PDF");
@@ -3304,6 +3132,43 @@ export default function Home() {
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setToast("Đã xuất note kèm nguồn");
+  };
+
+  const handlePdfWheelZoom = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey) || !currentPdfDocument) return;
+    event.preventDefault();
+    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, event.currentTarget.clientHeight) : 1;
+    pdfWheelAccumulatorRef.current += event.deltaY * multiplier;
+    if (Math.abs(pdfWheelAccumulatorRef.current) < 60 || pdfWheelZoomingRef.current) return;
+    const direction = pdfWheelAccumulatorRef.current > 0 ? -1 : 1;
+    pdfWheelAccumulatorRef.current -= Math.sign(pdfWheelAccumulatorRef.current) * 60;
+    const stage = event.currentTarget;
+    const oldZoom = sourceZoom;
+    const nextZoom = pdfReader.clampZoom(oldZoom + direction * .1);
+    if (nextZoom === oldZoom) return;
+    const stageRect = stage.getBoundingClientRect();
+    const localX = event.clientX - stageRect.left;
+    const localY = event.clientY - stageRect.top;
+    const contentX = stage.scrollLeft + localX;
+    const contentY = stage.scrollTop + localY;
+    const surface = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".pdf-page-surface, .document-paper");
+    const surfaceRect = surface?.getBoundingClientRect();
+    const surfaceX = surfaceRect ? (event.clientX - surfaceRect.left) / Math.max(1, surfaceRect.width) : 0;
+    const surfaceY = surfaceRect ? (event.clientY - surfaceRect.top) / Math.max(1, surfaceRect.height) : 0;
+    pdfWheelZoomingRef.current = true;
+    setSourceZoom(nextZoom);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if (surface?.isConnected) {
+        const nextRect = surface.getBoundingClientRect();
+        stage.scrollLeft += nextRect.left + nextRect.width * surfaceX - event.clientX;
+        stage.scrollTop += nextRect.top + nextRect.height * surfaceY - event.clientY;
+      } else {
+        const anchored = zoomAroundAnchor(oldZoom, nextZoom, { contentX, contentY, localX, localY });
+        stage.scrollLeft = anchored.left;
+        stage.scrollTop = anchored.top;
+      }
+      pdfWheelZoomingRef.current = false;
+    }));
   };
 
   const handleReaderScroll = () => {
@@ -4044,7 +3909,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
+          <div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll} onWheel={handlePdfWheelZoom}>
             {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
               <div className="continuous-pages">
                 {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}

@@ -1,4 +1,4 @@
-import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-reader";
+import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-domain";
 import type { DocumentGraph, DocumentRecord } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
 import type { DriveLibrary } from "./drive-backup";

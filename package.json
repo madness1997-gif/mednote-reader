@@ -17,6 +17,7 @@
     "test:p5": "node --import tsx --test tests-unit/document-library-controller.test.ts",
     "test:p6": "node --import tsx --test tests-unit/drive-sync-service.test.ts tests-unit/drive-backup-compat.test.ts",
     "test:p65": "node --import tsx --test tests-unit/library-projection.test.ts",
+    "test:p7": "node --import tsx --test tests-unit/pdf-reader-controller.test.ts tests-unit/pdf-annotation-session.test.ts tests-unit/pdf-document-export.test.ts",
     "test:all": "playwright test",
     "build:pages": "vite build --config vite.github.config.ts",
     "build:desktop": "vite build --config vite.desktop.config.ts",

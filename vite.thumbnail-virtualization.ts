@@ -1,6 +1,9 @@
 import type { Plugin } from "vite";
 
-const IMPORT_ANCHOR = 'import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";';
+const IMPORT_ANCHORS = [
+  'import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";',
+  'import type { PDFiumDocument } from "./pdfium-renderer";',
+];
 const IMPORT_LINE = 'import { VirtualPdfThumbnailList } from "./virtualized-thumbnails";';
 const PDF_PAGES_START = '          {pdfRailTab === "pages" && (';
 const PDF_PAGES_END = '          {pdfRailTab === "outline" && (';
@@ -23,8 +26,9 @@ export function thumbnailVirtualizationPlugin(): Plugin {
 
       let next = code;
       if (!next.includes(IMPORT_LINE)) {
-        if (!next.includes(IMPORT_ANCHOR)) throw new Error("Không tìm thấy vị trí import để gắn PDF thumbnail virtualization.");
-        next = next.replace(IMPORT_ANCHOR, `${IMPORT_ANCHOR}\n${IMPORT_LINE}`);
+        const importAnchor = IMPORT_ANCHORS.find((anchor) => next.includes(anchor));
+        if (!importAnchor) throw new Error("Không tìm thấy vị trí import để gắn PDF thumbnail virtualization.");
+        next = next.replace(importAnchor, `${importAnchor}\n${IMPORT_LINE}`);
       }
 
       next = replaceRange(
