@@ -62,6 +62,10 @@ jobs:
           new = '''  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });\n  await waitForAppReady(page);\n  await page.locator('input[data-pdf-input="preview"]').setInputFiles({'''
           assert text.count(old) >= 2
           text = text.replace(old, new, 2)
+          old = "const pdfRow = page.locator('.library-row', { hasText: 'independent' }).first();"
+          new = "const pdfRow = page.locator('.library-domain[aria-label=\"Tài liệu\"] .library-row', { hasText: 'independent' }).first();"
+          assert old in text
+          text = text.replace(old, new, 1)
           e2e.write_text(text)
 
           pages = Path('.github/workflows/pages.yml')
