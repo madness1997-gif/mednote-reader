@@ -37,8 +37,7 @@ test("P8 ink history is capped at 60 and isolated by Sheet", () => {
   }
   assert.equal(session.snapshot("sheet-a").undo.length, 60);
   assert.equal(session.canUndo("sheet-b"), false);
-  const beforeUndo = current;
-  const previous = session.undo("sheet-a", beforeUndo);
+  const previous = session.undo("sheet-a", current);
   assert.ok(previous);
   assert.equal(previous.length, 64);
   assert.equal(session.canRedo("sheet-a"), true);
@@ -99,13 +98,15 @@ test("P8 symbol and zoom shims no longer own global DOM state", async () => {
   assert.doesNotMatch(equation, /document\.execCommand/);
 });
 
-test("P8 invariants remain on v6 NoteStructure and SheetContent", async () => {
+test("P8 invariants remain on v6 NoteStructure and canonical SheetContent adapter", async () => {
   const domain = await source("app/note-domain.ts");
   assert.match(domain, /Notebook/);
   assert.match(domain, /Section/);
   assert.match(domain, /Page/);
   assert.match(domain, /Sheet/);
-  for (const field of ["body", "bodyHtml", "strokes", "paper", "text", "excerpts"]) assert.match(domain, new RegExp(field));
+  assert.match(domain, /SheetContent = Record<string, unknown>/);
+  const runtime = await source("app/note-runtime-adapter.ts");
+  for (const field of ["body", "bodyHtml", "strokes", "paper", "text", "excerpts"]) assert.match(runtime, new RegExp(field));
   const drive = await source("app/drive-sync-service.ts");
   assert.match(drive, /manifest/i);
 });
