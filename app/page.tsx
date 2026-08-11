@@ -116,7 +116,7 @@ import { requestNoteDestination } from "./mednote-dialog";
 import NoteSidebar from "./note-sidebar";
 import PageTitleEditor from "./page-title-editor";
 import { RichTextEditor } from "./rich-text-editor";
-import { NoteRichTextController } from "./note-rich-text-controller";
+import { noteRichTextController } from "./note-rich-text-controller";
 import { NoteInkSession } from "./note-ink-session";
 import { NoteInkCanvas } from "./note-ink-canvas";
 import { NoteObjectLayer } from "./note-object-layer";
@@ -844,7 +844,7 @@ export default function Home() {
   const [tableRows, setTableRows] = useState(3);
   const [tableColumns, setTableColumns] = useState(3);
   const [tableBorder, setTableBorder] = useState<TableBorderSettings>({ style: "solid", width: 1, color: "#60737d" });
-  const richTextController = useMemo(() => new NoteRichTextController(), []);
+  const richTextController = noteRichTextController;
   const activeTextEditorRef = richTextController.activeEditorRef;
   const savedTextRangeRef = richTextController.savedRangeRef;
   const pendingFontSizeRef = useRef(new Map<string, number>());

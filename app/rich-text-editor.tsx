@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { sanitizeRichTextHtml } from "./note-runtime-adapter";
-import { NoteRichTextController, richTextRangeBelongsToEditor } from "./note-rich-text-controller";
+import { noteRichTextController, richTextRangeBelongsToEditor } from "./note-rich-text-controller";
 
 export type RichTextEditorProps = {
   editorId: string;
@@ -17,7 +17,7 @@ export type RichTextEditorProps = {
 };
 
 function insertPlainText(editor: HTMLElement, value: string) {
-  const controller = new NoteRichTextController();
+  const controller = noteRichTextController;
   const selection = window.getSelection();
   const current = selection?.rangeCount ? selection.getRangeAt(0) : null;
   controller.activate(editor.dataset.richEditorId ?? "editor", editor, current && richTextRangeBelongsToEditor(current, editor) ? current : null);

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { noteRichTextController } from "./note-rich-text-controller";
 import "./equation-composer.css";
 
 type EquationDisplayMode = "inline" | "display";
-type SavedTextTarget = { editor: HTMLElement; range: Range };
 type ParsedAtom = { html: string; next: number };
 type EquationSnippet = { id: string; label: string; sample: string; source: string };
 type EquationPreset = { label: string; source: string };
@@ -232,47 +232,26 @@ function equationMarkup(source: string, mode: EquationDisplayMode) {
     : `<span style="${MATH_STYLE};display:inline-block;vertical-align:middle;line-height:1.25;white-space:nowrap">${content}</span>`;
 }
 
-function findEditorForRange(range: Range) {
-  const node = range.commonAncestorContainer;
-  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-  return element?.closest<HTMLElement>("[data-rich-editor-id]") ?? null;
-}
-
 export default function EquationComposer() {
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState("x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}");
   const [mode, setMode] = useState<EquationDisplayMode>("display");
   const [message, setMessage] = useState("Dùng các khối bên dưới để ghép nhiều thành phần trong cùng một công thức.");
-  const savedTargetRef = useRef<SavedTextTarget | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const captureEditorSelection = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection?.rangeCount) return;
-    const range = selection.getRangeAt(0);
-    const editor = findEditorForRange(range);
-    if (!editor) return;
-    savedTargetRef.current = { editor, range: range.cloneRange() };
-  }, []);
-
   useEffect(() => {
-    document.addEventListener("selectionchange", captureEditorSelection);
     const interceptFormulaButton = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.word-command-button[title="Chèn công thức"]') : null;
       if (!target) return;
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      captureEditorSelection();
-      setMessage(savedTargetRef.current ? "Có thể nhập trực tiếp hoặc bấm các khối để ghép biểu thức." : "Hãy bấm vào vị trí cần chèn trong note trước khi xác nhận.");
+      setMessage(noteRichTextController.activeEditorRef.current ? "Có thể nhập trực tiếp hoặc bấm các khối để ghép biểu thức." : "Hãy bấm vào vị trí cần chèn trong note trước khi xác nhận.");
       setOpen(true);
     };
     document.addEventListener("click", interceptFormulaButton, true);
-    return () => {
-      document.removeEventListener("selectionchange", captureEditorSelection);
-      document.removeEventListener("click", interceptFormulaButton, true);
-    };
-  }, [captureEditorSelection]);
+    return () => document.removeEventListener("click", interceptFormulaButton, true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -312,20 +291,12 @@ export default function EquationComposer() {
   };
 
   const insertEquation = () => {
-    const target = savedTargetRef.current;
-    if (!target?.editor.isConnected) {
+    if (!noteRichTextController.activeEditorRef.current?.editor.isConnected) {
       setMessage("Chưa có vị trí chèn. Đóng cửa sổ, bấm vào nội dung hoặc textbox rồi mở Công thức lại.");
       return;
     }
-    const selection = window.getSelection();
-    if (!selection) return;
-    target.editor.focus({ preventScroll: true });
-    selection.removeAllRanges();
-    selection.addRange(target.range);
     const markup = equationMarkup(source.trim() || "□", mode);
-    document.execCommand("insertHTML", false, mode === "display" ? `${markup}<div><br></div>` : `${markup}&nbsp;`);
-    target.editor.dispatchEvent(new Event("input", { bubbles: true }));
-    if (selection.rangeCount) savedTargetRef.current = { editor: target.editor, range: selection.getRangeAt(0).cloneRange() };
+    noteRichTextController.insertHtml(mode === "display" ? `${markup}<div><br></div>` : `${markup}&nbsp;`);
     setOpen(false);
   };
 
