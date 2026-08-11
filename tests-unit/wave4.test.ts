@@ -72,12 +72,8 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
 });
 
 test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const toolbar = await readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8");
   const sidebar = await readFile(new URL("../app/note-sidebar.tsx", import.meta.url), "utf8");
-  const start = page.indexOf('<div className={`note-toolbar');
-  const end = page.indexOf('{notePanel === "text" && textInsertPopover === "bullets"', start);
-  assert.ok(start >= 0 && end > start, "note toolbar source boundary must exist");
-  const toolbar = page.slice(start, end);
   assert.doesNotMatch(toolbar, /Sổ mới|Xóa sổ|aria-label="Thêm trang"|aria-label="Xóa trang note"/);
   assert.match(toolbar, /Từng trang/);
   assert.match(toolbar, /Liên tục/);
@@ -137,13 +133,16 @@ test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent"
 
 test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const stage = await readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8");
   const runtimeAdapter = await readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8");
   const editor = await readFile(new URL("../app/page-title-editor.tsx", import.meta.url), "utf8");
   assert.match(runtimeAdapter, /export type NotePageContentPatch = Partial<Omit<NotePage, "id" \| "title" \| "titleHtml" \| "__mednoteLazyPage">>/);
-  assert.match(page, /<PageTitleEditor/);
-  assert.doesNotMatch(page, /activeNote\.titleHtml/);
-  assert.doesNotMatch(page, /page\.titleHtml \?/);
-  assert.doesNotMatch(page, /titleHtml: pageTitle/);
+  assert.match(stage, /<PageTitleEditor/);
+  for (const source of [page, stage]) {
+    assert.doesNotMatch(source, /activeNote\.titleHtml/);
+    assert.doesNotMatch(source, /page\.titleHtml \?/);
+    assert.doesNotMatch(source, /titleHtml: pageTitle/);
+  }
   assert.match(page, /noteStore\.renamePage\(activeLogicalPage\.id, "TÊN CHỦ ĐỀ"\)/);
   assert.match(editor, /PAGE_TITLE_DEBOUNCE_MS = 280/);
   assert.match(editor, /noteStore\.renamePage\(targetPageId, nextTitle\)/);

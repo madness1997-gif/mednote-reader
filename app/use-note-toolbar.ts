@@ -1,9 +1,30 @@
-import { useMemo } from "react";
+import type { NoteInkSession } from "./note-ink-session";
+import type { NoteToolbarScope } from "./ui/note-toolbar";
 
-/**
- * Keeps toolbar coordination as a view-model boundary. Canonical note state and
- * editor sessions remain owned by Home/NoteStore; this hook does not persist data.
- */
-export function useNoteToolbar<T extends Record<string, unknown>>(model: T): T {
-  return useMemo(() => model, [model]);
+export type NoteToolbarInput = Omit<NoteToolbarScope, "canUndo" | "canRedo"> & {
+  noteInkSession: NoteInkSession;
+};
+
+const TOOLBAR_KEYS = [
+  "NOTE_ZOOM_PRESETS", "TEXT_FONTS", "activeNote", "activeTool", "applyTextCommand", "applyTextLineHeight",
+  "changeListLevel", "chooseNoteTool", "exportNotebook", "fitNoteToView", "inkHistoryVersion", "notePanel",
+  "noteSheetViewMode", "noteZoom", "noteZoomPercent", "openTextPopover", "redo", "scrollTextToolbar",
+  "scrollTextToolbarWithWheel", "selectedExcerpt", "selectedExcerptIndex", "selectedTextBoxAppearance",
+  "selectedToolbarFont", "setActiveTool", "setNotePanel", "setNoteSheetViewMode", "setNoteSidebarVisibility",
+  "setNoteViewZoom", "shiftExcerptLayer", "showNoteSidebar", "tableBorder", "textCharacterToolbarRef",
+  "textInsertPopover", "textParagraphToolbarRef", "textToolbar", "tools", "undo",
+] as const satisfies readonly (keyof Omit<NoteToolbarScope, "canUndo" | "canRedo">)[];
+
+function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {
+  return Object.fromEntries(keys.map((key) => [key, source[key]])) as Pick<T, K>;
+}
+
+/** Projects the composition scope into a toolbar-only view model. */
+export function useNoteToolbar(input: NoteToolbarInput): NoteToolbarScope {
+  const model = pick(input, TOOLBAR_KEYS);
+  return {
+    ...model,
+    canUndo: input.noteInkSession.canUndo(input.activeNote.id),
+    canRedo: input.noteInkSession.canRedo(input.activeNote.id),
+  };
 }

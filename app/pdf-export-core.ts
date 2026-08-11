@@ -1,5 +1,4 @@
-import html2canvas from "html2canvas";
-import { PDFDocument } from "pdf-lib";
+import type { PDFDocument } from "pdf-lib";
 
 const CONTROL_SELECTOR = [
   ".excerpt-object-controls",
@@ -100,6 +99,7 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
   await settleLayout();
 
   try {
+    const { default: html2canvas } = await import("html2canvas");
     const canvas = await withTimeout(html2canvas(source, {
       backgroundColor: "#ffffff",
       scale,
@@ -155,6 +155,7 @@ function pdfPageSize(width: number, height: number) {
 }
 
 export async function createPdfDocument() {
+  const { PDFDocument } = await import("pdf-lib");
   return PDFDocument.create();
 }
 

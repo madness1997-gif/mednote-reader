@@ -1,11 +1,30 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw } from "lucide-react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
 
-export type P9UiScope = Record<string, any>;
+type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "error";
 
-export function AppTopBar({ scope }: { scope: P9UiScope }) {
-  const { BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw, activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode } = scope;
+export type AppTopBarScope = {
+  activeWorkspace: WorkspaceItem;
+  activeWorkspaceHasLinkedNote: boolean;
+  addNotebook: () => void | Promise<unknown>;
+  changeWorkspaceMode: (mode: WorkspaceMode) => void;
+  connectDrive: () => void | Promise<unknown>;
+  documentName: string;
+  driveStatus: DriveStatus;
+  driveToken: string | null;
+  hasActiveNote: boolean;
+  previewPdfInputRef: RefObject<HTMLInputElement | null>;
+  ready: boolean;
+  saveTemporaryWorkspace: () => void | Promise<unknown>;
+  setDrivePanelOpen: Dispatch<SetStateAction<boolean>>;
+  setLibraryOpen: Dispatch<SetStateAction<boolean>>;
+  toast: string;
+  workspaceMode: WorkspaceMode;
+};
+
+export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
+  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode } = scope;
   return (<><header className="topbar">
         <div className="brand-group">
           <button className="icon-button menu-button" aria-label="Mở thư viện" onClick={() => setLibraryOpen(true)}><Menu size={19} /></button>

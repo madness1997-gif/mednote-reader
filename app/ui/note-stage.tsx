@@ -1,11 +1,135 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { Check, Sigma, Table2, X, type LucideIcon } from "lucide-react";
+import type { CSSProperties, ComponentProps, Dispatch, MutableRefObject, PointerEvent, RefObject, SetStateAction } from "react";
+import { FirstAidBlockEditor } from "../first-aid-block-editor";
+import type { Page } from "../note-domain";
+import { NoteInkCanvas } from "../note-ink-canvas";
+import { NoteObjectLayer, type NoteObjectLayerProps } from "../note-object-layer";
+import type { ActiveRichTextEditor } from "../note-rich-text-controller";
+import {
+  plainTextToRichHtml,
+  type ExcerptAppearance,
+  type NotePage,
+  type NotePageContentPatch,
+  type PaperColor,
+  type PaperSettings,
+  type PaperSize,
+  type PaperTemplate,
+  type PenStyle,
+  type ShapeKind,
+  type Stroke,
+  type TableBorderStyle,
+} from "../note-runtime-adapter";
+import type { NoteStoreSnapshot } from "../note-store";
+import PageTitleEditor from "../page-title-editor";
+import { RichTextEditor, type RichTextEditorProps } from "../rich-text-editor";
+import { NoteSheetPreview, type NoteSheetPreviewProps } from "./note-sheet-preview";
+import type { BulletStyle, EquationTemplate, FirstAidCropResult, NotePanel, NoteSheetViewMode, NumberingStyle, StickerPresetId, TableBorderSettings, TextCommand, TextInsertPopover, TextToolbarState, Tool } from "./ui-contracts";
 
-export type P9UiScope = Record<string, any>;
+type LinePreset = { id: string; label: string; style: TableBorderStyle; width: number };
+type EquationOption = { id: EquationTemplate; label: string; sample: string; fields: string[]; defaults: string[] };
 
-export function NoteStage({ scope }: { scope: P9UiScope }) {
-  const { BORDER_COLORS, BULLET_STYLES, Check, EQUATION_PRESETS, EQUATION_TEMPLATES, FirstAidBlockEditor, INK_COLORS, LINE_PRESETS, NUMBERING_STYLES, NoteInkCanvas, NoteObjectLayer, NoteSheetPreview, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, PageTitleEditor, RichTextEditor, STICKER_PRESETS, SYMBOL_GROUPS, Sigma, TEXT_BACKGROUND_COLORS, TEXT_BOX_BACKGROUND_COLORS, TEXT_COLORS, Table2, X, activateContinuousSheet, activateTextEditor, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTextEditorRef, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, icon, inkColor, inkWidth, insertEquation, insertTable, insertTextAtSelection, moveExcerpt, normalizeTextEditorInput, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, plainTextToRichHtml, requestFirstAidPdfCrop, resolveExcerptSource, savedTextRangeRef, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setEquationDraft, setEquationParts, setEquationTemplate, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setTableColumns, setTableRows, setTextInsertPopover, setToast, shapeKind, tableBorder, tableColumns, tableRows, textInsertPopover, textLayerStyle, textPopoverLeft, textToolbar, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance, updateTableBorder } = scope;
+export type NoteStageScope = {
+  BORDER_COLORS: string[];
+  BULLET_STYLES: { id: BulletStyle; label: string; glyph: string }[];
+  EQUATION_PRESETS: string[];
+  EQUATION_TEMPLATES: EquationOption[];
+  INK_COLORS: string[];
+  LINE_PRESETS: LinePreset[];
+  NUMBERING_STYLES: { id: NumberingStyle; label: string; sample: string }[];
+  PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[];
+  PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }>;
+  PAPER_TEMPLATES: { id: PaperTemplate; label: string }[];
+  PEN_STYLES: { id: PenStyle; label: string; icon: LucideIcon }[];
+  STICKER_PRESETS: { id: StickerPresetId; label: string; description: string }[];
+  SYMBOL_GROUPS: { label: string; symbols: string[] }[];
+  TEXT_BACKGROUND_COLORS: string[];
+  TEXT_BOX_BACKGROUND_COLORS: string[];
+  TEXT_COLORS: string[];
+  activateContinuousSheet: (sheetId: string) => void | Promise<unknown>;
+  activateTextEditor: RichTextEditorProps["onActivate"];
+  activeLogicalPage: Page | undefined;
+  activeNote: NotePage;
+  activeNoteHydrating: boolean;
+  activeSheetIndex: number;
+  activeTextEditorRef: MutableRefObject<ActiveRichTextEditor | null>;
+  activeTool: Tool;
+  addCalloutAt: (event: PointerEvent<HTMLElement>) => void;
+  addFirstAidImage: ComponentProps<typeof FirstAidBlockEditor>["onInsertImage"];
+  addSticker: (presetId: StickerPresetId) => void;
+  addTextBoxAt: (event: PointerEvent<HTMLElement>) => void;
+  applyBulletStyle: (style: BulletStyle) => void;
+  applyNumberingStyle: (style: NumberingStyle) => void;
+  applyTableLinePreset: (preset: LinePreset) => void;
+  applyTextCommand: (command: TextCommand, value?: string | number) => void;
+  basePaperMaxWidth: number;
+  commitStrokes: (next: Stroke[], previous: Stroke[]) => void;
+  continuousNotes: NotePage[];
+  deleteExcerpt: NoteObjectLayerProps["onDelete"];
+  editExcerpt: NoteObjectLayerProps["onEdit"];
+  equationDraft: string;
+  equationMarkup: (template: EquationTemplate, parts: string[]) => string;
+  equationParts: string[];
+  equationTemplate: EquationTemplate;
+  equationTemplateById: (template: EquationTemplate) => EquationOption;
+  finishFirstAidPdfCrop: (token: string) => void;
+  firstAidCropResult: FirstAidCropResult | null;
+  goToPage: (page: number) => void;
+  highlighterWidth: number;
+  inkColor: string;
+  inkWidth: number;
+  insertEquation: () => void;
+  insertTable: () => void;
+  insertTextAtSelection: (text: string, message?: string) => void;
+  moveExcerpt: NoteObjectLayerProps["onMove"];
+  normalizeTextEditorInput: RichTextEditorProps["onNormalizeInput"];
+  notePanel: NotePanel;
+  noteSheetViewMode: NoteSheetViewMode;
+  noteStageRef: RefObject<HTMLDivElement | null>;
+  noteState: NoteStoreSnapshot;
+  noteZoom: number;
+  openExcerptSource: NoteObjectLayerProps["onOpenSource"];
+  paperHeight: number;
+  paperStyle: CSSProperties;
+  paperWidth: number;
+  penStyle: PenStyle;
+  requestFirstAidPdfCrop: ComponentProps<typeof FirstAidBlockEditor>["onRequestPdfCrop"];
+  resolveExcerptSource: NoteSheetPreviewProps["resolveSource"];
+  savedTextRangeRef: MutableRefObject<Range | null>;
+  selectedExcerptId: string | null;
+  selectedPaperSize: { label: string; dimensions: string };
+  selectedTextBoxAppearance: ExcerptAppearance | null;
+  setActiveTool: Dispatch<SetStateAction<Tool>>;
+  setEquationDraft: Dispatch<SetStateAction<string>>;
+  setEquationParts: Dispatch<SetStateAction<string[]>>;
+  setEquationTemplate: Dispatch<SetStateAction<EquationTemplate>>;
+  setHighlighterWidth: Dispatch<SetStateAction<number>>;
+  setInkColor: Dispatch<SetStateAction<string>>;
+  setInkWidth: Dispatch<SetStateAction<number>>;
+  setNotePanel: Dispatch<SetStateAction<NotePanel>>;
+  setPenStyle: Dispatch<SetStateAction<PenStyle>>;
+  setSelectedExcerptId: Dispatch<SetStateAction<string | null>>;
+  setShapeKind: Dispatch<SetStateAction<ShapeKind>>;
+  setTableColumns: Dispatch<SetStateAction<number>>;
+  setTableRows: Dispatch<SetStateAction<number>>;
+  setTextInsertPopover: Dispatch<SetStateAction<TextInsertPopover>>;
+  setToast: Dispatch<SetStateAction<string>>;
+  shapeKind: ShapeKind;
+  tableBorder: TableBorderSettings;
+  tableColumns: number;
+  tableRows: number;
+  textInsertPopover: TextInsertPopover;
+  textLayerStyle: CSSProperties;
+  textPopoverLeft: number;
+  textToolbar: TextToolbarState;
+  updateActiveNote: (changes: NotePageContentPatch) => void;
+  updatePaper: (changes: Partial<PaperSettings>) => void;
+  updatePaperTemplate: (template: PaperTemplate) => void;
+  updateSelectedTextBoxAppearance: (changes: Partial<ExcerptAppearance>, closePopover?: boolean) => void;
+  updateTableBorder: (changes: Partial<TableBorderSettings>) => void;
+};
+
+export function NoteStage({ scope }: { scope: NoteStageScope }) {
+  const { BORDER_COLORS, BULLET_STYLES, EQUATION_PRESETS, EQUATION_TEMPLATES, INK_COLORS, LINE_PRESETS, NUMBERING_STYLES, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, SYMBOL_GROUPS, TEXT_BACKGROUND_COLORS, TEXT_BOX_BACKGROUND_COLORS, TEXT_COLORS, activateContinuousSheet, activateTextEditor, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTextEditorRef, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, insertEquation, insertTable, insertTextAtSelection, moveExcerpt, normalizeTextEditorInput, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, savedTextRangeRef, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setEquationDraft, setEquationParts, setEquationTemplate, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setTableColumns, setTableRows, setTextInsertPopover, setToast, shapeKind, tableBorder, tableColumns, tableRows, textInsertPopover, textLayerStyle, textPopoverLeft, textToolbar, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance, updateTableBorder } = scope;
   return (<>{notePanel === "text" && textInsertPopover === "bullets" && (
             <div className="text-insert-popover list-library-popover bullet-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện dấu đầu dòng">
               <div className="list-library-grid">

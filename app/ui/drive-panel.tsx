@@ -1,11 +1,32 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { CloudOff, DownloadCloud, RefreshCw, UploadCloud, X } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
+import type { DriveAccount } from "../drive-sync-service";
 
-export type P9UiScope = Record<string, any>;
+type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "error";
 
-export function DrivePanel({ scope }: { scope: P9UiScope }) {
-  const { CloudOff, DownloadCloud, IS_DESKTOP_APP, RefreshCw, UploadCloud, X, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
+export type DrivePanelScope = {
+  IS_DESKTOP_APP: boolean;
+  connectDrive: () => void | Promise<unknown>;
+  desktopGoogleClientId: string;
+  desktopGoogleClientSecret: string;
+  disconnectDrive: () => void | Promise<unknown>;
+  driveAutoSync: boolean;
+  driveError: string | null;
+  driveLastSyncedAt: number | null;
+  driveReady: boolean;
+  driveStatus: DriveStatus;
+  driveUser: DriveAccount | null;
+  restoreFromDrive: () => void | Promise<unknown>;
+  setDesktopGoogleClientId: Dispatch<SetStateAction<string>>;
+  setDesktopGoogleClientSecret: Dispatch<SetStateAction<string>>;
+  setDriveAutoSync: Dispatch<SetStateAction<boolean>>;
+  setDriveError: Dispatch<SetStateAction<string | null>>;
+  setDrivePanelOpen: Dispatch<SetStateAction<boolean>>;
+  syncToDrive: () => void | Promise<unknown>;
+};
+
+export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
+  const { IS_DESKTOP_APP, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
   return (<><aside className="drive-panel" aria-label="Google Drive">
           <div className="drive-panel-header">
             <div><strong>Google Drive</strong><span>JSON, PDF gốc và hình cắt</span></div>

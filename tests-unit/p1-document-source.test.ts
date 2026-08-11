@@ -217,12 +217,16 @@ test("temporary document IDs remap through NoteStore, survive reload and Drive r
 });
 
 test("page runtime consumes resolver while controller owns document-ID remapping", async () => {
-  const [page, controller] = await Promise.all([
+  const [page, noteStage, notePreview, controller] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ui/note-sheet-preview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/document-library-controller.ts", import.meta.url), "utf8"),
   ]);
   assert.match(page, /resolveDocumentSource/);
-  assert.match(page, /source=\{resolveExcerptSource\(excerpt\)\}/);
+  assert.match(page, /resolveExcerptSource/);
+  assert.match(noteStage, /resolveSource=\{resolveExcerptSource\}/);
+  assert.match(notePreview, /resolveSource=\{resolveSource\}/);
   assert.doesNotMatch(page, /documentName:\s*renamedDocument\.name/);
   assert.doesNotMatch(page, /sourceKind:\s*"manual",\s*documentId:\s*undefined/);
   assert.doesNotMatch(page, /Đã quay lại \$\{excerpt\.documentName\}/);

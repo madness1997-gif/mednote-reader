@@ -1,12 +1,41 @@
-// @ts-nocheck
-import type React from "react";
+import { Bookmark, BookmarkCheck, ChevronLeft, Highlighter, ListTree, ScanText, Search, Trash2, X } from "lucide-react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { Dispatch, SetStateAction } from "react";
+import type { LibraryDocument, ReaderState, WorkspaceItem } from "../document-runtime-adapter";
+import type { PdfAnnotation } from "../pdf-domain";
 import { VirtualPdfThumbnailList } from "../virtualized-thumbnails";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import type { PdfOutlineEntry, PdfRailTab, SearchResult } from "./ui-contracts";
 
-export type P9UiScope = Record<string, any>;
+export type PdfNavigationRailScope = {
+  activeDocument: LibraryDocument | null;
+  activeSearchQuery: string;
+  activeWorkspace: WorkspaceItem;
+  bookmarks: number[];
+  currentPdfDocument: PDFDocumentProxy | null;
+  goToPageFromRail: (page: number) => void;
+  openSearchResult: (result: SearchResult) => void;
+  outline: PdfOutlineEntry[];
+  pdfAnnotationLabel: (annotation: PdfAnnotation) => string;
+  pdfAnnotationSummary: (annotation: PdfAnnotation) => string;
+  pdfAnnotations: PdfAnnotation[];
+  pdfRailTab: PdfRailTab;
+  performSearch: () => void | Promise<unknown>;
+  removePdfAnnotation: (annotationId: string) => void;
+  searchQuery: string;
+  searchResults: SearchResult[];
+  searchWholeCollection: boolean;
+  searching: boolean;
+  setPdfRailTab: Dispatch<SetStateAction<PdfRailTab>>;
+  setSearchQuery: Dispatch<SetStateAction<string>>;
+  setSearchWholeCollection: Dispatch<SetStateAction<boolean>>;
+  setShowPdfRail: Dispatch<SetStateAction<boolean>>;
+  sourcePage: number;
+  sourcePages: number[];
+  updateReader: (updater: (reader: ReaderState) => ReaderState) => void;
+};
 
-export function PdfNavigationRail({ scope }: { scope: P9UiScope }) {
-  const { Bookmark, BookmarkCheck, ChevronLeft, Highlighter, ListTree, ScanText, Search, Trash2, X, activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader } = scope;
+export function PdfNavigationRail({ scope }: { scope: PdfNavigationRailScope }) {
+  const { activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader } = scope;
   return (<><aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">
           <div className="pdf-rail-tabs">
             <button className={pdfRailTab === "pages" ? "active" : ""} onClick={() => setPdfRailTab("pages")} title="Trang" aria-label="Hình thu nhỏ các trang"><ScanText size={17} /></button>

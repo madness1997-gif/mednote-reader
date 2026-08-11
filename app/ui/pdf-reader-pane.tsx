@@ -1,3 +1,8 @@
-import { PdfToolbar } from "./pdf-toolbar";
-import { PdfReaderStage } from "./pdf-reader-stage";
-export function ReaderPane({ scope }: { scope: Record<string, any> }) { return <section className="reader-pane"><PdfToolbar scope={scope} /><PdfReaderStage scope={scope} /></section>; }
+import { PdfToolbar, type PdfToolbarScope } from "./pdf-toolbar";
+import { PdfReaderStage, type PdfReaderStageScope } from "./pdf-reader-stage";
+
+export type ReaderPaneScope = PdfToolbarScope & PdfReaderStageScope;
+
+export function ReaderPane({ scope }: { scope: ReaderPaneScope }) {
+  return <section className="reader-pane"><PdfToolbar scope={scope} /><PdfReaderStage scope={scope} /></section>;
+}

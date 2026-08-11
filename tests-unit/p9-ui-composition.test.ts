@@ -64,17 +64,56 @@ test("P9 Library and Drive panels are render consumers only", async () => {
 });
 
 test("P9 note UI is split into toolbar, stage, preview and toolbar view model", async () => {
+  const page = await source("app/page.tsx");
   const pane = await source("app/ui/note-pane.tsx");
   const stage = await source("app/ui/note-stage.tsx");
   const preview = await source("app/ui/note-sheet-preview.tsx");
   const toolbarHook = await source("app/use-note-toolbar.ts");
   assert.match(pane, /NoteToolbar/);
   assert.match(pane, /NoteStage/);
-  assert.match(pane, /useNoteToolbar/);
+  assert.match(page, /useNoteToolbar/);
+  assert.match(pane, /toolbar=|toolbar:/);
+  assert.match(pane, /stage=|stage:/);
   assert.match(stage, /NoteSheetPreview/);
   assert.match(preview, /NoteObjectLayer/);
   assert.match(preview, /NoteInkCanvas/);
   assert.match(toolbarHook, /useNoteToolbar/);
+  assert.match(toolbarHook, /canUndo:/);
+  assert.match(toolbarHook, /canRedo:/);
+  assert.match(toolbarHook, /TOOLBAR_KEYS/);
+});
+
+test("P9 UI contracts keep extracted components inside strict TypeScript", async () => {
+  const paths = [
+    "app/ui/app-top-bar.tsx",
+    "app/ui/drive-panel.tsx",
+    "app/ui/library-panel.tsx",
+    "app/ui/pdf-navigation-rail.tsx",
+    "app/ui/pdf-toolbar.tsx",
+    "app/ui/pdf-reader-stage.tsx",
+    "app/ui/note-navigation-host.tsx",
+    "app/ui/note-toolbar.tsx",
+    "app/ui/note-stage.tsx",
+    "app/ui/note-pane.tsx",
+    "app/ui/pdf-reader-pane.tsx",
+  ];
+  const files = await Promise.all(paths.map(source));
+  for (const file of files) {
+    assert.doesNotMatch(file, /@ts-nocheck/);
+    assert.doesNotMatch(file, /Record<string,\s*any>|\bany\b/);
+  }
+  assert.match(await source("app/ui/ui-contracts.ts"), /export type Tool/);
+});
+
+test("heavy PDF export libraries stay outside the initial application chunk", async () => {
+  const page = await source("app/page.tsx");
+  const core = await source("app/pdf-export-core.ts");
+  assert.match(page, /await import\("\.\/pdf-document-export"\)/);
+  assert.doesNotMatch(page, /from "\.\/pdf-document-export"/);
+  assert.match(core, /await import\("html2canvas"\)/);
+  assert.match(core, /await import\("pdf-lib"\)/);
+  assert.doesNotMatch(core, /import html2canvas from/);
+  assert.doesNotMatch(core, /import \{ PDFDocument \} from "pdf-lib"/);
 });
 
 test("P9 workspace shell only composes layout slots", async () => {

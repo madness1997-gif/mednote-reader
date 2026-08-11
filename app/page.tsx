@@ -1,96 +1,44 @@
 "use client";
 
 import {
-  AlignCenter,
-  AlignJustify,
-  AlignLeft,
-  AlignRight,
   Blend,
   BookOpen,
-  Bold,
-  Bookmark,
-  BookmarkCheck,
-  BringToFront,
   Brush,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Cloud,
-  CloudOff,
-  Columns2,
   Copy,
   Crop,
-  Download,
-  DownloadCloud,
   Eraser,
-  FileText,
-  FolderOpen,
   Hand,
   Highlighter,
-  IndentDecrease,
-  IndentIncrease,
-  Italic,
   Lasso,
-  Layers2,
   Languages,
-  List,
-  ListOrdered,
-  ListTree,
-  Maximize2,
-  Menu,
   MessageSquareText,
-  Minus,
   MousePointer2,
   Move,
   NotebookTabs,
-  Omega,
   PaintBucket,
-  PanelLeftOpen,
-  PanelRightOpen,
   Pencil,
   PenLine,
   PenTool,
-  Plus,
-  Printer,
-  Redo2,
-  RemoveFormatting,
   RefreshCw,
-  RotateCcw,
-  RotateCw,
-  Rows3,
   ScanText,
-  Search,
   Signature,
-  SendToBack,
-  Settings2,
   Shapes,
-  Sigma,
   Square,
   Stamp,
   Strikethrough,
-  Subscript,
-  Superscript,
-  Table2,
   TextSelect,
   TextCursorInput,
   Type,
-  Trash2,
   Underline,
-  Undo2,
-  UploadCloud,
   Volume2,
   X,
 } from "lucide-react";
-import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LazyPdfPageView, PdfPageView } from "./pdf-reader";
-import type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";
+import type { PdfAnnotation, PdfCropResult, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
 import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
 import {
   addPdfMarkup as addPdfMarkupCommand,
-  commitPdfAnnotations as commitPdfAnnotationCommand,
   deletePdfAnnotation as deletePdfAnnotationCommand,
   emptyPdfAnnotationHistory,
   redoPdfAnnotations as redoPdfAnnotationCommand,
@@ -98,23 +46,19 @@ import {
   undoPdfAnnotations as undoPdfAnnotationCommand,
   type PdfAnnotationHistory,
 } from "./pdf-annotation-session";
-import { exportAnnotatedPdf as createAnnotatedPdf } from "./pdf-document-export";
 import { driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
-import { resolveDocumentSource, type ResolvedDocumentSource } from "./note-document-source";
+import { resolveDocumentSource } from "./note-document-source";
 import {
   lookupEnglishVietnamese,
   oxfordLookupUrl,
   type EnglishVietnameseLookup,
 } from "./dictionary";
 import type { PDFiumDocument } from "./pdfium-renderer";
-import { FirstAidBlockEditor } from "./first-aid-block-editor";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
-import NoteSidebar from "./note-sidebar";
-import PageTitleEditor from "./page-title-editor";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -124,68 +68,55 @@ import { NotePane } from "./ui/note-pane";
 import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
-import { NoteSheetPreview } from "./ui/note-sheet-preview";
-import { RichTextEditor } from "./rich-text-editor";
+import type {
+  BulletStyle,
+  EquationTemplate,
+  FirstAidCropPlacement,
+  FirstAidCropResult,
+  FirstAidCropTarget,
+  NotePanel,
+  NoteSheetViewMode,
+  NumberingStyle,
+  PdfHistory,
+  PdfOutlineEntry,
+  PdfPanel,
+  PdfRailTab,
+  SearchResult,
+  StickerPresetId,
+  TableBorderSettings,
+  TextInsertPopover,
+  TextLineHeight,
+  TextToolbarState,
+  Tool,
+} from "./ui/ui-contracts";
 import { noteRichTextController } from "./note-rich-text-controller";
 import { NoteInkSession } from "./note-ink-session";
-import { NoteInkCanvas } from "./note-ink-canvas";
-import { NoteObjectLayer } from "./note-object-layer";
+import { useNoteToolbar } from "./use-note-toolbar";
 import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
-import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
+import { ordered } from "./note-domain";
 import {
-  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_NEW_NOTE_PAPER, DEFAULT_PAPER, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
+  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_PAPER, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
   FIRST_AID_TEMPLATE_HTML, FIRST_AID_TEMPLATE_TEXT, createBlankPage, defaultExcerptLayout, escapeHtml,
-  normalizeCalloutSettings, normalizeExcerptAppearance, normalizeExcerptLayout, normalizePaper, normalizeText,
-  notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml, sanitizeRichTextHtml,
-  type CalloutSettings, type ExcerptAppearance, type ExcerptLayout, type InkTool, type NoteExcerpt, type Notebook,
-  type NotePage, type NotePageContentPatch, type PaperColor, type PaperOrientation, type PaperSettings, type PaperSize,
-  type PaperTemplate, type PenStyle, type Point, type ShapeKind, type Stroke, type TableBorderStyle, type TextAlign,
-  type TextFont, type TextSettings,
+  normalizeExcerptAppearance, normalizeText,
+  notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml,
+  type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt, type Notebook,
+  type NotePage, type NotePageContentPatch, type PaperColor, type PaperSettings, type PaperSize,
+  type PaperTemplate, type PenStyle, type ShapeKind, type Stroke, type TableBorderStyle, type TextAlign,
+  type TextFont,
 } from "./note-runtime-adapter";
 import {
-  DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createDemoWorkspace, createEmptyWorkspace, documentRuntimeWorkspace,
-  isReaderPlaceholder, normalizeReader, type ReaderState,
+  DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createDemoWorkspace,
+  normalizeReader, type ReaderState,
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
 
-type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox" | "callout";
-type TextLineHeight = "1" | "1.15" | "1.5" | "1.8" | "2";
-type BulletStyle = "none" | "disc" | "circle" | "square" | "diamond" | "arrow" | "check" | "dash";
-type NumberingStyle = "decimal" | "decimal-leading-zero" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman" | "lower-greek" | "cjk-decimal";
-type TextToolbarState = TextSettings & {
-  strike: boolean;
-  subscript: boolean;
-  superscript: boolean;
-  unordered: boolean;
-  ordered: boolean;
-  backgroundColor: string;
-  lineHeight: TextLineHeight;
-  bulletStyle: BulletStyle;
-  numberingStyle: NumberingStyle;
-};
-type TableBorderSettings = { style: TableBorderStyle; width: number; color: string };
-type StickerPresetId = "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";
-type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | "stickers" | null;
-type EquationTemplate = "plain" | "fraction" | "root" | "power" | "subscript" | "sum" | "integral" | "matrix";
-type FirstAidCropPlacement = { x: number; y: number; width: number };
-type FirstAidCropTarget = { noteId: string; blockId: string; placement: FirstAidCropPlacement };
-type FirstAidCropResult = { token: string; blockId: string; excerptId: string; imageName: string; aspectRatio: number };
-
-type PdfOutlineEntry = { title: string; page: number | null; depth: number };
-type PdfRailTab = "pages" | "outline" | "search" | "marks";
-type NoteSheetViewMode = "single" | "continuous";
-type NotePanel = "ink" | "shape" | "text" | "paper" | null;
-type PdfPanel = "view" | "ink" | null;
-type SearchResult = { documentId: string | null; documentName: string; page: number; snippet: string; occurrences: number };
 type DictionaryLookupState = {
   status: "idle" | "loading" | "ready" | "error";
   sourceText: string;
   result: EnglishVietnameseLookup | null;
   error: string | null;
 };
-
-type PdfHistory = Record<string, PdfAnnotationHistory>;
 
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
@@ -253,12 +184,6 @@ const TEXT_COLORS = ["#26343a", "#000000", "#c00000", "#ff0000", "#ed7d31", "#ff
 const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ffe699", "#ccebf3", "#d8f1dc", "#f7d5dd", "#e4d8f3", "#d9e2f3", "#ffffff"];
 const TEXT_BOX_BACKGROUND_COLORS = ["transparent", "#ffffff", "#fff2a8", "#d8f1dc", "#ccebf3", "#f7d5dd", "#e4d8f3"];
 const BORDER_COLORS = ["transparent", "#60737d", "#111111", "#2465a8", "#c94b50", "#16836f"];
-const TABLE_BORDER_STYLES: { id: TableBorderStyle; label: string }[] = [
-  { id: "solid", label: "Nét liền" },
-  { id: "dashed", label: "Nét gạch" },
-  { id: "dotted", label: "Nét chấm" },
-  { id: "double", label: "Nét đôi" },
-];
 const BULLET_STYLES: { id: BulletStyle; glyph: string; label: string }[] = [
   { id: "none", glyph: "∅", label: "Không dùng dấu đầu dòng" },
   { id: "disc", glyph: "●", label: "Chấm tròn đặc" },
@@ -355,25 +280,6 @@ function cssColorToHex(color: string) {
   const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
   if (!channels || channels.length < 3) return "#111111";
   return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function hexToRgb01(color: string) {
-  const hex = cssColorToHex(color).replace("#", "");
-  const normalized = hex.length === 3 ? hex.split("").map((character) => character + character).join("") : hex.padEnd(6, "0").slice(0, 6);
-  return {
-    red: Number.parseInt(normalized.slice(0, 2), 16) / 255,
-    green: Number.parseInt(normalized.slice(2, 4), 16) / 255,
-    blue: Number.parseInt(normalized.slice(4, 6), 16) / 255,
-  };
-}
-
-function standardPdfText(value: string) {
-  return value
-    .replace(/Đ/g, "D")
-    .replace(/đ/g, "d")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\x20-\x7E]/g, "?");
 }
 
 function cssBackgroundColor(color: string) {
@@ -546,39 +452,6 @@ function boundingPdfRect(rects: PdfRect[]): PdfRect | undefined {
   });
 }
 
-function notePagePresentation(page: NotePage, zoom: number) {
-  const selectedSize = PAPER_SIZES[page.paper.size];
-  const width = page.paper.orientation === "portrait" ? selectedSize.width : selectedSize.height;
-  const height = page.paper.orientation === "portrait" ? selectedSize.height : selectedSize.width;
-  const maxWidth = page.paper.orientation === "portrait" ? selectedSize.maxWidth : Math.min(920, selectedSize.maxWidth * 1.32);
-  const lineStep = page.paper.template === "ruled-dense" ? 5 : 8;
-  const font = TEXT_FONTS.find((option) => option.id === page.text.font) ?? TEXT_FONTS[0];
-  return {
-    selectedSize,
-    width,
-    height,
-    maxWidth,
-    paperStyle: {
-      "--paper-ratio": `${width} / ${height}`,
-      "--paper-max-width": `${maxWidth}px`,
-      "--note-view-zoom": zoom,
-      "--paper-line-step": `${(lineStep / height) * 100}%`,
-      "--paper-cell-x": `${(8 / width) * 100}%`,
-      "--paper-cell-y": `${(8 / height) * 100}%`,
-      "--cornell-header": `${(40 / height) * 100}%`,
-    } as React.CSSProperties,
-    textLayerStyle: {
-      "--text-font": font.family,
-      "--text-size": `${page.text.size}px`,
-      "--text-color": page.text.color === "auto" ? "var(--paper-ink)" : page.text.color,
-      "--text-weight": page.text.bold ? 700 : 400,
-      "--text-style": page.text.italic ? "italic" : "normal",
-      "--text-decoration": page.text.underline ? "underline" : "none",
-      "--text-align": page.text.align,
-    } as React.CSSProperties,
-  };
-}
-
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -591,107 +464,6 @@ function blobToDataUrl(blob: Blob) {
 function rangeBelongsToEditor(range: Range, editor: HTMLElement) {
   const container = range.commonAncestorContainer;
   return container === editor || editor.contains(container.nodeType === Node.ELEMENT_NODE ? container : container.parentNode);
-}
-
-function DemoDocument({ page }: { page: number }) {
-  return (
-    <article className="document-paper">
-      <div className="page-meta"><strong>{page}</strong><em>Diabetes Mellitus: A Clinical Textbook, 5th Edition</em></div>
-      <h1>3.4&nbsp;&nbsp; DIABETIC NEUROPATHY</h1>
-      <div className="document-columns">
-        <section>
-          <h2>3.4.1&nbsp;&nbsp; Introduction</h2>
-          <p>Diabetic neuropathy is the most common chronic complication of diabetes mellitus and a leading cause of morbidity. It may involve the peripheral and autonomic nervous systems.</p>
-          <h2>3.4.3&nbsp;&nbsp; Clinical Features</h2>
-          <p>Peripheral neuropathy typically presents with distal symmetrical sensory loss and neuropathic pain.</p>
-          <ul><li>Numbness, tingling and burning pain</li><li>Loss of vibration and temperature sensation</li><li>Reduced ankle reflexes</li></ul>
-          <div className="figure-card">
-            <div className="mechanism-row"><span>Hyperglycemia</span><b>→</b><span>Polyol pathway</span><b>→</b><span>Nerve damage</span></div>
-            <div className="nerve-illustration"><i /><i /><i /><i /><i /></div>
-            <small>Figure 3.7. Proposed mechanisms in diabetic peripheral neuropathy.</small>
-          </div>
-        </section>
-        <section>
-          <h2>3.4.2&nbsp;&nbsp; Pathophysiology</h2>
-          <p>The pathogenesis is multifactorial, involving metabolic, vascular and neurotrophic mechanisms.</p>
-          <ul><li>Chronic hyperglycemia → polyol pathway activation</li><li>Advanced glycation end products (AGEs)</li><li>Oxidative stress and inflammation</li><li>Microvascular ischemia</li><li>Neurotrophic factor deficiency</li></ul>
-          <h2>3.4.4&nbsp;&nbsp; Diagnosis</h2>
-          <p>Diagnosis is primarily clinical and based on history and physical examination.</p>
-          <ul><li>10-g monofilament test</li><li>Vibration perception (128-Hz tuning fork)</li><li>Nerve conduction studies when needed</li></ul>
-          <h2>3.4.5&nbsp;&nbsp; Management</h2>
-          <ul><li>Optimal glycemic control</li><li>Pain management</li><li>Foot care and ulcer prevention</li></ul>
-        </section>
-      </div>
-    </article>
-  );
-}
-
-function PdfPageCanvas({ document, page, zoom }: { document: PDFDocumentProxy; page: number; zoom: number }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let disposed = false;
-    let renderTask: PDFRenderTask | null = null;
-    let requestNumber = 0;
-    let rendering = false;
-    const wrapper = wrapRef.current;
-    const canvas = canvasRef.current;
-    if (!wrapper || !canvas) return;
-
-    const drainRenderQueue = async () => {
-      if (rendering) return;
-      rendering = true;
-      while (!disposed) {
-        const currentRequest = requestNumber;
-        const pdfPage = await document.getPage(page);
-        if (disposed) break;
-        if (currentRequest !== requestNumber) continue;
-        const base = pdfPage.getViewport({ scale: 1 });
-        const available = Math.max(260, wrapper.clientWidth - 2);
-        const scale = (available / base.width) * zoom;
-        const viewport = pdfPage.getViewport({ scale });
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.floor(viewport.width * ratio);
-        canvas.height = Math.floor(viewport.height * ratio);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        const context = canvas.getContext("2d");
-        if (!context) break;
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
-        try {
-          await renderTask.promise;
-        } catch (error) {
-          if (!disposed && (error as Error).name !== "RenderingCancelledException") throw error;
-        } finally {
-          renderTask = null;
-        }
-        if (currentRequest === requestNumber) {
-          if (!disposed) setLoading(false);
-          break;
-        }
-      }
-      rendering = false;
-    };
-
-    const requestRender = () => {
-      requestNumber += 1;
-      renderTask?.cancel();
-      void drainRenderQueue();
-    };
-
-    const observer = new ResizeObserver(requestRender);
-    observer.observe(wrapper);
-    return () => {
-      disposed = true;
-      observer.disconnect();
-      renderTask?.cancel();
-    };
-  }, [document, page, zoom]);
-
-  return <div className="pdf-canvas-wrap" ref={wrapRef}>{loading && <div className="pdf-loading">Đang dựng trang…</div>}<canvas ref={canvasRef} /></div>;
 }
 
 export default function Home() {
@@ -1214,7 +986,6 @@ export default function Home() {
   const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {
     const selection = pdfReader.selectDocumentTarget(activeWorkspace.documents, documentId, page);
     if (!selection) return;
-    const target = selection.document;
     const nextPage = selection.page;
     updateActiveWorkspace((workspace) => ({
       ...workspace,
@@ -1453,10 +1224,6 @@ export default function Home() {
   const applyPdfAnnotationResult = (result: { annotations: PdfAnnotation[]; history: PdfAnnotationHistory }) => {
     setPdfHistory((state) => ({ ...state, [pdfHistoryKey]: result.history }));
     updateReader((reader) => ({ ...reader, annotations: result.annotations }));
-  };
-
-  const commitPdfAnnotations = (next: PdfAnnotation[], previous = pdfAnnotations) => {
-    applyPdfAnnotationResult(commitPdfAnnotationCommand(previous, next, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
   };
 
   const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
@@ -2090,7 +1857,8 @@ export default function Home() {
     try {
       const stored = await documentLibrary.readPdf(activeDocument.id);
       if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");
-      const blob = await createAnnotatedPdf({ blob: stored.blob, annotations: pdfAnnotations });
+      const { exportAnnotatedPdf } = await import("./pdf-document-export");
+      const blob = await exportAnnotatedPdf({ blob: stored.blob, annotations: pdfAnnotations });
       const url = URL.createObjectURL(blob);
       if (mode === "download") {
         const link = document.createElement("a");
@@ -2541,11 +2309,6 @@ export default function Home() {
     setToast(shouldSeed ? "Đã tạo khung note First Aid để điền nội dung" : "Đã áp dụng bố cục First Aid");
   };
 
-  const updateText = (changes: Partial<TextSettings>) => {
-    updateActiveNote({ text: { ...activeNote.text, ...changes } });
-    setToast("Đã lưu định dạng chữ cho trang này");
-  };
-
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
     if (mode !== "reader" && !hasActiveNote) {
       setToast(activeWorkspace.kind === "temporary"
@@ -2627,19 +2390,20 @@ export default function Home() {
 
   const showReader = workspaceMode !== "note";
   const showNote = workspaceMode !== "reader";
+  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, TEXT_FONTS, activeNote, activeTool, applyTextCommand, applyTextLineHeight, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo });
 
   return (
     <main className="app-shell">
       <input ref={previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, false); event.currentTarget.value = ""; }} />
       <input ref={libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, true); event.currentTarget.value = ""; }} />
-      <AppTopBar scope={{ BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw, activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
+      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
 
       {drivePanelOpen && (
-        <DrivePanel scope={{ CloudOff, DownloadCloud, IS_DESKTOP_APP, RefreshCw, UploadCloud, X, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
+        <DrivePanel scope={{ IS_DESKTOP_APP, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
       )}
 
       {libraryOpen && (
-        <LibraryPanel scope={{ Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X, activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, noteStore, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces }} />
+        <LibraryPanel scope={{ activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces }} />
       )}
 
       {pdfSelection && (
@@ -2690,14 +2454,14 @@ export default function Home() {
       )}
 
       <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
-        {showReader && <PdfNavigationRail scope={{ Bookmark, BookmarkCheck, ChevronLeft, Highlighter, ListTree, ScanText, Search, Trash2, X, activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader }} />}
+        {showReader && <PdfNavigationRail scope={{ activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader }} />}
 
-        {showReader && <ReaderPane scope={{ BookOpen, Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, DemoDocument, Download, FileText, FolderOpen, INK_COLORS, LazyPdfPageView, Maximize2, Minus, PDF_TOOLS, PanelLeftOpen, PdfPageView, Plus, Printer, Redo2, RotateCw, Rows3, Settings2, Square, Trash2, Undo2, X, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setShowPdfRail, setSourceZoom, showPdfRail, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />}
+        {showReader && <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setShowPdfRail, setSourceZoom, showPdfRail, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />}
 
         {workspaceMode === "split" && <SplitDivider onPointerDown={startResize} />}
 
-        {showNote && <NotePane scope={{ AlignCenter, AlignJustify, AlignLeft, AlignRight, BORDER_COLORS, BULLET_STYLES, Bold, BringToFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, EQUATION_PRESETS, EQUATION_TEMPLATES, FirstAidBlockEditor, INK_COLORS, IndentDecrease, IndentIncrease, Italic, LINE_PRESETS, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NOTE_ZOOM_PRESETS, NUMBERING_STYLES, NoteInkCanvas, NoteObjectLayer, NoteSheetPreview, NotebookTabs, Omega, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, PageTitleEditor, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, RichTextEditor, Rows3, STICKER_PRESETS, SYMBOL_GROUPS, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, TEXT_BACKGROUND_COLORS, TEXT_BOX_BACKGROUND_COLORS, TEXT_COLORS, TEXT_FONTS, Table2, Underline, Undo2, X, activateContinuousSheet, activateTextEditor, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTextEditorRef, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, applyTextLineHeight, basePaperMaxWidth, changeListLevel, chooseNoteTool, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, exportNotebook, finishFirstAidPdfCrop, firstAidCropResult, fitNoteToView, goToPage, highlighterWidth, inkColor, inkHistoryVersion, inkWidth, insertEquation, insertTable, insertTextAtSelection, moveExcerpt, normalizeTextEditorInput, noteInkSession, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, noteZoomPercent, openExcerptSource, openTextPopover, paperHeight, paperStyle, paperWidth, penStyle, plainTextToRichHtml, redo, requestFirstAidPdfCrop, resolveExcerptSource, savedTextRangeRef, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptId, selectedExcerptIndex, selectedPaperSize, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setEquationDraft, setEquationParts, setEquationTemplate, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, setPenStyle, setSelectedExcerptId, setShapeKind, setTableColumns, setTableRows, setTextInsertPopover, setToast, shapeKind, shiftExcerptLayer, showNoteSidebar, tableBorder, tableColumns, tableRows, textCharacterToolbarRef, textInsertPopover, textLayerStyle, textParagraphToolbarRef, textPopoverLeft, textToolbar, tools, undo, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance, updateTableBorder }} />}
-        {showNote && showNoteSidebar && <NoteNavigationHost scope={{ NoteSidebar, setNoteSidebarVisibility }} />}
+        {showNote && <NotePane toolbar={noteToolbar} stage={{ BORDER_COLORS, BULLET_STYLES, EQUATION_PRESETS, EQUATION_TEMPLATES, INK_COLORS, LINE_PRESETS, NUMBERING_STYLES, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, SYMBOL_GROUPS, TEXT_BACKGROUND_COLORS, TEXT_BOX_BACKGROUND_COLORS, TEXT_COLORS, activateContinuousSheet, activateTextEditor, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTextEditorRef, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, insertEquation, insertTable, insertTextAtSelection, moveExcerpt, normalizeTextEditorInput, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, savedTextRangeRef, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setEquationDraft, setEquationParts, setEquationTemplate, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setTableColumns, setTableRows, setTextInsertPopover, setToast, shapeKind, tableBorder, tableColumns, tableRows, textInsertPopover, textLayerStyle, textPopoverLeft, textToolbar, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance, updateTableBorder }} />}
+        {showNote && showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
       </WorkspaceShell>
     </main>
   );

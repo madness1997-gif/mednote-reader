@@ -1,11 +1,39 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, Download, Minus, PanelLeftOpen, Plus, Printer, Redo2, Settings2, Trash2, Undo2, type LucideIcon } from "lucide-react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { Dispatch, SetStateAction } from "react";
+import type { LibraryDocument, WorkspaceItem } from "../document-runtime-adapter";
+import type { PdfTool } from "../pdf-domain";
+import type { PdfHistory, PdfPanel } from "./ui-contracts";
 
-export type P9UiScope = Record<string, any>;
+export type PdfToolbarScope = {
+  PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: LucideIcon }[];
+  activeDocument: LibraryDocument | null;
+  activeWorkspace: WorkspaceItem;
+  bookmarks: number[];
+  choosePdfTool: (tool: PdfTool) => void;
+  currentPdfDocument: PDFDocumentProxy | null;
+  deleteActiveDocument: () => void | Promise<unknown>;
+  exportAnnotatedPdf: (mode: "download" | "print") => void | Promise<unknown>;
+  goToPage: (page: number) => void;
+  pdfHistory: PdfHistory;
+  pdfHistoryKey: string;
+  pdfPanel: PdfPanel;
+  pdfTool: PdfTool;
+  redoPdf: () => void;
+  setPdfPanel: Dispatch<SetStateAction<PdfPanel>>;
+  setShowPdfRail: Dispatch<SetStateAction<boolean>>;
+  setSourceZoom: Dispatch<SetStateAction<number>>;
+  showPdfRail: boolean;
+  sourcePage: number;
+  sourceZoom: number;
+  switchDocument: (documentId: string) => void;
+  toggleBookmark: () => void;
+  totalPages: number;
+  undoPdf: () => void;
+};
 
-export function PdfToolbar({ scope }: { scope: P9UiScope }) {
-  const { Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, Download, Minus, PDF_TOOLS, PanelLeftOpen, Plus, Printer, Redo2, Settings2, Trash2, Undo2, activeDocument, activeWorkspace, bookmarks, choosePdfTool, currentPdfDocument, deleteActiveDocument, exportAnnotatedPdf, goToPage, icon, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, setShowPdfRail, setSourceZoom, showPdfRail, sourcePage, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf } = scope;
+export function PdfToolbar({ scope }: { scope: PdfToolbarScope }) {
+  const { PDF_TOOLS, activeDocument, activeWorkspace, bookmarks, choosePdfTool, currentPdfDocument, deleteActiveDocument, exportAnnotatedPdf, goToPage, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, setShowPdfRail, setSourceZoom, showPdfRail, sourcePage, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf } = scope;
   return (<><div className="pane-toolbar pdf-toolbar two-row-toolbar" role="toolbar" aria-label="Công cụ PDF">
             <div className="toolbar-row toolbar-row-primary">
               {!showPdfRail && <button className="pdf-toolbar-button" aria-label="Hiện bảng điều hướng" title="Hiện bảng điều hướng" onClick={() => setShowPdfRail(true)}><PanelLeftOpen size={17} /></button>}

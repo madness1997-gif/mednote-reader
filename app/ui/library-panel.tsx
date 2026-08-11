@@ -1,11 +1,33 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { LibraryProjection } from "../library-projection";
+import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
 
-export type P9UiScope = Record<string, any>;
+export type LibraryPanelScope = {
+  activeWorkspace: WorkspaceItem;
+  activeWorkspaceIdRef: { current: string };
+  beginWorkspaceRename: (workspace: WorkspaceItem) => void;
+  cancelWorkspaceRename: () => void;
+  commitWorkspaceRename: (workspaceId: string) => void;
+  deleteWorkspace: (workspaceId: string) => void | Promise<unknown>;
+  libraryPdfInputRef: RefObject<HTMLInputElement | null>;
+  libraryProjection: LibraryProjection;
+  noteState: { structure: { active: { activeNotebookId: string } } | null };
+  openLibraryNotebook: (notebookId: string) => void | Promise<unknown>;
+  ready: boolean;
+  renamingWorkspaceId: string | null;
+  renamingWorkspaceName: string;
+  setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
+  setLibraryOpen: Dispatch<SetStateAction<boolean>>;
+  setRenamingWorkspaceName: Dispatch<SetStateAction<string>>;
+  setToast: Dispatch<SetStateAction<string>>;
+  setWorkspaceMode: Dispatch<SetStateAction<WorkspaceMode>>;
+  workspaceModeRef: { current: WorkspaceMode };
+  workspaces: WorkspaceItem[];
+};
 
-export function LibraryPanel({ scope }: { scope: P9UiScope }) {
-  const { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X, activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
+export function LibraryPanel({ scope }: { scope: LibraryPanelScope }) {
+  const { activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
   return (<><div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
           <aside className="library-panel" aria-label="Thư viện tài liệu" onPointerDown={(event) => event.stopPropagation()}>
             <div className="library-header"><div><strong>Thư viện</strong><span>PDF và note được lưu độc lập; chỉ liên kết khi bạn chọn</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>

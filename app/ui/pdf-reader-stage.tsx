@@ -1,11 +1,93 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { BookOpen, FileText, FolderOpen, Maximize2, RotateCw, Rows3, Square, X } from "lucide-react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { ComponentProps, Dispatch, RefObject, SetStateAction, WheelEvent } from "react";
+import type { LibraryDocument, ReaderState, WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
+import type { PdfAnnotation, PdfFitMode, PdfRect, PdfTool, PdfViewMode } from "../pdf-domain";
+import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
+import type { PDFiumDocument } from "../pdfium-renderer";
+import type { PdfPanel } from "./ui-contracts";
 
-export type P9UiScope = Record<string, any>;
+export type PdfReaderStageScope = {
+  INK_COLORS: string[];
+  activeDocument: LibraryDocument | null;
+  activeSearchQuery: string;
+  activeWorkspace: WorkspaceItem;
+  addImageExcerpt: ComponentProps<typeof PdfPageView>["onCrop"];
+  changeWorkspaceMode: (mode: WorkspaceMode) => void;
+  commitPdfPageAnnotations: (page: number, next: PdfAnnotation[], previous: PdfAnnotation[]) => void;
+  currentPdfDocument: PDFDocumentProxy | null;
+  documentStageRef: RefObject<HTMLDivElement | null>;
+  fitMode: PdfFitMode;
+  handlePdfSelection: ComponentProps<typeof PdfPageView>["onSelection"];
+  handlePdfWheelZoom: (event: WheelEvent<HTMLDivElement>) => void;
+  handleReaderScroll: () => void;
+  inkColor: string;
+  inkWidth: number;
+  libraryPdfInputRef: RefObject<HTMLInputElement | null>;
+  pdfAnnotationText: string;
+  pdfAnnotations: PdfAnnotation[];
+  pdfHighlightColor: string;
+  pdfPanel: PdfPanel;
+  pdfPanelColor: string;
+  pdfSignatureDraft: string;
+  pdfStampDraft: string;
+  pdfStatus: "idle" | "loading" | "error";
+  pdfTextDraft: string;
+  pdfTool: PdfTool;
+  pdfiumDocument: PDFiumDocument | null;
+  previewPdfInputRef: RefObject<HTMLInputElement | null>;
+  ready: boolean;
+  rotation: number;
+  setInkWidth: Dispatch<SetStateAction<number>>;
+  setPdfPanel: Dispatch<SetStateAction<PdfPanel>>;
+  setPdfSignatureDraft: Dispatch<SetStateAction<string>>;
+  setPdfStampDraft: Dispatch<SetStateAction<string>>;
+  setPdfTextDraft: Dispatch<SetStateAction<string>>;
+  sourceFocus: { documentId: string; page: number; rect: PdfRect } | null;
+  sourcePage: number;
+  sourcePages: number[];
+  sourceZoom: number;
+  updatePdfPanelColor: (color: string) => void;
+  updateReader: (updater: (reader: ReaderState) => ReaderState) => void;
+  viewMode: PdfViewMode;
+  workspaceMode: WorkspaceMode;
+};
 
-export function PdfReaderStage({ scope }: { scope: P9UiScope }) {
-  const { BookOpen, DemoDocument, FileText, FolderOpen, INK_COLORS, LazyPdfPageView, Maximize2, PdfPageView, RotateCw, Rows3, Square, X, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, changeWorkspaceMode, commitPdfPageAnnotations, currentPdfDocument, documentStageRef, fitMode, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, sourceFocus, sourcePage, sourcePages, sourceZoom, updatePdfPanelColor, updateReader, viewMode, workspaceMode } = scope;
+function DemoDocument({ page }: { page: number }) {
+  return (
+    <article className="document-paper">
+      <div className="page-meta"><strong>{page}</strong><em>Diabetes Mellitus: A Clinical Textbook, 5th Edition</em></div>
+      <h1>3.4&nbsp;&nbsp; DIABETIC NEUROPATHY</h1>
+      <div className="document-columns">
+        <section>
+          <h2>3.4.1&nbsp;&nbsp; Introduction</h2>
+          <p>Diabetic neuropathy is the most common chronic complication of diabetes mellitus and a leading cause of morbidity. It may involve the peripheral and autonomic nervous systems.</p>
+          <h2>3.4.3&nbsp;&nbsp; Clinical Features</h2>
+          <p>Peripheral neuropathy typically presents with distal symmetrical sensory loss and neuropathic pain.</p>
+          <ul><li>Numbness, tingling and burning pain</li><li>Loss of vibration and temperature sensation</li><li>Reduced ankle reflexes</li></ul>
+          <div className="figure-card">
+            <div className="mechanism-row"><span>Hyperglycemia</span><b>→</b><span>Polyol pathway</span><b>→</b><span>Nerve damage</span></div>
+            <div className="nerve-illustration"><i /><i /><i /><i /><i /></div>
+            <small>Figure 3.7. Proposed mechanisms in diabetic peripheral neuropathy.</small>
+          </div>
+        </section>
+        <section>
+          <h2>3.4.2&nbsp;&nbsp; Pathophysiology</h2>
+          <p>The pathogenesis is multifactorial, involving metabolic, vascular and neurotrophic mechanisms.</p>
+          <ul><li>Chronic hyperglycemia → polyol pathway activation</li><li>Advanced glycation end products (AGEs)</li><li>Oxidative stress and inflammation</li><li>Microvascular ischemia</li><li>Neurotrophic factor deficiency</li></ul>
+          <h2>3.4.4&nbsp;&nbsp; Diagnosis</h2>
+          <p>Diagnosis is primarily clinical and based on history and physical examination.</p>
+          <ul><li>10-g monofilament test</li><li>Vibration perception (128-Hz tuning fork)</li><li>Nerve conduction studies when needed</li></ul>
+          <h2>3.4.5&nbsp;&nbsp; Management</h2>
+          <ul><li>Optimal glycemic control</li><li>Pain management</li><li>Foot care and ulcer prevention</li></ul>
+        </section>
+      </div>
+    </article>
+  );
+}
+
+export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
+  const { INK_COLORS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, changeWorkspaceMode, commitPdfPageAnnotations, currentPdfDocument, documentStageRef, fitMode, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, sourceFocus, sourcePage, sourcePages, sourceZoom, updatePdfPanelColor, updateReader, viewMode, workspaceMode } = scope;
   return (<>{pdfPanel === "view" && (
             <div className="floating-tool-panel pdf-view-panel" role="dialog" aria-label="Tùy chọn hiển thị PDF">
               <div className="tool-panel-heading"><div><strong>Hiển thị PDF</strong><span>Thu phóng và bố cục trang</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
@@ -31,9 +113,9 @@ export function PdfReaderStage({ scope }: { scope: P9UiScope }) {
               {["note", "text", "stamp", "signature"].includes(pdfTool) && <p className="pdf-placement-help">Bấm nhiều vị trí để đặt lại cùng nội dung. Dùng công cụ Tẩy hoặc danh sách Chú thích để xóa.</p>}
             </div>
           )}<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll} onWheel={handlePdfWheelZoom}>
-            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={addImageExcerpt} /> : currentPdfDocument ? (
               <div className="continuous-pages">
-                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus?.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
+                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={addImageExcerpt} />)}
               </div>
             ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={() => libraryPdfInputRef.current?.click()}>Chọn lại PDF</button>}</div>

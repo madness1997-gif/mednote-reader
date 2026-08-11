@@ -1,11 +1,52 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2, type LucideIcon } from "lucide-react";
+import type { Dispatch, RefObject, SetStateAction, WheelEvent } from "react";
+import type { ExcerptAppearance, NoteExcerpt, NotePage, TextFont } from "../note-runtime-adapter";
+import type { NotePanel, NoteSheetViewMode, TableBorderSettings, TextCommand, TextInsertPopover, TextLineHeight, TextToolbarState, Tool } from "./ui-contracts";
 
-export type P9UiScope = Record<string, any>;
+export type NoteToolbarScope = {
+  NOTE_ZOOM_PRESETS: number[];
+  TEXT_FONTS: { id: TextFont; label: string; family: string }[];
+  activeNote: NotePage;
+  activeTool: Tool;
+  applyTextCommand: (command: TextCommand, value?: string | number) => void;
+  applyTextLineHeight: (lineHeight: TextLineHeight) => void;
+  canRedo: boolean;
+  canUndo: boolean;
+  changeListLevel: (direction: "increase" | "decrease") => void;
+  chooseNoteTool: (tool: Tool) => void;
+  exportNotebook: () => void | Promise<unknown>;
+  fitNoteToView: () => void;
+  inkHistoryVersion: number;
+  notePanel: NotePanel;
+  noteSheetViewMode: NoteSheetViewMode;
+  noteZoom: number;
+  noteZoomPercent: number;
+  openTextPopover: (popover: Exclude<TextInsertPopover, null>, button: HTMLElement) => void;
+  redo: () => void;
+  scrollTextToolbar: (toolbar: HTMLDivElement | null, direction: -1 | 1) => void;
+  scrollTextToolbarWithWheel: (event: WheelEvent<HTMLDivElement>) => void;
+  selectedExcerpt: NoteExcerpt | null;
+  selectedExcerptIndex: number;
+  selectedTextBoxAppearance: ExcerptAppearance | null;
+  selectedToolbarFont: { family: string };
+  setActiveTool: Dispatch<SetStateAction<Tool>>;
+  setNotePanel: Dispatch<SetStateAction<NotePanel>>;
+  setNoteSheetViewMode: Dispatch<SetStateAction<NoteSheetViewMode>>;
+  setNoteSidebarVisibility: (visible: boolean) => void;
+  setNoteViewZoom: (zoom: number) => void;
+  shiftExcerptLayer: (direction: "front" | "forward" | "backward" | "back") => void;
+  showNoteSidebar: boolean;
+  tableBorder: TableBorderSettings;
+  textCharacterToolbarRef: RefObject<HTMLDivElement | null>;
+  textInsertPopover: TextInsertPopover;
+  textParagraphToolbarRef: RefObject<HTMLDivElement | null>;
+  textToolbar: TextToolbarState;
+  tools: { id: Tool; label: string; icon: LucideIcon }[];
+  undo: () => void;
+};
 
-export function NoteToolbar({ scope }: { scope: P9UiScope }) {
-  const { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NOTE_ZOOM_PRESETS, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, TEXT_FONTS, Table2, Underline, Undo2, activeNote, activeTool, applyTextCommand, applyTextLineHeight, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, icon, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo } = scope;
+export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
+  const { NOTE_ZOOM_PRESETS, TEXT_FONTS, activeNote, activeTool, applyTextCommand, applyTextLineHeight, canRedo, canUndo, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, inkHistoryVersion, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo } = scope;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
@@ -27,8 +68,8 @@ export function NoteToolbar({ scope }: { scope: P9UiScope }) {
                 <button onClick={fitNoteToView} aria-label="Vừa chiều rộng khung note" title="Vừa chiều rộng khung note"><Maximize2 size={14} /></button>
               </div>
               <div className="toolbar-cluster history-cluster">
-                <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!noteInkSession.canUndo(activeNote.id)} data-ink-history-version={inkHistoryVersion}><Undo2 size={19} /></button>
-                <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!noteInkSession.canRedo(activeNote.id)} data-ink-history-version={inkHistoryVersion}><Redo2 size={19} /></button>
+                <button className="icon-button compact" aria-label="Hoàn tác" onClick={undo} disabled={!canUndo} data-ink-history-version={inkHistoryVersion}><Undo2 size={19} /></button>
+                <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!canRedo} data-ink-history-version={inkHistoryVersion}><Redo2 size={19} /></button>
               </div>
               <button className={`paper-button ${notePanel === "paper" ? "active" : ""}`} onClick={() => setNotePanel((panel) => panel === "paper" ? null : "paper")} aria-expanded={notePanel === "paper"}><NotebookTabs size={17} /><span>Giấy</span><ChevronDown size={11} /></button>
             </div>

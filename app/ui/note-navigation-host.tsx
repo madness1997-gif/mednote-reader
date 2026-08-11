@@ -1,10 +1,5 @@
-// @ts-nocheck
-import type React from "react";
-type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type PdfViewMode = any; type PdfTool = any;
+import NoteSidebar from "../note-sidebar";
 
-export type P9UiScope = Record<string, any>;
-
-export function NoteNavigationHost({ scope }: { scope: P9UiScope }) {
-  const { NoteSidebar, setNoteSidebarVisibility } = scope;
+export function NoteNavigationHost({ setNoteSidebarVisibility }: { setNoteSidebarVisibility: (visible: boolean) => void }) {
   return (<><aside className="note-navigation-host" aria-label="Điều hướng ghi chú"><NoteSidebar onRequestClose={() => setNoteSidebarVisibility(false)} /></aside></>);
 }
