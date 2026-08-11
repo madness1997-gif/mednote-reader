@@ -113,6 +113,8 @@ export class NoteRichTextController {
   }
 }
 
+export const noteRichTextController = new NoteRichTextController();
+
 export function richTextRangeBelongsToEditor(range: Range, editor: HTMLElement) {
   return rangeBelongsToEditor(range, editor);
 }
