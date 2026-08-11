@@ -10,10 +10,12 @@ import {
 } from "./note-runtime-adapter";
 import {
   DEFAULT_READER,
+  NOTE_RUNTIME_WORKSPACE_ID,
   createEmptyWorkspace,
+  createNoteRuntimeWorkspace,
   documentRuntimeWorkspace,
   normalizeWorkspace,
-  workspacesFromDocumentGraph,
+  runtimeWorkspacesFromDocumentGraph,
   type LibraryDocument,
   type PersistedLibrary,
   type WorkspaceItem,
@@ -160,33 +162,39 @@ async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: stri
 
 function restoreV6DocumentRuntime(preferred: PersistedLibrary | null, warnings: string[]) {
   const state = noteStore.getSnapshot();
-  const workspaces = state.structure
-    ? workspacesFromDocumentGraph(state.documents, state.structure)
-    : [];
-  if (!workspaces.length) return null;
+  if (!state.structure) return null;
+  const workspaces = runtimeWorkspacesFromDocumentGraph(state.documents, state.structure);
   const preferredActiveId = preferred?.activeWorkspaceId;
-  const activeWorkspaceId = preferredActiveId && workspaces.some((workspace) => workspace.id === preferredActiveId)
+  const activeWorkspaceId = preferredActiveId && workspaces.some((workspace) => workspace.id === preferredActiveId && workspace.documents.length > 0)
     ? preferredActiveId
-    : workspaces[0].id;
+    : NOTE_RUNTIME_WORKSPACE_ID;
+  const settings = runtimeSettings(preferred, activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID ? "note" : "split");
   return resultWithWarnings({
     workspaces,
     activeWorkspaceId,
-    ...runtimeSettings(preferred, "split"),
+    ...settings,
+    workspaceMode: activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID && settings.workspaceMode === "reader"
+      ? "note"
+      : settings.workspaceMode,
   }, warnings);
 }
 
 function restoreLegacyRuntime(preferred: PersistedLibrary | null, warnings: string[]) {
   if (!preferred?.workspaces?.length) return null;
-  const workspaces = persistentDocumentWorkspaces(preferred.workspaces)
+  const documentWorkspaces = persistentDocumentWorkspaces(preferred.workspaces)
+    .filter((workspace) => workspace.documents.length > 0)
     .map((workspace) => documentRuntimeWorkspace(normalizeWorkspace(workspace)));
-  if (!workspaces.length) return null;
-  const activeWorkspaceId = workspaces.some((workspace) => workspace.id === preferred.activeWorkspaceId)
+  if (!documentWorkspaces.length) return null;
+  const workspaces = [...documentWorkspaces, createNoteRuntimeWorkspace()];
+  const activeWorkspaceId = documentWorkspaces.some((workspace) => workspace.id === preferred.activeWorkspaceId)
     ? preferred.activeWorkspaceId
-    : workspaces[0].id;
+    : NOTE_RUNTIME_WORKSPACE_ID;
+  const settings = runtimeSettings(preferred, activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID ? "note" : "split");
   return resultWithWarnings({
     workspaces,
     activeWorkspaceId,
-    ...runtimeSettings(preferred, "split"),
+    ...settings,
+    workspaceMode: activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID && settings.workspaceMode === "reader" ? "note" : settings.workspaceMode,
   }, warnings);
 }
 
@@ -224,9 +232,7 @@ async function migrateLegacyCurrentPdf(warnings: string[]) {
 }
 
 function noteOnlyWorkspace() {
-  const workspace = createEmptyWorkspace();
-  const activeNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || workspace.noteNotebookId || null;
-  return documentRuntimeWorkspace({ ...workspace, noteNotebookId: activeNotebookId });
+  return createNoteRuntimeWorkspace();
 }
 
 async function migrateLegacyNotebook(
@@ -265,16 +271,19 @@ async function migrateLegacyNotebook(
     await noteStore.replaceFromLegacySnapshot(snapshot);
     const restored = restoreV6DocumentRuntime(snapshot, warnings);
     if (restored) return restored;
+    const noteWorkspace = noteOnlyWorkspace();
     return resultWithWarnings({
-      workspaces: [noteOnlyWorkspace()],
-      activeWorkspaceId: "empty-workspace",
+      workspaces: [noteWorkspace],
+      activeWorkspaceId: noteWorkspace.id,
       ...runtimeSettings(snapshot, "note"),
     }, warnings);
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : "Không thể migrate dữ liệu v1");
+    const documentWorkspaces = pdfMigration ? [documentRuntimeWorkspace(restoredWorkspace)] : [];
+    const noteWorkspace = noteOnlyWorkspace();
     return resultWithWarnings({
-      workspaces: [documentRuntimeWorkspace(restoredWorkspace)],
-      activeWorkspaceId: restoredWorkspace.id,
+      workspaces: [...documentWorkspaces, noteWorkspace],
+      activeWorkspaceId: pdfMigration ? restoredWorkspace.id : noteWorkspace.id,
       ...runtimeSettings(snapshot, pdfMigration ? "split" : "note"),
     }, warnings);
   }
