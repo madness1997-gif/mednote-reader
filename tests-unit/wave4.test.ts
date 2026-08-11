@@ -74,6 +74,7 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
 test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () => {
   const toolbar = await readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8");
   const sidebar = await readFile(new URL("../app/note-sidebar.tsx", import.meta.url), "utf8");
+  const liveCollapseWorkflow = await readFile(new URL("../.github/workflows/sidebar-collapse-live.yml", import.meta.url), "utf8");
   assert.doesNotMatch(toolbar, /Sổ mới|Xóa sổ|aria-label="Thêm trang"|aria-label="Xóa trang note"/);
   assert.match(toolbar, /Từng trang/);
   assert.match(toolbar, /Liên tục/);
@@ -83,6 +84,9 @@ test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () =>
   assert.match(sidebar, /note-sidebar-collapse-button/);
   assert.match(sidebar, /<span>Ẩn<\/span><ChevronRight/);
   assert.doesNotMatch(sidebar, /title="Thu gọn" aria-label="Thu gọn điều hướng"><X/);
+  assert.match(liveCollapseWorkflow, /name: 'Ẩn thanh điều hướng Note'/);
+  assert.match(liveCollapseWorkflow, /name: 'Hiện thanh điều hướng Note'/);
+  assert.doesNotMatch(liveCollapseWorkflow, /name: 'Thu gọn điều hướng'|name: 'Hiện điều hướng ghi chú'/);
 });
 
 test("obsolete imperative hierarchy runtimes are removed", async () => {
