@@ -25,12 +25,22 @@ test("PDF.js becomes ready when PDFium fails", async () => {
 
 test("fast switch drops stale result and destroys stale proxy", async () => {
   let release!: (value: any) => void;
+  let markStarted!: () => void;
   const first = new Promise<any>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
   const stale = proxy("stale");
   const current = proxy("current");
   let calls = 0;
-  const controller = new PdfReaderController({ loadPdf: async () => ++calls === 1 ? first : current, loadPdfium: async () => { throw new Error("skip"); } });
+  const controller = new PdfReaderController({
+    loadPdf: async () => {
+      calls += 1;
+      if (calls === 1) { markStarted(); return first; }
+      return current;
+    },
+    loadPdfium: async () => { throw new Error("skip"); },
+  });
   const opening = controller.open({ documentId: "one", lastModified: 1, blob: new Blob(["1"]) });
+  await started;
   const second = await controller.open({ documentId: "two", lastModified: 2, blob: new Blob(["2"]) });
   release(stale);
   assert.equal(await opening, null);
@@ -65,6 +75,17 @@ test("outline resolves named destination", async () => {
   const controller = new PdfReaderController({ loadPdf: async () => pdf, loadPdfium: async () => { throw new Error("skip"); } });
   await controller.open({ documentId: "a", lastModified: 1, blob: new Blob(["x"]) });
   assert.deepEqual(await controller.resolveOutline(), [{ title: "Chapter", page: 5, depth: 0 }]);
+});
+
+test("collection search scans multiple bounded targets", async () => {
+  const one = proxy("one");
+  const two = proxy("two");
+  const controller = new PdfReaderController({ loadPdf: async () => one, loadPdfium: async () => { throw new Error("skip"); } });
+  const results = await controller.search("diabetes", [
+    { id: "one", name: "One", lastModified: 1, proxy: one },
+    { id: "two", name: "Two", lastModified: 2, proxy: two },
+  ], { concurrency: 2 });
+  assert.deepEqual(results.map((item) => item.documentId).sort(), ["one", "two"]);
 });
 
 test("search works across targets, cancellation stops it, temporary proxy is destroyed", async () => {

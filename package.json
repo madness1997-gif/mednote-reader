@@ -6,7 +6,6 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --config vite.github.config.ts",
-    "pretypecheck": "node scripts/p7-pretypecheck.cjs",
     "typecheck": "tsc -p tsconfig.json",
     "test:wave1": "node --import tsx --test tests-unit/wave1.test.ts && npm run test:wave1:large",
     "test:wave1:large": "node --expose-gc --import tsx --test tests-unit/wave15-large.test.ts",

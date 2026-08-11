@@ -160,10 +160,14 @@ export class PdfReaderController {
 
   async open(input: { documentId: string; lastModified: number; blob: Blob }): Promise<PdfReaderSession | null> {
     const generation = ++this.generation;
+    const previous = this.session;
+    this.session = null;
     this.status = "loading";
     this.error = null;
     this.emit();
+    if (previous) await Promise.allSettled([previous.pdf.destroy(), previous.pdfium?.destroy?.()]);
     const bytes = new Uint8Array(await input.blob.arrayBuffer());
+    if (generation !== this.generation) return null;
 
     let pdf: PDFDocumentProxy;
     try {
@@ -182,7 +186,6 @@ export class PdfReaderController {
       return null;
     }
 
-    const previous = this.session;
     const session: PdfReaderSession = {
       documentId: input.documentId,
       lastModified: input.lastModified,
@@ -194,9 +197,6 @@ export class PdfReaderController {
     this.status = "ready";
     this.emit();
 
-    if (previous && previous.pdf !== pdf) {
-      await Promise.allSettled([previous.pdf.destroy(), previous.pdfium?.destroy?.()]);
-    }
 
     void resolveOutline(pdf).then((outline) => {
       if (generation === this.generation && this.session === session) { session.outline = outline; this.emit(); }
