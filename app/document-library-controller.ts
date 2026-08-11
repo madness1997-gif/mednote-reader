@@ -4,7 +4,8 @@ import { noteStore, type NoteStore } from "./note-store";
 import { createBlankPage, notePageToSheetContent } from "./note-runtime-adapter";
 import {
   DEFAULT_READER,
-  createEmptyWorkspace,
+  NOTE_RUNTIME_WORKSPACE_ID,
+  createNoteRuntimeWorkspace,
   createReaderPlaceholder,
   documentWorkspaceInput,
   type LibraryDocument,
@@ -139,12 +140,12 @@ export class DocumentLibraryController {
   ) {
     const persistent = persistentDocumentWorkspaces(workspaces);
     const activeTemporary = workspaces.find((workspace) => workspace.id === activeWorkspaceId && workspace.kind === "temporary");
-    const linkedPersistentWorkspace = activeTemporary?.noteNotebookId
-      ? persistent.find((workspace) => workspace.noteNotebookId === activeTemporary.noteNotebookId)
-      : undefined;
+    const noteRuntime = persistent.find((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID);
     const persistedActiveWorkspaceId = persistent.some((workspace) => workspace.id === activeWorkspaceId)
       ? activeWorkspaceId
-      : linkedPersistentWorkspace?.id || persistent[0]?.id || "";
+      : activeTemporary?.noteNotebookId
+        ? noteRuntime?.id || persistent[0]?.id || ""
+        : persistent.find((workspace) => workspace.documents.length > 0)?.id || noteRuntime?.id || persistent[0]?.id || "";
     const savedAt = this.now();
     this.writeRuntime({
       workspaces: persistent,
@@ -295,22 +296,6 @@ export class DocumentLibraryController {
     }
 
     const persistentWorkspaces = input.workspaces.filter((item) => item.kind !== "temporary" && item.id !== workspace.id);
-    if (!input.saveToLibrary && selectedNotebookId && !persistentWorkspaces.some((item) => item.noteNotebookId === selectedNotebookId)) {
-      const notebookTitle = this.notes.getSnapshot().structure?.notebooks.find((notebook) => notebook.id === selectedNotebookId)?.title || "Ghi chú MedNote";
-      const noteWorkspaceId = `relation-note:${selectedNotebookId}`;
-      const notePlaceholder = createReaderPlaceholder(noteWorkspaceId);
-      persistentWorkspaces.unshift({
-        id: noteWorkspaceId,
-        kind: "empty",
-        name: notebookTitle,
-        documents: [],
-        activeDocumentId: null,
-        noteNotebookId: selectedNotebookId,
-        notebooks: [notePlaceholder],
-        activeNotebookId: notePlaceholder.id,
-        sourcePage: 1,
-      });
-    }
     const workspaces = [workspace, ...persistentWorkspaces];
     const workspaceMode: WorkspaceMode = selectedNotebookId ? "split" : "reader";
     const savedAt = this.persist(workspaces, workspace.id, {
@@ -438,7 +423,6 @@ export class DocumentLibraryController {
     const target = input.workspaces.find((workspace) => workspace.id === input.workspaceId);
     if (!target) throw new Error("Không tìm thấy tài liệu");
     const structure = this.notes.getSnapshot().structure;
-    const linkedNotebook = structure?.notebooks.find((notebook) => notebook.id === target.noteNotebookId);
     let remainingIds = new Set(this.notes.getSnapshot().documents.documents.map((document) => document.id));
     if (target.kind !== "temporary") {
       const graph = await this.notes.deleteDocumentWorkspace(target.id);
@@ -452,25 +436,19 @@ export class DocumentLibraryController {
     }
     const removedDocumentIds = target.documents.map((document) => document.id);
     const targetIndex = input.workspaces.findIndex((workspace) => workspace.id === target.id);
-    const detachedPlaceholder = createReaderPlaceholder(target.id);
-    const detached: WorkspaceItem | null = linkedNotebook ? {
-      ...target,
-      kind: "empty",
-      name: linkedNotebook.title,
-      documents: [],
-      activeDocumentId: null,
-      noteNotebookId: linkedNotebook.id,
-      notebooks: [detachedPlaceholder],
-      activeNotebookId: detachedPlaceholder.id,
-      sourcePage: 1,
-    } : null;
-    const remaining = input.workspaces.flatMap((workspace) => workspace.id !== target.id ? [workspace] : detached ? [detached] : []);
-    const workspaces = remaining.length ? remaining : [createEmptyWorkspace()];
+    const remaining = input.workspaces.filter((workspace) => workspace.id !== target.id);
+    if (!remaining.some((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID)) remaining.push(createNoteRuntimeWorkspace());
+    const workspaces = remaining.length ? remaining : [createNoteRuntimeWorkspace()];
     const wasActive = input.activeWorkspaceId === target.id;
+    const noteRuntime = workspaces.find((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID);
+    const hasActiveNote = Boolean(structure?.active.activeSheetId);
+    const fallback = workspaces[Math.min(Math.max(0, targetIndex), workspaces.length - 1)] || noteRuntime!;
     const activeWorkspaceId = wasActive
-      ? detached?.id || workspaces[Math.min(targetIndex, workspaces.length - 1)].id
+      ? hasActiveNote && noteRuntime ? noteRuntime.id : fallback.id
       : input.activeWorkspaceId;
-    const workspaceMode: WorkspaceMode = wasActive ? detached ? "note" : "reader" : input.workspaceMode;
+    const workspaceMode: WorkspaceMode = wasActive
+      ? hasActiveNote && noteRuntime ? "note" : fallback.documents.length ? "reader" : "note"
+      : input.workspaceMode;
     const savedAt = this.persist(workspaces, activeWorkspaceId, { ...input, workspaceMode });
     const label = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
     return {
@@ -479,7 +457,7 @@ export class DocumentLibraryController {
       workspaceMode,
       savedAt,
       removedDocumentIds,
-      message: detached ? `Đã xóa ${label}; note đã trở thành note độc lập` : `Đã xóa ${label}`,
+      message: hasActiveNote ? `Đã xóa ${label}; ghi chú trong thư viện được giữ nguyên` : `Đã xóa ${label}`,
     };
   }
 
