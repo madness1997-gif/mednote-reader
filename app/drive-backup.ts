@@ -7,16 +7,16 @@ import { NOTE_SCHEMA_VERSION, type LibraryV6 } from "./note-repository";
 export type DriveLibrary = LibraryV6;
 
 export const DRIVE_BACKUP_FORMAT = "mednote-library-v2" as const;
+export const DRIVE_SHEET_HASH_ALGORITHM = "json-safe-v1" as const;
 
 export type DriveBackupV2 = {
   format: typeof DRIVE_BACKUP_FORMAT;
   schemaVersion: typeof NOTE_SCHEMA_VERSION;
   exportedAt: number;
+  sheetHashAlgorithm?: typeof DRIVE_SHEET_HASH_ALGORITHM;
   sheetContentHashes: Record<string, string>;
   library: LibraryV6;
 };
-
-const LEGACY_PRE_JSON_HASH_CUTOFF = 1786422600000;
 
 const clone = <T,>(value: T): T => {
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -77,6 +77,7 @@ export function createDriveBackup(library: LibraryV6): DriveBackupV2 {
     format: DRIVE_BACKUP_FORMAT,
     schemaVersion: NOTE_SCHEMA_VERSION,
     exportedAt: Date.now(),
+    sheetHashAlgorithm: DRIVE_SHEET_HASH_ALGORITHM,
     sheetContentHashes: hashesFor(snapshot),
     library: snapshot,
   };
@@ -98,15 +99,15 @@ export function parseDriveBackup(payload: unknown): LibraryV6 {
     || Object.entries(actualHashes).some(([id, hash]) => expectedHashes[id] !== hash);
 
   if (hashMismatch) {
-    // Manifests written before the JSON-canonical hash fix could contain hashes
-    // calculated from optional undefined properties that JSON later removed.
-    // That old hash cannot be reconstructed from the downloaded JSON. Accept
-    // only that bounded compatibility window when the Sheet ID set itself is
-    // intact; all newer manifests remain strict.
-    const isLegacyPreJsonHash = sameHashKeys
+    // Older v2 manifests did not identify the hash algorithm. Some of those
+    // hashes were calculated before JSON serialization removed optional
+    // undefined fields, so the downloaded JSON cannot reproduce the old hash.
+    // New manifests carry an explicit algorithm marker and remain strict.
+    const legacyHashesAreStructurallyComplete = backup.sheetHashAlgorithm === undefined
+      && sameHashKeys
       && Number.isFinite(backup.exportedAt)
-      && Number(backup.exportedAt) < LEGACY_PRE_JSON_HASH_CUTOFF;
-    if (!isLegacyPreJsonHash) throw new Error("Hash nội dung Sheet trong bản lưu Drive không khớp");
+      && Object.values(expectedHashes).every((hash) => typeof hash === "string" && hash.length > 0);
+    if (!legacyHashesAreStructurallyComplete) throw new Error("Hash nội dung Sheet trong bản lưu Drive không khớp");
   }
   return library;
 }
