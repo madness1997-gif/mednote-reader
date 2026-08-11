@@ -1,7 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { thumbnailVirtualizationPlugin } from "./vite.thumbnail-virtualization";
-import { workspaceSuspensionPlugin } from "./vite.workspace-suspension";
 import { desktopPdfCanvasBudgetPlugin } from "./vite.desktop-pdf-canvas-budget";
 import { bundlePdfAssets } from "./vite.pdf-assets";
 
@@ -18,7 +16,7 @@ const normalizeSourceLineEndingsPlugin = () => ({
 
 export default defineConfig({
   base: "./",
-  plugins: [normalizeSourceLineEndingsPlugin(), thumbnailVirtualizationPlugin(), desktopPdfCanvasBudgetPlugin(), workspaceSuspensionPlugin(), react(), bundlePdfAssets("dist-electron")],
+  plugins: [normalizeSourceLineEndingsPlugin(), desktopPdfCanvasBudgetPlugin(), react(), bundlePdfAssets("dist-electron")],
   build: {
     outDir: "dist-electron",
     emptyOutDir: true,

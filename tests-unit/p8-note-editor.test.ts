@@ -57,15 +57,19 @@ test("P8 object operations preserve PDF provenance", () => {
   assert.equal(session.rotate(layout, 90).rotation, 90);
 });
 
-test("P8 source boundary has no Note editor engines left in page.tsx", async () => {
+test("P8 source boundary keeps Note editor engines outside page.tsx", async () => {
   const page = await source("app/page.tsx");
   assert.doesNotMatch(page, /function RichTextEditor/);
   assert.doesNotMatch(page, /function InkCanvas/);
   assert.doesNotMatch(page, /function DraggableExcerpt/);
   assert.doesNotMatch(page, /document\.execCommand\s*\(/);
-  assert.match(page, /<NoteObjectLayer/);
-  assert.match(page, /<NoteInkCanvas/);
-  assert.match(page, /<FirstAidBlockEditor/);
+  assert.match(page, /<NotePane/);
+
+  const stage = await source("app/ui/note-stage.tsx");
+  assert.match(stage, /NoteObjectLayer/);
+  assert.match(stage, /NoteInkCanvas/);
+  assert.match(stage, /FirstAidBlockEditor/);
+  assert.match(stage, /RichTextEditor/);
 });
 
 test("P8 Vite no longer patches sticker or First Aid editor models", async () => {
