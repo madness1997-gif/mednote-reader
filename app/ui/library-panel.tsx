@@ -5,7 +5,7 @@ type TextLineHeight = any; type PaperTemplate = any; type PdfFitMode = any; type
 export type P9UiScope = Record<string, any>;
 
 export function LibraryPanel({ scope }: { scope: P9UiScope }) {
-  const { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X, activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, noteStore, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
+  const { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X, activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
   return (<><div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
           <aside className="library-panel" aria-label="Thư viện tài liệu" onPointerDown={(event) => event.stopPropagation()}>
             <div className="library-header"><div><strong>Thư viện</strong><span>PDF và note được lưu độc lập; chỉ liên kết khi bạn chọn</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
@@ -39,17 +39,11 @@ export function LibraryPanel({ scope }: { scope: P9UiScope }) {
                         <button className={`library-item ${item.id === activeWorkspace.id ? "active" : ""}`} disabled={!workspace} onClick={() => {
                           if (!workspace) return setToast("Document runtime chưa sẵn sàng");
                           void (async () => {
-                            const currentNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || null;
+                            const currentNotebookId = noteState.structure?.active.activeNotebookId || null;
                             const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
                               ? currentNotebookId
                               : item.linkedNotebookIds[0] || null;
-                            if (linkedNotebookId) {
-                              try {
-                                await noteStore.openNotebook(linkedNotebookId);
-                              } catch (error) {
-                                setToast(error instanceof Error ? error.message : "Không thể mở Notebook liên kết");
-                              }
-                            }
+                            if (linkedNotebookId) await openLibraryNotebook(linkedNotebookId);
                             activeWorkspaceIdRef.current = item.id;
                             setActiveWorkspaceId(item.id);
                             workspaceModeRef.current = "reader";
