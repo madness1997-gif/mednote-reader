@@ -124,6 +124,7 @@ import { NotePane } from "./ui/note-pane";
 import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
+import { NoteSheetPreview } from "./ui/note-sheet-preview";
 import { RichTextEditor } from "./rich-text-editor";
 import { noteRichTextController } from "./note-rich-text-controller";
 import { NoteInkSession } from "./note-ink-session";
@@ -691,87 +692,6 @@ function PdfPageCanvas({ document, page, zoom }: { document: PDFDocumentProxy; p
   }, [document, page, zoom]);
 
   return <div className="pdf-canvas-wrap" ref={wrapRef}>{loading && <div className="pdf-loading">Đang dựng trang…</div>}<canvas ref={canvasRef} /></div>;
-}
-
-function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocumentProxy; page: number; active: boolean; onClick: () => void }) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [visible, setVisible] = useState(page <= 4);
-  useEffect(() => {
-    const button = buttonRef.current;
-    if (!button) return;
-    const root = button.closest(".pdf-thumbnails");
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) setVisible(true);
-    }, { root, rootMargin: "500px 0px" });
-    observer.observe(button);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    if (!visible) return;
-    let disposed = false;
-    let task: PDFRenderTask | null = null;
-    void document.getPage(page).then((pdfPage) => {
-      if (disposed || !canvasRef.current) return;
-      const base = pdfPage.getViewport({ scale: 1 });
-      const viewport = pdfPage.getViewport({ scale: 72 / base.width });
-      const canvas = canvasRef.current;
-      canvas.width = Math.floor(viewport.width * 1.5);
-      canvas.height = Math.floor(viewport.height * 1.5);
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      context.setTransform(1.5, 0, 0, 1.5, 0, 0);
-      task = pdfPage.render({ canvas, canvasContext: context, viewport });
-      return task.promise;
-    }).catch(() => undefined);
-    return () => { disposed = true; task?.cancel(); };
-  }, [document, page, visible]);
-  return <button ref={buttonRef} className={`pdf-thumb ${active ? "active" : ""}`} onClick={onClick}><span className="mini-paper pdf-mini">{visible ? <canvas ref={canvasRef} /> : <i className="thumb-placeholder" />}</span><span>{page}</span></button>;
-}
-
-function NoteSheetPreview({
-  note,
-  sheetNumber,
-  zoom,
-  loaded,
-  onActivate,
-  resolveSource,
-}: {
-  note: NotePage;
-  sheetNumber: number;
-  zoom: number;
-  loaded: boolean;
-  onActivate: () => void;
-  resolveSource: (excerpt: NoteExcerpt) => ResolvedDocumentSource<PdfRect> | null;
-}) {
-  const presentation = notePagePresentation(note, zoom);
-  return (
-    <section className="note-sheet-frame note-sheet-frame-inactive" data-note-sheet-frame={note.id} style={presentation.paperStyle}>
-      <header className="note-sheet-frame-header">
-        <span>Tờ {sheetNumber}</span>
-        <button type="button" onClick={onActivate} aria-label={`Chỉnh sửa tờ ${sheetNumber}`}>Chỉnh sửa tờ này</button>
-      </header>
-      <article
-        data-note-page-id={note.id}
-        className={`note-paper note-paper-preview paper-${note.paper.color} template-${note.paper.template}`}
-        style={presentation.paperStyle}
-        aria-label={`Bản xem trước tờ ${sheetNumber}`}
-      >
-        <div className="paper-background" />
-        {loaded ? <>
-          <div className={`typed-layer ${note.excerpts.length ? "has-excerpts" : ""}`} style={presentation.textLayerStyle}>
-            <div className="note-title-input">{note.title}</div>
-            <div className="note-editor rich-text-editor" dangerouslySetInnerHTML={{ __html: note.bodyHtml ?? plainTextToRichHtml(note.body) }} />
-            <NoteObjectLayer excerpts={note.excerpts} resolveSource={resolveSource} selectedId={null} activeTool="pointer" interactive={false} onSelect={() => undefined} onMove={() => undefined} onEdit={() => undefined} onTextActivate={() => undefined} onNormalizeTextInput={() => undefined} onOpenSource={() => undefined} onDelete={() => undefined} />
-          </div>
-          <NoteInkCanvas tool="pointer" color="#2465a8" width={2} penStyle="ballpoint" shape="rectangle" strokes={note.strokes} onCommit={() => undefined} />
-        </> : <div className="note-sheet-preview-loading" role="status">Đang tải nội dung tờ…</div>}
-      </article>
-      <div className="paper-size">{presentation.selectedSize.label} ({presentation.selectedSize.dimensions}) · {note.paper.orientation === "portrait" ? "Dọc" : "Ngang"}</div>
-    </section>
-  );
 }
 
 export default function Home() {
