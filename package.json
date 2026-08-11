@@ -19,6 +19,7 @@
     "test:p65": "node --import tsx --test tests-unit/library-projection.test.ts",
     "test:p7": "node --import tsx --test tests-unit/pdf-reader-controller.test.ts tests-unit/pdf-annotation-session.test.ts tests-unit/pdf-document-export.test.ts",
     "test:p8": "node --import tsx --test tests-unit/p8-note-editor.test.ts",
+    "test:p9": "node --import tsx --test tests-unit/p9-ui-composition.test.ts",
     "test:all": "playwright test",
     "build:pages": "vite build --config vite.github.config.ts",
     "build:desktop": "vite build --config vite.desktop.config.ts",
@@ -50,30 +51,9 @@
     "appId": "vn.mednote.reader",
     "productName": "MedNote Reader",
     "asar": true,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist-electron/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "MedNote-Reader-Setup-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
+    "directories": { "output": "release" },
+    "files": ["dist-electron/**/*", "electron/**/*", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "artifactName": "MedNote-Reader-Setup-${version}.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
   }
 }
