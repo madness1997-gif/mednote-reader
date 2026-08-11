@@ -24,6 +24,7 @@ jobs:
       - run: |
           node scripts/p9-split.cjs
           node scripts/p9-fix.cjs
+          nl -ba app/page.tsx | sed -n '2775,2785p'
       - run: npm run typecheck
       - name: Commit generated source
         run: |
