@@ -21,7 +21,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node scripts/p9-split.cjs
+      - run: |
+          node scripts/p9-split.cjs
+          node scripts/p9-fix.cjs
       - run: npm run typecheck
       - name: Commit generated source
         run: |
