@@ -260,9 +260,11 @@ export class DriveSyncService {
           noteZoom: snapshot.noteZoom,
         }));
       }
-      const activeDocumentContextId = documentWorkspaces.some((workspace) => workspace.id === snapshot.activeWorkspaceId)
-        ? snapshot.activeWorkspaceId
-        : documentWorkspaces[0]?.id || "";
+      const activeDocumentContextId = snapshot.activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID
+        ? ""
+        : documentWorkspaces.some((workspace) => workspace.id === snapshot.activeWorkspaceId)
+          ? snapshot.activeWorkspaceId
+          : "";
       await this.notes.setPreferences({
         activeDocumentContextId,
         readerShare: snapshot.readerShare,

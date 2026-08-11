@@ -108,6 +108,7 @@ export class DocumentLibraryController {
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly temporaryPdfs = new Map<string, StoredPdf>();
+  private readonly temporaryNoteTargets = new Map<string, { notebookId: string; target: LinkedNoteTarget }>();
 
   constructor(dependencies: DocumentLibraryControllerDependencies = {}) {
     this.notes = dependencies.notes || noteStore;
@@ -269,6 +270,13 @@ export class DocumentLibraryController {
       warning = error instanceof Error ? error.message : "Không thể tạo vị trí note";
     }
 
+    if (!input.saveToLibrary) {
+      this.temporaryNoteTargets.clear();
+      if (selectedNotebookId && selectedTarget) {
+        this.temporaryNoteTargets.set(workspaceId, { notebookId: selectedNotebookId, target: selectedTarget });
+      }
+    }
+
     const placeholder = createReaderPlaceholder(workspaceId);
     const workspace: WorkspaceItem = {
       id: workspaceId,
@@ -315,6 +323,7 @@ export class DocumentLibraryController {
     this.requireReady();
     const temporary = input.workspaces.find((workspace) => workspace.id === input.workspaceId);
     if (!temporary || temporary.kind !== "temporary") throw new Error("Không tìm thấy phiên PDF tạm");
+    const pendingNoteTarget = this.temporaryNoteTargets.get(temporary.id);
     const documents = temporary.documents.map((document) => ({
       ...document,
       id: `doc-${stableId(`${document.name}:${document.size}:${document.lastModified}`)}`,
@@ -328,6 +337,7 @@ export class DocumentLibraryController {
       await this.notes.remapDocumentReferences(idMap);
       const workspaces = input.workspaces.filter((workspace) => workspace.id !== temporary.id);
       this.temporaryPdfs.clear();
+      this.temporaryNoteTargets.delete(temporary.id);
       const savedAt = this.persist(workspaces, existing.id, input);
       return {
         workspaces,
@@ -360,15 +370,23 @@ export class DocumentLibraryController {
       activeNotebookId: placeholder.id,
     };
     const structure = this.notes.getSnapshot().structure;
-    const linkedPageId = structure && savedWorkspace.noteNotebookId
+    const pendingTargetExists = Boolean(structure && pendingNoteTarget && (pendingNoteTarget.target.targetType === "page"
+      ? structure.pages.some((page) => page.id === pendingNoteTarget.target.targetId)
+      : structure.sheets.some((sheet) => sheet.id === pendingNoteTarget.target.targetId)));
+    const fallbackLinkedPageId = structure && savedWorkspace.noteNotebookId
       ? structure.pages.find((page) => structure.sections.find((section) => section.id === page.sectionId)?.notebookId === savedWorkspace.noteNotebookId)?.id
       : null;
+    const linkedTarget = pendingNoteTarget
+      && pendingNoteTarget.notebookId === savedWorkspace.noteNotebookId
+      && pendingTargetExists
+      ? pendingNoteTarget.target
+      : fallbackLinkedPageId ? { targetType: "page" as const, targetId: fallbackLinkedPageId } : null;
     let graphSaved = false;
     try {
       await this.notes.saveDocumentWorkspace(documentWorkspaceInput(
         savedWorkspace,
-        linkedPageId ? { targetType: "page", targetId: linkedPageId } : null,
-        { workspaceMode: linkedPageId ? "split" : "reader", readerShare: input.readerShare, noteZoom: input.noteZoom },
+        linkedTarget,
+        { workspaceMode: linkedTarget ? "split" : "reader", readerShare: input.readerShare, noteZoom: input.noteZoom },
       ));
       graphSaved = true;
       await this.notes.remapDocumentReferences(idMap);
@@ -382,6 +400,7 @@ export class DocumentLibraryController {
     const workspaceMode: WorkspaceMode = input.hasActiveNote ? "split" : "reader";
     const savedAt = this.persist(workspaces, workspaceId, { ...input, workspaceMode });
     this.temporaryPdfs.clear();
+    this.temporaryNoteTargets.delete(temporary.id);
     return {
       workspaces,
       activeWorkspaceId: workspaceId,
@@ -430,6 +449,7 @@ export class DocumentLibraryController {
     }
     if (target.kind === "temporary") {
       target.documents.forEach((document) => this.temporaryPdfs.delete(document.id));
+      this.temporaryNoteTargets.delete(target.id);
     } else {
       const unreferenced = target.documents.filter((document) => !remainingIds.has(document.id));
       await Promise.allSettled(unreferenced.map((document) => this.pdfStorage.deletePdf(document.id)));

@@ -313,3 +313,36 @@ test("page.tsx delegates document lifecycle mutations and contains no readiness 
   assert.match(controller, /this\.pdfStorage\.deletePdf/);
   assert.match(controller, /this\.writeRuntime/);
 });
+
+test("temporary Save Library preserves the exact Page or Sheet destination", async () => {
+  for (const targetType of ["page", "sheet"] as const) {
+    const context = await harness();
+    try {
+      context.controller.activate();
+      const second = await context.notes.createPage("sec", `Second ${targetType}`, {});
+      const target = targetType === "page"
+        ? { targetType, targetId: second.active.activePageId }
+        : { targetType, targetId: second.active.activeSheetId };
+      const temporary = await context.controller.importPdfFiles({
+        ...baseInput([pdf(`Temp-${targetType}.pdf`)]),
+        saveToLibrary: false,
+        destination: { mode: "existing", notebookId: "nb", target },
+      });
+      assert.equal((await context.repository.loadDocumentGraph())?.links.length, 0);
+      const saved = await context.controller.saveTemporaryWorkspace({
+        workspaceId: temporary.activeWorkspaceId,
+        workspaces: temporary.workspaces,
+        activeWorkspaceId: temporary.activeWorkspaceId,
+        hasActiveNote: true,
+        readerShare: 46,
+        workspaceMode: temporary.workspaceMode,
+        noteZoom: 1.15,
+      });
+      assert.notEqual(saved.activeWorkspaceId, temporary.activeWorkspaceId);
+      const graph = await context.repository.loadDocumentGraph();
+      assert.equal(graph?.links.length, 1);
+      assert.equal(graph?.links[0].targetType, target.targetType);
+      assert.equal(graph?.links[0].targetId, target.targetId);
+    } finally { await context.close(); }
+  }
+});

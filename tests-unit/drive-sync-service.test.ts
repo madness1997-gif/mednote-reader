@@ -17,6 +17,7 @@ import { NoteStore } from "../app/note-store";
 import { createBlankPage } from "../app/note-runtime-adapter";
 import {
   DEFAULT_READER,
+  NOTE_RUNTIME_WORKSPACE_ID,
   workspacesFromLibraryV6,
   type PersistedLibrary,
   type WorkspaceItem,
@@ -442,6 +443,35 @@ test("P6.5 preserves five notebooks and canonical hashes across web to desktop v
     assert.deepEqual(actual.documents.links.map((item) => item.id).sort(), ["link-one", "link-two"]);
     assert.deepEqual(actualBackup.sheetContentHashes, expected.sheetContentHashes);
     assert.equal(restored.snapshot.workspaces.filter((workspace) => workspace.id === "note-runtime-v6").length, 1);
+  } finally {
+    await web.close();
+    await desktop.close();
+  }
+});
+
+test("Drive v2 preserves the note runtime as active even when documents exist", async () => {
+  const remote = new MemoryDrive();
+  const web = await harness(library({ body: "note runtime", withAsset: false }), remote);
+  const desktop = await harness(library({ body: "old desktop", withAsset: false, documentName: "Old.pdf" }), remote);
+  try {
+    web.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["shared-pdf"], { type: "application/pdf" }) });
+    await web.service.sync("web-token", {
+      ...web.snapshot,
+      activeWorkspaceId: NOTE_RUNTIME_WORKSPACE_ID,
+      workspaceMode: "note",
+    });
+    const manifest = remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    const canonical = parseDriveBackup(JSON.parse(await manifest.blob.text()));
+    assert.equal(canonical.preferences.activeDocumentContextId, "");
+
+    const restored = await desktop.service.restore("desktop-token");
+    assert.equal(restored.snapshot.activeWorkspaceId, NOTE_RUNTIME_WORKSPACE_ID);
+    assert.equal(restored.snapshot.workspaceMode, "note");
+    const local = await desktop.repository.loadLibrary();
+    assert.equal(local?.notes.notebooks.length, 1);
+    assert.equal(local?.documents.contexts.length, 1);
+    assert.equal(local?.documents.links.length, 1);
   } finally {
     await web.close();
     await desktop.close();
