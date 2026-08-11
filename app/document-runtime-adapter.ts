@@ -3,6 +3,7 @@ import type { DocumentGraph, DocumentRecord } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
 import type { DriveLibrary } from "./drive-backup";
 import type { NoteStructure } from "./note-domain";
+import { linkedNotebookIdsForDocuments } from "./library-projection";
 import { DEFAULT_NEW_NOTE_PAPER, createBlankPage, createNotebook, normalizePage, type Notebook, type NotePage } from "./note-runtime-adapter";
 
 export type LibraryDocument = {
@@ -50,6 +51,7 @@ export type PersistedLibrary = {
 export type LinkedNoteTarget = { targetType: "page" | "sheet"; targetId: string };
 
 export const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", rotation: 0, viewMode: "single", bookmarks: [], annotations: [] };
+export const NOTE_RUNTIME_WORKSPACE_ID = "note-runtime-v6";
 
 export const READER_PLACEHOLDER_PREFIX = "__mednote_reader_placeholder__:";
 
@@ -161,16 +163,12 @@ export function documentWorkspaceInput(
   };
 }
 
+export function notebookIdsForDocumentContext(graph: DocumentGraph, structure: NoteStructure, documentIds: string[]) {
+  return linkedNotebookIdsForDocuments(graph, structure, documentIds);
+}
+
 export function notebookIdForDocumentContext(graph: DocumentGraph, structure: NoteStructure, documentIds: string[]) {
-  const documentSet = new Set(documentIds);
-  const link = graph.links.find((record) => documentSet.has(record.documentId));
-  if (!link) return null;
-  const pageId = link.targetType === "page"
-    ? link.targetId
-    : structure.sheets.find((sheet) => sheet.id === link.targetId)?.pageId;
-  const page = structure.pages.find((record) => record.id === pageId);
-  const section = page && structure.sections.find((record) => record.id === page.sectionId);
-  return section?.notebookId || null;
+  return notebookIdsForDocumentContext(graph, structure, documentIds)[0] || null;
 }
 
 export function workspacesFromDocumentGraph(graph: DocumentGraph, structure: NoteStructure): WorkspaceItem[] {
@@ -206,8 +204,27 @@ export function workspacesFromDocumentGraph(graph: DocumentGraph, structure: Not
   });
 }
 
+export function createNoteRuntimeWorkspace(): WorkspaceItem {
+  const placeholder = createReaderPlaceholder(NOTE_RUNTIME_WORKSPACE_ID);
+  return {
+    id: NOTE_RUNTIME_WORKSPACE_ID,
+    kind: "empty",
+    name: "Ghi chú",
+    documents: [],
+    activeDocumentId: null,
+    noteNotebookId: null,
+    notebooks: [placeholder],
+    activeNotebookId: placeholder.id,
+    sourcePage: 1,
+  };
+}
+
+export function runtimeWorkspacesFromDocumentGraph(graph: DocumentGraph, structure: NoteStructure): WorkspaceItem[] {
+  return [...workspacesFromDocumentGraph(graph, structure), createNoteRuntimeWorkspace()];
+}
+
 export function workspacesFromLibraryV6(library: DriveLibrary): WorkspaceItem[] {
-  return workspacesFromDocumentGraph(library.documents, library.notes);
+  return runtimeWorkspacesFromDocumentGraph(library.documents, library.notes);
 }
 
 export function createReaderPlaceholder(sourceId: string): Notebook {
