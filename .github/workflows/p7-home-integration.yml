@@ -1,0 +1,152 @@
+name: P7 Home integration
+on:
+  push:
+    branches: [p7-pdf-runtime]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: ${{ !contains(github.event.head_commit.message, '[p7-home]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: p7-pdf-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply P7 integration
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def once(text, old, new, label):
+              count=text.count(old)
+              if count != 1: raise SystemExit(f'{label}: expected 1, found {count}')
+              return text.replace(old,new,1)
+
+          # Finalize controller as a lazy runtime boundary with subscriptions.
+          p=Path('app/pdf-reader-controller.ts'); t=p.read_text()
+          t=once(t,'import { loadPdfDocument } from "./pdf-document-loader";\n','', 'remove eager pdf loader')
+          t=once(t,'type LoadPdfium = (data: Uint8Array) => Promise<PDFiumDocument>;\n','type LoadPdf = (source: Uint8Array | Blob) => Promise<PDFDocumentProxy>;\ntype LoadPdfium = (data: Uint8Array) => Promise<PDFiumDocument>;\ntype PdfReaderListener = (state: ReturnType<PdfReaderController["getState"]>) => void;\n', 'load pdf type')
+          t=once(t,'  loadPdf?: typeof loadPdfDocument;\n','  loadPdf?: LoadPdf;\n', 'dep load type')
+          t=once(t,'const defaultLoadPdfium: LoadPdfium = async (data) => (await import("./pdfium-renderer")).loadPdfiumDocument(data);\n','const defaultLoadPdf: LoadPdf = async (source) => (await import("./pdf-document-loader")).loadPdfDocument(source);\nconst defaultLoadPdfium: LoadPdfium = async (data) => (await import("./pdfium-renderer")).loadPdfiumDocument(data);\n', 'lazy defaults')
+          t=t.replace('return clamp(zoom, .35, 4);','return clamp(zoom, .55, 2.5);')
+          t=once(t,'  private readonly loadPdf: typeof loadPdfDocument;\n','  private readonly loadPdf: LoadPdf;\n', 'field load type')
+          t=once(t,'  private readonly textCache = new Map<string, Map<number, string>>();\n','  private readonly textCache = new Map<string, Map<number, string>>();\n  private readonly listeners = new Set<PdfReaderListener>();\n', 'listeners field')
+          t=once(t,'    this.loadPdf = dependencies.loadPdf || loadPdfDocument;\n','    this.loadPdf = dependencies.loadPdf || defaultLoadPdf;\n', 'constructor default')
+          t=once(t,'  getState() {\n    return { status: this.status, error: this.error, session: this.session };\n  }\n','  getState() {\n    return { status: this.status, error: this.error, session: this.session };\n  }\n\n  subscribe(listener: PdfReaderListener) {\n    this.listeners.add(listener);\n    listener(this.getState());\n    return () => this.listeners.delete(listener);\n  }\n\n  private emit() {\n    const state = this.getState();\n    this.listeners.forEach((listener) => listener(state));\n  }\n\n  selectDocumentTarget<T extends { id: string; reader?: { page?: number } }>(documents: T[], documentId: string, requestedPage?: number) {\n    const document = documents.find((item) => item.id === documentId);\n    if (!document) return null;\n    return { document, page: Math.max(1, Math.round(requestedPage ?? document.reader?.page ?? 1)) };\n  }\n','subscribe API')
+          t=once(t,'    this.error = null;\n    if (old) await Promise.allSettled([old.pdf.destroy(), old.pdfium?.destroy?.()]);\n','    this.error = null;\n    this.emit();\n    if (old) await Promise.allSettled([old.pdf.destroy(), old.pdfium?.destroy?.()]);\n','close emit')
+          t=once(t,'    this.status = "loading";\n    this.error = null;\n    const bytes = new Uint8Array(await input.blob.arrayBuffer());\n','    this.status = "loading";\n    this.error = null;\n    this.emit();\n    const bytes = new Uint8Array(await input.blob.arrayBuffer());\n','loading emit')
+          t=once(t,'        this.error = error instanceof Error ? error : new Error(String(error));\n      }\n','        this.error = error instanceof Error ? error : new Error(String(error));\n        this.emit();\n      }\n','error emit')
+          t=once(t,'    this.session = session;\n    this.status = "ready";\n','    this.session = session;\n    this.status = "ready";\n    this.emit();\n','ready emit')
+          t=once(t,'      if (generation === this.generation && this.session === session) session.outline = outline;\n','      if (generation === this.generation && this.session === session) { session.outline = outline; this.emit(); }\n','outline emit')
+          t=once(t,'      session.pdfium = pdfium;\n','      session.pdfium = pdfium;\n      this.emit();\n','pdfium emit')
+          p.write_text(t)
+
+          # Preserve old redo stack orientation exactly.
+          p=Path('app/pdf-annotation-session.ts'); t=p.read_text()
+          t=t.replace('redo: [current, ...history.redo].slice(0, PDF_ANNOTATION_HISTORY_LIMIT),','redo: [...history.redo, current].slice(-PDF_ANNOTATION_HISTORY_LIMIT),')
+          t=t.replace('const next = history.redo[0];','const next = history.redo.at(-1);')
+          t=t.replace('redo: history.redo.slice(1),','redo: history.redo.slice(0, -1),')
+          p.write_text(t)
+
+          # P7.0 dependency direction in view and adapter.
+          p=Path('app/pdf-reader.tsx'); t=p.read_text()
+          start=t.index('export type PdfTool ='); end=t.index('type PageViewport =')
+          block='import type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfInkAnnotation, PdfMarkupAnnotation, PdfObjectAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\nexport type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfInkAnnotation, PdfMarkupAnnotation, PdfObjectAnnotation, PdfPoint, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\n\n'
+          p.write_text(t[:start]+block+t[end:])
+          p=Path('app/document-runtime-adapter.ts'); t=p.read_text().replace('import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-reader";','import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-domain";'); p.write_text(t)
+
+          # Home imports: view stays view-only; domain/services become direct dependencies.
+          p=Path('app/page.tsx'); t=p.read_text()
+          old='''import {\n  LazyPdfPageView,\n  PdfPageView,\n  type PdfAnnotation,\n  type PdfCropResult,\n  type PdfFitMode,\n  type PdfMarkupAnnotation,\n  type PdfRect,\n  type PdfSelection,\n  type PdfTool,\n  type PdfViewMode,\n} from "./pdf-reader";\n'''
+          new='''import { LazyPdfPageView, PdfPageView } from "./pdf-reader";\nimport type { PdfAnnotation, PdfCropResult, PdfFitMode, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";\nimport { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";\nimport {\n  addPdfMarkup as addPdfMarkupCommand,\n  commitPdfAnnotations as commitPdfAnnotationCommand,\n  deletePdfAnnotation as deletePdfAnnotationCommand,\n  emptyPdfAnnotationHistory,\n  redoPdfAnnotations as redoPdfAnnotationCommand,\n  replacePdfPageAnnotations as replacePdfPageAnnotationCommand,\n  undoPdfAnnotations as undoPdfAnnotationCommand,\n  type PdfAnnotationHistory,\n} from "./pdf-annotation-session";\nimport { exportAnnotatedPdf as createAnnotatedPdf } from "./pdf-document-export";\n'''
+          t=once(t,old,new,'page pdf imports')
+          t=t.replace('import { loadPdfDocument } from "./pdf-document-loader";\n','')
+          t=t.replace('import { loadPdfiumDocument, type PDFiumDocument } from "./pdfium-renderer";','import type { PDFiumDocument } from "./pdfium-renderer";')
+          t=t.replace('type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;','type PdfHistory = Record<string, PdfAnnotationHistory>;')
+
+          state_anchor='''  const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});\n  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string } | null>(null);\n'''
+          state_new='''  const [strokeHistory, setStrokeHistory] = useState<StrokeHistory>({});\n  const pdfReader = useMemo(() => new PdfReaderController({\n    readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,\n  }), []);\n  const pdfSearchAbortRef = useRef<AbortController | null>(null);\n  const pdfWheelAccumulatorRef = useRef(0);\n  const pdfWheelZoomingRef = useRef(false);\n  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string; lastModified: number } | null>(null);\n'''
+          t=once(t,state_anchor,state_new,'reader state')
+
+          # Navigation delegates clamping and target selection to controller.
+          t=t.replace('const next = Math.max(1, Math.min(totalPages, typeof value === "function" ? value(sourcePage) : value));','const next = pdfReader.clampPage(typeof value === "function" ? value(sourcePage) : value, totalPages);',1)
+          t=t.replace('updateReader((reader) => ({ ...reader, zoom: Math.max(.55, Math.min(2.5, typeof value === "function" ? value(reader.zoom) : value)) }));','updateReader((reader) => ({ ...reader, zoom: pdfReader.clampZoom(typeof value === "function" ? value(reader.zoom) : value) }));',1)
+          t=t.replace('const next = Math.max(1, Math.min(totalPages, page));\n    setSourcePage(next);','const next = pdfReader.clampPage(page, totalPages);\n    setSourcePage(next);',1)
+          old_switch='''  const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {\n    const target = activeWorkspace.documents.find((document) => document.id === documentId);\n    if (!target) return;\n    const nextPage = Math.max(1, page ?? target.reader.page ?? 1);\n'''
+          new_switch='''  const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {\n    const selection = pdfReader.selectDocumentTarget(activeWorkspace.documents, documentId, page);\n    if (!selection) return;\n    const target = selection.document;\n    const nextPage = selection.page;\n'''
+          t=once(t,old_switch,new_switch,'switch target')
+
+          # Stored blob includes lastModified for session cache identity.
+          t=t.replace('setPdfSource({ blob: stored.blob, documentId: activeDocument.id });','setPdfSource({ blob: stored.blob, documentId: activeDocument.id, lastModified: activeDocument.lastModified });')
+
+          # Replace raw lifecycle+outline orchestration with controller consumer effects.
+          start=t.index('  useEffect(() => {\n    if (!pdfSource) return undefined;')
+          end=t.index('  useEffect(() => {\n    if (!toast || toast === "Đã tự lưu") return;', start)
+          lifecycle='''  useEffect(() => pdfReader.subscribe(({ status, session }) => {\n    setPdfDocument(session?.pdf ?? null);\n    setPdfiumDocument(session?.pdfium ?? null);\n    setLoadedDocumentId(session?.documentId ?? null);\n    setPdfStatus(status === "loading" ? "loading" : status === "error" ? "error" : "idle");\n    if (session) setOutline(session.outline);\n  }), [pdfReader]);\n\n  useEffect(() => () => {\n    pdfSearchAbortRef.current?.abort();\n    void pdfReader.close();\n  }, [pdfReader]);\n\n  useEffect(() => {\n    if (!pdfSource) {\n      void pdfReader.close();\n      return;\n    }\n    let cancelled = false;\n    void pdfReader.open({ documentId: pdfSource.documentId, lastModified: pdfSource.lastModified, blob: pdfSource.blob }).then((session) => {\n      if (!session || cancelled) return;\n      setWorkspaces((items) => items.map((workspace) => ({\n        ...workspace,\n        sourcePage: workspace.id === activeWorkspaceId\n          ? pdfReader.clampPage(workspace.documents.find((item) => item.id === pdfSource.documentId)?.reader.page ?? workspace.sourcePage, session.pdf.numPages)\n          : workspace.sourcePage,\n        documents: workspace.documents.map((item) => item.id === pdfSource.documentId\n          ? { ...item, reader: { ...normalizeReader(item.reader), page: pdfReader.clampPage(item.reader?.page ?? 1, session.pdf.numPages) } }\n          : item),\n      })));\n      setToast(`Đã mở ${session.pdf.numPages} trang`);\n    }).catch(() => {\n      if (!cancelled) setToast("Không thể mở PDF này");\n    });\n    return () => { cancelled = true; };\n  }, [activeWorkspaceId, pdfReader, pdfSource]);\n\n  useEffect(() => {\n    if (currentPdfDocument) return;\n    setOutline(activeDocument || activeWorkspace.kind !== "demo" ? [] : [\n      { title: "3.4 Diabetic Neuropathy", page: 123, depth: 0 },\n      { title: "Introduction", page: 123, depth: 1 },\n      { title: "Pathophysiology", page: 126, depth: 1 },\n      { title: "Clinical features", page: 127, depth: 1 },\n    ]);\n  }, [activeDocument, activeWorkspace.kind, currentPdfDocument]);\n\n'''
+          t=t[:start]+lifecycle+t[end:]
+
+          # Annotation commands: Home only applies service results to ReaderState/UI state.
+          old_commit='''  const commitPdfAnnotations = (next: PdfAnnotation[], previous = pdfAnnotations) => {\n    const unchanged = next.length === previous.length && next.every((annotation, index) => annotation === previous[index]);\n    if (unchanged) return;\n    setPdfHistory((state) => {\n      const history = state[pdfHistoryKey] ?? { undo: [], redo: [] };\n      return { ...state, [pdfHistoryKey]: { undo: [...history.undo, previous].slice(-60), redo: [] } };\n    });\n    updateReader((reader) => ({ ...reader, annotations: next }));\n  };\n'''
+          new_commit='''  const applyPdfAnnotationResult = (result: { annotations: PdfAnnotation[]; history: PdfAnnotationHistory }) => {\n    setPdfHistory((state) => ({ ...state, [pdfHistoryKey]: result.history }));\n    updateReader((reader) => ({ ...reader, annotations: result.annotations }));\n  };\n\n  const commitPdfAnnotations = (next: PdfAnnotation[], previous = pdfAnnotations) => {\n    applyPdfAnnotationResult(commitPdfAnnotationCommand(previous, next, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));\n  };\n'''
+          t=once(t,old_commit,new_commit,'annotation commit')
+          t=t.replace('    commitPdfAnnotations([...pdfAnnotations, annotation]);','    applyPdfAnnotationResult(addPdfMarkupCommand(pdfAnnotations, annotation, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));',1)
+          old_page='''  const commitPdfPageAnnotations = (page: number, nextPage: PdfAnnotation[], previousPage: PdfAnnotation[]) => {\n    const other = pdfAnnotations.filter((annotation) => annotation.page !== page);\n    const previous = [...other, ...previousPage];\n    const next = [...other, ...nextPage.map((annotation) => ({ ...annotation, page }))];\n    commitPdfAnnotations(next, previous);\n  };\n'''
+          new_page='''  const commitPdfPageAnnotations = (page: number, nextPage: PdfAnnotation[], previousPage: PdfAnnotation[]) => {\n    applyPdfAnnotationResult(replacePdfPageAnnotationCommand(pdfAnnotations, page, nextPage, previousPage, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));\n  };\n'''
+          t=once(t,old_page,new_page,'page annotation command')
+          old_undo='''  const undoPdf = () => {\n    const history = pdfHistory[pdfHistoryKey];\n    const previous = history?.undo.at(-1);\n    if (!previous) return;\n    updateReader((reader) => ({ ...reader, annotations: previous }));\n    setPdfHistory((state) => ({\n      ...state,\n      [pdfHistoryKey]: { undo: history.undo.slice(0, -1), redo: [...history.redo, pdfAnnotations].slice(-60) },\n    }));\n    setToast("Đã hoàn tác chú thích PDF");\n  };\n\n  const redoPdf = () => {\n    const history = pdfHistory[pdfHistoryKey];\n    const next = history?.redo.at(-1);\n    if (!next) return;\n    updateReader((reader) => ({ ...reader, annotations: next }));\n    setPdfHistory((state) => ({\n      ...state,\n      [pdfHistoryKey]: { undo: [...history.undo, pdfAnnotations].slice(-60), redo: history.redo.slice(0, -1) },\n    }));\n    setToast("Đã làm lại chú thích PDF");\n  };\n\n  const removePdfAnnotation = (annotationId: string) => {\n    commitPdfAnnotations(pdfAnnotations.filter((annotation) => annotation.id !== annotationId));\n    setToast("Đã xóa chú thích PDF");\n  };\n'''
+          new_undo='''  const undoPdf = () => {\n    const result = undoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());\n    if (result.annotations === pdfAnnotations) return;\n    applyPdfAnnotationResult(result);\n    setToast("Đã hoàn tác chú thích PDF");\n  };\n\n  const redoPdf = () => {\n    const result = redoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());\n    if (result.annotations === pdfAnnotations) return;\n    applyPdfAnnotationResult(result);\n    setToast("Đã làm lại chú thích PDF");\n  };\n\n  const removePdfAnnotation = (annotationId: string) => {\n    applyPdfAnnotationResult(deletePdfAnnotationCommand(pdfAnnotations, annotationId, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));\n    setToast("Đã xóa chú thích PDF");\n  };\n'''
+          t=once(t,old_undo,new_undo,'undo redo delete')
+
+          # Search delegates scanning/caching/cancellation to controller.
+          start=t.index('  const performSearch = async () => {')
+          end=t.index('  const openSearchResult = (result: SearchResult) => {', start)
+          search='''  useEffect(() => {\n    pdfSearchAbortRef.current?.abort();\n    pdfSearchAbortRef.current = null;\n  }, [activeDocument?.id, searchQuery, searchWholeCollection]);\n\n  const performSearch = async () => {\n    const query = searchQuery.trim();\n    if (!query) {\n      setSearchResults([]);\n      setActiveSearchQuery("");\n      return;\n    }\n    pdfSearchAbortRef.current?.abort();\n    const abort = new AbortController();\n    pdfSearchAbortRef.current = abort;\n    setSearching(true);\n    setActiveSearchQuery(query);\n    setSearchResults([]);\n    const normalizedQuery = query.toLocaleLowerCase();\n    if (!activeWorkspace.documents.length) {\n      if (activeWorkspace.kind !== "demo") {\n        setSearching(false);\n        setToast("Chưa có PDF để tìm kiếm");\n        return;\n      }\n      const demoText = "Diabetic neuropathy pathophysiology hyperglycemia polyol pathway clinical features diagnosis management peripheral autonomic neuropathy";\n      const matches = demoText.toLocaleLowerCase().includes(normalizedQuery)\n        ? [{ documentId: null, documentName: "Tài liệu mẫu", page: 126, snippet: demoText, occurrences: 1 }]\n        : [];\n      if (!abort.signal.aborted) { setSearchResults(matches); setSearching(false); }\n      return;\n    }\n    const targets = (searchWholeCollection ? activeWorkspace.documents : activeDocument ? [activeDocument] : []).map((target) => ({\n      id: target.id,\n      name: target.name,\n      lastModified: target.lastModified,\n      proxy: target.id === loadedDocumentId ? currentPdfDocument : null,\n    }));\n    try {\n      const found = await pdfReader.search(query, targets, {\n        signal: abort.signal,\n        concurrency: window.matchMedia("(max-width: 820px)").matches ? 2 : 4,\n        maxResults: 300,\n      });\n      if (abort.signal.aborted) return;\n      setSearchResults(found);\n      setToast(found.length ? `Tìm thấy ở ${found.length} trang` : "Không tìm thấy kết quả");\n    } catch (error) {\n      if (!abort.signal.aborted && (error as Error).name !== "AbortError") setToast("Không thể tìm kiếm PDF");\n    } finally {\n      if (pdfSearchAbortRef.current === abort) pdfSearchAbortRef.current = null;\n      if (!abort.signal.aborted) setSearching(false);\n    }\n  };\n\n'''
+          t=t[:start]+search+t[end:]
+
+          # Export only leaves browser download/print UI in React.
+          start=t.index('  const exportAnnotatedPdf = async (mode: "download" | "print") => {')
+          end=t.index('  const exportNotebook = async () => {', start)
+          export='''  const exportAnnotatedPdf = async (mode: "download" | "print") => {\n    if (!activeDocument) {\n      setToast("Chưa có PDF để xuất");\n      return;\n    }\n    setToast(mode === "print" ? "Đang chuẩn bị bản in…" : "Đang tạo PDF có chú thích…");\n    try {\n      const stored = await documentLibrary.readPdf(activeDocument.id);\n      if (!stored) throw new Error("Không tìm thấy PDF gốc trên thiết bị");\n      const blob = await createAnnotatedPdf({ blob: stored.blob, annotations: pdfAnnotations });\n      const url = URL.createObjectURL(blob);\n      if (mode === "download") {\n        const link = document.createElement("a");\n        link.href = url;\n        link.download = `${activeDocument.name.replace(/\\.pdf$/i, "")}-annotated.pdf`;\n        link.click();\n        window.setTimeout(() => URL.revokeObjectURL(url), 1200);\n        setToast("Đã xuất PDF có chú thích");\n        return;\n      }\n      const frame = document.createElement("iframe");\n      frame.style.position = "fixed";\n      frame.style.right = "0";\n      frame.style.bottom = "0";\n      frame.style.width = "1px";\n      frame.style.height = "1px";\n      frame.style.opacity = "0";\n      frame.src = url;\n      frame.onload = () => window.setTimeout(() => { frame.contentWindow?.focus(); frame.contentWindow?.print(); }, 500);\n      document.body.appendChild(frame);\n      window.setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60_000);\n      setToast("Đã mở hộp thoại in");\n    } catch (error) {\n      setToast(error instanceof Error ? error.message : "Không thể xuất PDF");\n    }\n  };\n\n'''
+          t=t[:start]+export+t[end:]
+
+          # React-owned Ctrl+wheel anchor zoom, replacing DOM runtime shim.
+          marker='''  const handleReaderScroll = () => {\n'''
+          wheel='''  const handlePdfWheelZoom = (event: React.WheelEvent<HTMLDivElement>) => {\n    if (!(event.ctrlKey || event.metaKey) || !currentPdfDocument) return;\n    event.preventDefault();\n    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, event.currentTarget.clientHeight) : 1;\n    pdfWheelAccumulatorRef.current += event.deltaY * multiplier;\n    if (Math.abs(pdfWheelAccumulatorRef.current) < 60 || pdfWheelZoomingRef.current) return;\n    const direction = pdfWheelAccumulatorRef.current > 0 ? -1 : 1;\n    pdfWheelAccumulatorRef.current -= Math.sign(pdfWheelAccumulatorRef.current) * 60;\n    const stage = event.currentTarget;\n    const oldZoom = sourceZoom;\n    const nextZoom = pdfReader.clampZoom(oldZoom + direction * .1);\n    if (nextZoom === oldZoom) return;\n    const stageRect = stage.getBoundingClientRect();\n    const localX = event.clientX - stageRect.left;\n    const localY = event.clientY - stageRect.top;\n    const contentX = stage.scrollLeft + localX;\n    const contentY = stage.scrollTop + localY;\n    const surface = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".pdf-page-surface, .document-paper");\n    const surfaceRect = surface?.getBoundingClientRect();\n    const surfaceX = surfaceRect ? (event.clientX - surfaceRect.left) / Math.max(1, surfaceRect.width) : 0;\n    const surfaceY = surfaceRect ? (event.clientY - surfaceRect.top) / Math.max(1, surfaceRect.height) : 0;\n    pdfWheelZoomingRef.current = true;\n    setSourceZoom(nextZoom);\n    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {\n      if (surface?.isConnected) {\n        const nextRect = surface.getBoundingClientRect();\n        stage.scrollLeft += nextRect.left + nextRect.width * surfaceX - event.clientX;\n        stage.scrollTop += nextRect.top + nextRect.height * surfaceY - event.clientY;\n      } else {\n        const anchored = zoomAroundAnchor(oldZoom, nextZoom, { contentX, contentY, localX, localY });\n        stage.scrollLeft = anchored.left;\n        stage.scrollTop = anchored.top;\n      }\n      pdfWheelZoomingRef.current = false;\n    }));\n  };\n\n'''+marker
+          t=once(t,marker,wheel,'wheel handler')
+          t=once(t,'<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>','<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll} onWheel={handlePdfWheelZoom}>','stage wheel')
+          p.write_text(t)
+
+          # P7.5 remove bootstrap DOM shim import.
+          p=Path('src/main.tsx'); t=p.read_text(); p.write_text(t.replace('import "../app/pdf-wheel-zoom-runtime";\n',''))
+
+          # test:p7 and updated zoom expectation.
+          p=Path('package.json'); t=p.read_text()
+          if '"test:p7"' not in t:
+              t=t.replace('"test:p65": "node --import tsx --test tests-unit/library-projection.test.ts",','"test:p65": "node --import tsx --test tests-unit/library-projection.test.ts",\n    "test:p7": "node --import tsx --test tests-unit/pdf-reader-controller.test.ts tests-unit/pdf-annotation-session.test.ts tests-unit/pdf-document-export.test.ts",')
+          p.write_text(t)
+          p=Path('tests-unit/pdf-reader-controller.test.ts'); t=p.read_text().replace('assert.equal(clampPdfZoom(99), 4);','assert.equal(clampPdfZoom(99), 2.5);').replace('test("page, zoom, continuous navigation and anchored zoom are clamped"','test("page, zoom, continuous navigation and Ctrl+wheel anchor are clamped"'); p.write_text(t)
+          PY
+      - name: Remove obsolete runtime shims and temporary files
+        run: |
+          rm -f app/pdf-wheel-zoom-runtime.ts app/pdf-search-toolbar-runtime.ts P7_CORE_TRIGGER.txt P7_CORE_TRIGGER_2.txt .github/workflows/p7-core-validate.yml .github/workflows/p7-diagnostics.yml
+      - name: Install and validate P7 integration
+        run: |
+          npm ci
+          npm run typecheck
+          npm run test:p7
+          ! grep -nE 'loadPdfDocument|loadPdfiumDocument|PDFDocument\.load|getTextContent\(' app/page.tsx
+          ! grep -R -nE 'pdf-wheel-zoom-runtime|pdf-search-toolbar-runtime' src app --exclude='page.tsx'
+      - name: Commit integrated P7
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/p7-home-integration.yml
+          git add -A
+          git commit -m "P7 orchestrate PDF runtime through services [p7-home]"
+          git push origin HEAD:p7-pdf-runtime
