@@ -3849,11 +3849,24 @@ export default function Home() {
                       ) : (
                         <button className={`library-item ${item.id === activeWorkspace.id ? "active" : ""}`} disabled={!workspace} onClick={() => {
                           if (!workspace) return setToast("Document runtime chưa sẵn sàng");
-                          activeWorkspaceIdRef.current = item.id;
-                          setActiveWorkspaceId(item.id);
-                          workspaceModeRef.current = "reader";
-                          setWorkspaceMode("reader");
-                          setLibraryOpen(false);
+                          void (async () => {
+                            const currentNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || null;
+                            const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
+                              ? currentNotebookId
+                              : item.linkedNotebookIds[0] || null;
+                            if (linkedNotebookId) {
+                              try {
+                                await noteStore.openNotebook(linkedNotebookId);
+                              } catch (error) {
+                                setToast(error instanceof Error ? error.message : "Không thể mở Notebook liên kết");
+                              }
+                            }
+                            activeWorkspaceIdRef.current = item.id;
+                            setActiveWorkspaceId(item.id);
+                            workspaceModeRef.current = "reader";
+                            setWorkspaceMode("reader");
+                            setLibraryOpen(false);
+                          })();
                         }}>
                           <span className="library-icon"><FileText size={19} /></span>
                           <span><strong>{item.name}</strong><small>{item.kind === "collection" ? `${item.documents.length} tài liệu` : "1 tài liệu"} · {item.linkedNotebookIds.length ? `${item.linkedNotebookIds.length} Notebook liên kết` : "không liên kết note"}</small></span>
