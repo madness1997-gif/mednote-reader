@@ -97,17 +97,7 @@ import {
   type PdfTool,
   type PdfViewMode,
 } from "./pdf-reader";
-import {
-  downloadDriveFile,
-  getDriveUser,
-  listDriveAppFiles,
-  requestDriveToken,
-  revokeDriveToken,
-  upsertDriveFile,
-  type DriveAppFile,
-  type DriveUser,
-} from "./google-drive";
-import { createDriveBackup, stageDriveBackup, type DriveLibrary } from "./drive-backup";
+import { driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
 import { resolveDocumentSource, type ResolvedDocumentSource } from "./note-document-source";
 import {
   lookupEnglishVietnamese,
@@ -136,8 +126,7 @@ import {
 } from "./note-runtime-adapter";
 import {
   DEFAULT_READER, createDemoWorkspace, createEmptyWorkspace, documentRuntimeWorkspace,
-  documentWorkspaceInput, isReaderPlaceholder, normalizeReader, normalizeWorkspace,
-  workspacesFromLibraryV6, type LibraryDocument, type PersistedLibrary, type ReaderState,
+  isReaderPlaceholder, normalizeReader, type ReaderState,
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
 
@@ -179,8 +168,6 @@ type DictionaryLookupState = {
 type StrokeHistory = Record<string, { undo: Stroke[][]; redo: Stroke[][] }>;
 type PdfHistory = Record<string, { undo: PdfAnnotation[][]; redo: PdfAnnotation[][] }>;
 
-const DRIVE_MANIFEST_ID = "manifest:v2";
-const DRIVE_LEGACY_MANIFEST_ID = "manifest:v1";
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
 const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
@@ -1791,7 +1778,7 @@ export default function Home() {
   });
   const [desktopGoogleClientSecret, setDesktopGoogleClientSecret] = useState("");
   const [driveToken, setDriveToken] = useState<string | null>(null);
-  const [driveUser, setDriveUser] = useState<DriveUser | null>(null);
+  const [driveUser, setDriveUser] = useState<DriveAccount | null>(null);
   const [driveStatus, setDriveStatus] = useState<"disconnected" | "connecting" | "connected" | "syncing" | "error">("disconnected");
   const [driveReady, setDriveReady] = useState(false);
   const [driveAutoSync, setDriveAutoSync] = useState(true);
@@ -1802,7 +1789,6 @@ export default function Home() {
   activeWorkspaceIdRef.current = activeWorkspaceId;
   workspaceModeRef.current = workspaceMode;
   const localSavedAtRef = useRef(Date.now());
-  const driveSyncingRef = useRef(false);
 
   useEffect(() => {
     if (notePanel !== "text") setTextInsertPopover(null);
@@ -2928,71 +2914,38 @@ export default function Home() {
     return workspace.notebooks.some((notebook) => notebook.pages.some((page) => page.body.trim() || page.excerpts.length || page.strokes.length));
   });
 
+  const currentDriveSnapshot = (): DriveSyncSnapshot => ({
+    workspaces: workspacesRef.current,
+    activeWorkspaceId: activeWorkspaceIdRef.current,
+    readerShare,
+    workspaceMode: workspaceModeRef.current,
+    noteZoom,
+    savedAt: localSavedAtRef.current,
+  });
+
+  const applyDriveRestore = (result: DriveRestoreResult) => {
+    const { snapshot } = result;
+    workspacesRef.current = snapshot.workspaces;
+    activeWorkspaceIdRef.current = snapshot.activeWorkspaceId;
+    workspaceModeRef.current = snapshot.workspaceMode;
+    localSavedAtRef.current = snapshot.savedAt;
+    setWorkspaces(snapshot.workspaces);
+    setActiveWorkspaceId(snapshot.activeWorkspaceId);
+    setReaderShare(snapshot.readerShare);
+    setWorkspaceMode(snapshot.workspaceMode);
+    setNoteZoom(snapshot.noteZoom);
+  };
+
   const syncToDrive = async (token = driveToken, silent = false) => {
-    if (!token || driveSyncingRef.current) return false;
-    driveSyncingRef.current = true;
+    if (!token || driveSyncService.isBusy()) return false;
     setDriveStatus("syncing");
     setDriveError(null);
     if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
     try {
-      await noteStore.flush();
-      const persistentWorkspaces = workspaces.filter((workspace) => workspace.kind !== "temporary" && workspace.documents.length > 0);
-      for (const workspace of persistentWorkspaces) {
-        await noteStore.saveDocumentWorkspace(documentWorkspaceInput(workspace, null, { workspaceMode, readerShare, noteZoom }));
-      }
-      await noteStore.setPreferences({ activeDocumentContextId: activeWorkspaceId, readerShare, workspaceMode, noteZoom });
-      const library = await noteStore.exportLibrary();
-      const structure = library.notes;
-      const contents = library.sheetContents;
-      const materializedNotebooks = structure
-        ? ordered(structure.notebooks).map((notebook) => notebookFromStructure(structure, notebook.id, contents)).filter((notebook): notebook is Notebook => Boolean(notebook))
-        : [];
-      const remoteFiles = await listDriveAppFiles(token);
-      const remoteByMednoteId = new Map(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file] as const] : []));
-      const documents = new Map<string, LibraryDocument>();
-      workspaces.forEach((workspace) => workspace.documents.forEach((document) => documents.set(document.id, document)));
-
-      for (const document of documents.values()) {
-        const mednoteId = `pdf:${document.id}`;
-        if (remoteByMednoteId.has(mednoteId)) continue;
-        const stored = await localBinaryStorage.readPdf(document.id);
-        if (!stored) continue;
-        const uploaded = await upsertDriveFile(token, {
-          name: `${document.id}__${document.name}`,
-          mimeType: "application/pdf",
-          mednoteId,
-          blob: stored.blob,
-        });
-        remoteByMednoteId.set(mednoteId, uploaded);
-      }
-
-      const assetIds = new Set(materializedNotebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : []))));
-      for (const assetId of assetIds) {
-        const mednoteId = `asset:${assetId}`;
-        if (remoteByMednoteId.has(mednoteId)) continue;
-        const blob = await localBinaryStorage.readAsset(assetId);
-        if (!blob) continue;
-        const uploaded = await upsertDriveFile(token, {
-          name: `${assetId}.png`,
-          mimeType: blob.type || "image/png",
-          mednoteId,
-          blob,
-        });
-        remoteByMednoteId.set(mednoteId, uploaded);
-      }
-
-      const savedAt = library.savedAt;
-      const backup = createDriveBackup(library);
-      const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
-      await upsertDriveFile(token, {
-        name: "MedNote Library v2.json",
-        mimeType: "application/json",
-        mednoteId: DRIVE_MANIFEST_ID,
-        blob: new Blob([JSON.stringify(backup)], { type: "application/json" }),
-        existingId: existingManifest?.id,
-      });
+      const result = await driveSyncService.sync(token, currentDriveSnapshot());
+      localSavedAtRef.current = result.snapshot.savedAt;
       setDriveReady(true);
-      setDriveLastSyncedAt(savedAt);
+      setDriveLastSyncedAt(result.snapshot.savedAt);
       setDriveStatus("connected");
       if (!silent) setToast("Đã đồng bộ đầy đủ lên Google Drive");
       return true;
@@ -3002,123 +2955,25 @@ export default function Home() {
       setDriveStatus("error");
       setToast(`Lỗi Drive: ${message}`);
       return false;
-    } finally {
-      driveSyncingRef.current = false;
     }
   };
 
   const restoreFromDrive = async (token = driveToken, askBeforeReplace = true) => {
-    if (!token || driveSyncingRef.current) return false;
+    if (!token || driveSyncService.isBusy()) return false;
     if (askBeforeReplace && hasMeaningfulLocalData() && !window.confirm("Tải dữ liệu từ Google Drive sẽ thay thế workspace đang có trên thiết bị này. Tiếp tục?")) return false;
-    driveSyncingRef.current = true;
     setDriveStatus("syncing");
     setDriveError(null);
     setToast("Đang tải dữ liệu từ Google Drive…");
     try {
-      const remoteFiles = await listDriveAppFiles(token);
-      const remoteByMednoteId = new Map<string, DriveAppFile>(remoteFiles.flatMap((file) => file.appProperties?.mednoteId ? [[file.appProperties.mednoteId, file]] : []));
-      const v2ManifestFile = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
-      if (v2ManifestFile) {
-        const manifestBlob = await downloadDriveFile(token, v2ManifestFile.id);
-        const staged = await stageDriveBackup(JSON.parse(await manifestBlob.text()));
-        let missingFiles = 0;
-        for (const record of staged.documents.documents) {
-          const remote = remoteByMednoteId.get(`pdf:${record.id}`);
-          if (!remote) {
-            missingFiles += 1;
-            continue;
-          }
-          const document: LibraryDocument = {
-            id: record.id,
-            name: record.name,
-            size: record.size,
-            lastModified: record.lastModified,
-            reader: normalizeReader(record.payload.reader as Partial<ReaderState> | undefined),
-          };
-          await localBinaryStorage.savePdf(document.id, document.name, await downloadDriveFile(token, remote.id));
-        }
-        const assetIds = new Set(Object.values(staged.sheetContents).flatMap((content) => {
-          const excerpts = Array.isArray(content.excerpts) ? content.excerpts as NoteExcerpt[] : [];
-          return excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : []);
-        }));
-        for (const assetId of assetIds) {
-          const remote = remoteByMednoteId.get(`asset:${assetId}`);
-          if (!remote) {
-            missingFiles += 1;
-            continue;
-          }
-          await localBinaryStorage.saveAsset(assetId, await downloadDriveFile(token, remote.id));
-        }
-
-        await noteStore.replaceFromLibrary(staged);
-        const restoredDocuments = workspacesFromLibraryV6(staged);
-        const restoredWorkspaces = restoredDocuments.length ? restoredDocuments : [documentRuntimeWorkspace(createEmptyWorkspace())];
-        const activeContextId = staged.preferences.activeDocumentContextId;
-        const nextActiveWorkspaceId = restoredWorkspaces.some((workspace) => workspace.id === activeContextId)
-          ? activeContextId
-          : restoredWorkspaces[0].id;
-        localSavedAtRef.current = staged.savedAt;
-        workspacesRef.current = restoredWorkspaces;
-        activeWorkspaceIdRef.current = nextActiveWorkspaceId;
-        setWorkspaces(restoredWorkspaces);
-        setActiveWorkspaceId(nextActiveWorkspaceId);
-        setReaderShare(Math.max(20, Math.min(80, staged.preferences.readerShare || 50)));
-        setWorkspaceMode(staged.preferences.workspaceMode || "split");
-        setNoteZoom(Math.max(.5, Math.min(2, staged.preferences.noteZoom || 1)));
-        setDriveReady(true);
-        setDriveLastSyncedAt(staged.savedAt);
-        setDriveStatus("connected");
-        setToast(missingFiles ? `Đã khôi phục v2; thiếu ${missingFiles} tệp trên Drive` : "Đã khôi phục đầy đủ thư viện v2 từ Google Drive");
-        return true;
-      }
-
-      // Manifest v1 is import-only. A successful next sync writes a new v2
-      // manifest and never mutates the legacy backup.
-      const manifestFile = remoteByMednoteId.get(DRIVE_LEGACY_MANIFEST_ID);
-      if (!manifestFile) throw new Error("Google Drive chưa có bản lưu MedNote");
-      const manifestBlob = await downloadDriveFile(token, manifestFile.id);
-      const parsed = JSON.parse(await manifestBlob.text()) as PersistedLibrary;
-      if (!Array.isArray(parsed.workspaces) || !parsed.workspaces.length) throw new Error("Bản lưu Drive không hợp lệ");
-      const normalized = parsed.workspaces.map(normalizeWorkspace);
-      await noteStore.replaceFromLegacySnapshot(parsed);
-      let missingFiles = 0;
-
-      for (const workspace of normalized) {
-        for (const document of workspace.documents) {
-          const remote = remoteByMednoteId.get(`pdf:${document.id}`);
-          if (!remote) {
-            missingFiles += 1;
-            continue;
-          }
-          await localBinaryStorage.savePdf(document.id, document.name, await downloadDriveFile(token, remote.id));
-        }
-      }
-
-      const assetIds = new Set(normalized.flatMap((workspace) => workspace.notebooks.flatMap((notebook) => notebook.pages.flatMap((page) => page.excerpts.flatMap((excerpt) => excerpt.kind === "image" && excerpt.assetId ? [excerpt.assetId] : [])))));
-      for (const assetId of assetIds) {
-        const remote = remoteByMednoteId.get(`asset:${assetId}`);
-        if (!remote) {
-          missingFiles += 1;
-          continue;
-        }
-        await localBinaryStorage.saveAsset(assetId, await downloadDriveFile(token, remote.id));
-      }
-
-      const savedAt = parsed.savedAt || (manifestFile.modifiedTime ? Date.parse(manifestFile.modifiedTime) : Date.now());
-      localSavedAtRef.current = savedAt;
-      const documentWorkspaces = normalized
-        .filter((workspace) => workspace.id !== "note-runtime-v6")
-        .map(documentRuntimeWorkspace);
-      const restoredDocuments = documentWorkspaces.length ? documentWorkspaces : [documentRuntimeWorkspace(createEmptyWorkspace())];
-      setWorkspaces(restoredDocuments);
-      setActiveWorkspaceId(restoredDocuments.some((workspace) => workspace.id === parsed.activeWorkspaceId) ? parsed.activeWorkspaceId : restoredDocuments[0].id);
-      setReaderShare(parsed.readerShare || 50);
-      setWorkspaceMode(parsed.workspaceMode === "reader" || parsed.workspaceMode === "note" ? parsed.workspaceMode : "split");
-      setNoteZoom(Math.max(.5, Math.min(2, parsed.noteZoom || 1)));
+      const result = await driveSyncService.restore(token);
+      applyDriveRestore(result);
       setDriveReady(true);
-      setDriveLastSyncedAt(savedAt);
+      setDriveLastSyncedAt(result.snapshot.savedAt);
       setDriveStatus("connected");
-      setToast(missingFiles ? `Đã khôi phục; thiếu ${missingFiles} tệp trên Drive` : "Đã khôi phục đầy đủ từ Google Drive");
+      const source = result.sourceVersion === "v2" ? "thư viện v2" : "bản lưu v1";
+      setToast(result.missingFiles
+        ? `Đã khôi phục ${source}; thiếu ${result.missingFiles} tệp trên Drive`
+        : `Đã khôi phục đầy đủ ${source} từ Google Drive`);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Không thể tải dữ liệu từ Google Drive";
@@ -3126,8 +2981,6 @@ export default function Home() {
       setDriveStatus("error");
       setToast(`Lỗi Drive: ${message}`);
       return false;
-    } finally {
-      driveSyncingRef.current = false;
     }
   };
 
@@ -3146,17 +2999,18 @@ export default function Home() {
     setDriveStatus("connecting");
     setDriveError(null);
     try {
-      const token = await requestDriveToken(clientId, IS_DESKTOP_APP ? desktopGoogleClientSecret.trim() : "");
+      const connection = await driveSyncService.connect({
+        clientId,
+        clientSecret: IS_DESKTOP_APP ? desktopGoogleClientSecret.trim() : "",
+      });
       if (IS_DESKTOP_APP) setDesktopGoogleClientSecret("");
-      const [user, files] = await Promise.all([getDriveUser(token), listDriveAppFiles(token)]);
-      setDriveToken(token);
-      setDriveUser(user);
+      setDriveToken(connection.token);
+      setDriveUser(connection.user);
       setDriveStatus("connected");
-      const remoteExists = files.some((file) => file.appProperties?.mednoteId === DRIVE_MANIFEST_ID || file.appProperties?.mednoteId === DRIVE_LEGACY_MANIFEST_ID);
-      if (remoteExists && !hasMeaningfulLocalData()) {
-        await restoreFromDrive(token, false);
-      } else if (!remoteExists) {
-        await syncToDrive(token);
+      if (connection.remote.hasBackup && !hasMeaningfulLocalData()) {
+        await restoreFromDrive(connection.token, false);
+      } else if (!connection.remote.hasBackup) {
+        await syncToDrive(connection.token);
       } else {
         setDriveReady(false);
         setToast("Drive đã có dữ liệu — chọn tải lên hoặc khôi phục");
@@ -3170,7 +3024,7 @@ export default function Home() {
   };
 
   const disconnectDrive = () => {
-    if (driveToken) revokeDriveToken(driveToken);
+    const token = driveToken;
     setDriveToken(null);
     setDriveUser(null);
     setDriveReady(false);
@@ -3178,6 +3032,7 @@ export default function Home() {
     setDriveError(null);
     setDrivePanelOpen(false);
     setToast("Đã ngắt Google Drive; dữ liệu cục bộ vẫn được giữ");
+    void driveSyncService.disconnect(token).catch(() => undefined);
   };
 
   useEffect(() => {

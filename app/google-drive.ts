@@ -1,7 +1,15 @@
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+export const GOOGLE_DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.appdata",
+  "https://www.googleapis.com/auth/drive",
+] as const;
+
+const DRIVE_SCOPE = GOOGLE_DRIVE_SCOPES.join(" ");
 const GIS_SCRIPT = "https://accounts.google.com/gsi/client";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
+const DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+export const MEDNOTE_SHARED_ROOT_ID = "root:shared:v1";
+const MEDNOTE_SHARED_ROOT_NAME = "MedNote Reader";
 
 type TokenResponse = {
   access_token?: string;
@@ -44,6 +52,7 @@ export type DriveAppFile = {
   mimeType: string;
   modifiedTime?: string;
   size?: string;
+  properties?: Record<string, string>;
   appProperties?: Record<string, string>;
 };
 
@@ -51,6 +60,11 @@ export type DriveUser = {
   displayName: string;
   emailAddress: string;
   photoLink?: string;
+};
+
+export type DriveSharedFiles = {
+  folder: DriveAppFile | null;
+  files: DriveAppFile[];
 };
 
 let gisPromise: Promise<void> | null = null;
@@ -124,16 +138,68 @@ export async function getDriveUser(token: string): Promise<DriveUser> {
   return payload.user;
 }
 
-export async function listDriveAppFiles(token: string): Promise<DriveAppFile[]> {
-  const params = new URLSearchParams({
+async function listDriveFiles(token: string, input: { spaces?: string; q: string }) {
+  const files: DriveAppFile[] = [];
+  let pageToken: string | undefined;
+  do {
+    const params = new URLSearchParams({
+      q: input.q,
+      pageSize: "1000",
+      fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size,properties,appProperties)",
+    });
+    if (input.spaces) params.set("spaces", input.spaces);
+    if (pageToken) params.set("pageToken", pageToken);
+    const response = await driveFetch(token, `${DRIVE_API}/files?${params}`);
+    const payload = await response.json() as { files?: DriveAppFile[]; nextPageToken?: string };
+    files.push(...(payload.files ?? []));
+    pageToken = payload.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
+/** Legacy, application-specific storage. New canonical backups use the shared folder below. */
+export function listDriveAppFiles(token: string): Promise<DriveAppFile[]> {
+  return listDriveFiles(token, {
     spaces: "appDataFolder",
     q: "'appDataFolder' in parents and trashed = false",
-    pageSize: "1000",
-    fields: "files(id,name,mimeType,modifiedTime,size,appProperties)",
   });
-  const response = await driveFetch(token, `${DRIVE_API}/files?${params}`);
-  const payload = await response.json() as { files?: DriveAppFile[] };
-  return payload.files ?? [];
+}
+
+function newestFile(files: DriveAppFile[]) {
+  return [...files].sort((left, right) => {
+    const modified = Date.parse(right.modifiedTime || "") - Date.parse(left.modifiedTime || "");
+    return modified || right.id.localeCompare(left.id);
+  })[0] || null;
+}
+
+async function listSharedRootFolders(token: string) {
+  return listDriveFiles(token, {
+    q: `mimeType = '${DRIVE_FOLDER_MIME_TYPE}' and trashed = false and properties has { key='mednoteId' and value='${MEDNOTE_SHARED_ROOT_ID}' }`,
+  });
+}
+
+export async function listDriveSharedFiles(token: string): Promise<DriveSharedFiles> {
+  const folder = newestFile(await listSharedRootFolders(token));
+  if (!folder) return { folder: null, files: [] };
+  return {
+    folder,
+    files: await listDriveFiles(token, { q: `'${folder.id}' in parents and trashed = false` }),
+  };
+}
+
+export async function ensureDriveSharedFolder(token: string) {
+  const existing = newestFile(await listSharedRootFolders(token));
+  if (existing) return existing;
+  const response = await driveFetch(token, `${DRIVE_API}/files?fields=id,name,mimeType,modifiedTime,size,properties,appProperties`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: MEDNOTE_SHARED_ROOT_NAME,
+      mimeType: DRIVE_FOLDER_MIME_TYPE,
+      properties: { mednoteId: MEDNOTE_SHARED_ROOT_ID },
+    }),
+  });
+  return response.json() as Promise<DriveAppFile>;
 }
 
 export async function downloadDriveFile(token: string, fileId: string) {
@@ -143,13 +209,15 @@ export async function downloadDriveFile(token: string, fileId: string) {
 
 export async function upsertDriveFile(
   token: string,
-  options: { name: string; mimeType: string; mednoteId: string; blob: Blob; existingId?: string },
+  options: { name: string; mimeType: string; mednoteId: string; blob: Blob; existingId?: string; parentId?: string },
 ) {
   const metadata = {
     name: options.name,
     mimeType: options.mimeType,
-    appProperties: { mednoteId: options.mednoteId },
-    ...(options.existingId ? {} : { parents: ["appDataFolder"] }),
+    ...(options.parentId
+      ? { properties: { mednoteId: options.mednoteId } }
+      : { appProperties: { mednoteId: options.mednoteId } }),
+    ...(options.existingId ? {} : { parents: [options.parentId || "appDataFolder"] }),
   };
   const boundary = `mednote_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const body = new Blob([
@@ -160,8 +228,8 @@ export async function upsertDriveFile(
     `\r\n--${boundary}--`,
   ]);
   const url = options.existingId
-    ? `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(options.existingId)}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,appProperties`
-    : `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,appProperties`;
+    ? `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(options.existingId)}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,properties,appProperties`
+    : `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,properties,appProperties`;
   const response = await driveFetch(token, url, {
     method: options.existingId ? "PATCH" : "POST",
     headers: { "Content-Type": `multipart/related; boundary=${boundary}` },

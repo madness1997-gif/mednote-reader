@@ -4,7 +4,13 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+// Keep this in lockstep with GOOGLE_DRIVE_SCOPES in app/google-drive.ts.
+// appdata remains readable for legacy imports; canonical cross-platform v2
+// backups live in the user's visible MedNote Reader folder.
+const DRIVE_SCOPE = [
+  "https://www.googleapis.com/auth/drive.appdata",
+  "https://www.googleapis.com/auth/drive",
+].join(" ");
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
@@ -198,7 +204,7 @@ async function authorizeWithSystemBrowser(clientId, clientSecret = "") {
         };
         if (clientSecret) tokenParameters.client_secret = clientSecret;
         const payload = await tokenRequest(tokenParameters);
-        if (payload.refresh_token) await saveCredential({ clientId, clientSecret, refreshToken: payload.refresh_token });
+        if (payload.refresh_token) await saveCredential({ clientId, clientSecret, refreshToken: payload.refresh_token, driveScope: DRIVE_SCOPE });
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end(callbackPage("Đã kết nối Google Drive", "MedNote đã nhận quyền truy cập và lưu phiên đăng nhập an toàn trên máy.", true));
         finish(null, payload.access_token);
@@ -242,7 +248,7 @@ async function authorizeDrive(clientId, clientSecret = "") {
   if (normalizedClientSecret.length > 512) throw new Error("OAuth Client Secret không hợp lệ");
   const credential = await readCredential();
   let effectiveClientSecret = normalizedClientSecret;
-  if (credential?.clientId === normalizedClientId && credential.refreshToken) {
+  if (credential?.clientId === normalizedClientId && credential.refreshToken && credential.driveScope === DRIVE_SCOPE) {
     effectiveClientSecret ||= String(credential.clientSecret || "").trim();
     try {
       const accessToken = await refreshAccessToken(normalizedClientId, credential.refreshToken, effectiveClientSecret);
@@ -253,6 +259,10 @@ async function authorizeDrive(clientId, clientSecret = "") {
     } catch {
       await clearCredential();
     }
+  } else if (credential) {
+    // Credentials created before shared-folder sync only grant appdata. Force a
+    // one-time consent so desktop can see the same canonical backup as web.
+    await clearCredential();
   }
   return authorizeWithSystemBrowser(normalizedClientId, effectiveClientSecret);
 }

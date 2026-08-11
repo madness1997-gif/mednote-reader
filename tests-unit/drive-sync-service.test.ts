@@ -1,0 +1,397 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import "fake-indexeddb/auto";
+
+import { createDriveBackup, parseDriveBackup } from "../app/drive-backup";
+import {
+  DRIVE_LEGACY_MANIFEST_ID,
+  DRIVE_MANIFEST_ID,
+  DriveSyncService,
+  type DriveRemoteGateway,
+  type DriveSyncSnapshot,
+} from "../app/drive-sync-service";
+import type { DriveAppFile, DriveSharedFiles } from "../app/google-drive";
+import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository } from "../app/indexeddb-note-repository";
+import { NoteStore } from "../app/note-store";
+import { createBlankPage } from "../app/note-runtime-adapter";
+import {
+  DEFAULT_READER,
+  workspacesFromLibraryV6,
+  type PersistedLibrary,
+  type WorkspaceItem,
+} from "../app/document-runtime-adapter";
+import type { LibraryV6 } from "../app/note-repository";
+
+type RemoteRecord = { file: DriveAppFile; blob: Blob };
+
+class MemoryDrive implements DriveRemoteGateway {
+  readonly shared = new Map<string, RemoteRecord>();
+  readonly legacy = new Map<string, RemoteRecord>();
+  readonly upserts: string[] = [];
+  readonly revoked: string[] = [];
+  sharedFolder: DriveAppFile | null = null;
+  failMednoteId: string | null = null;
+  private sequence = 0;
+
+  requestToken = async (clientId: string) => `token:${clientId}`;
+  revokeToken = async (token: string) => { this.revoked.push(token); };
+  getUser = async () => ({ displayName: "Bác sĩ", emailAddress: "doctor@example.com" });
+  listSharedFiles = async (): Promise<DriveSharedFiles> => ({
+    folder: this.sharedFolder,
+    files: [...this.shared.values()].map((record) => structuredClone(record.file)),
+  });
+  listLegacyAppDataFiles = async () => [...this.legacy.values()].map((record) => structuredClone(record.file));
+  ensureSharedFolder = async () => {
+    this.sharedFolder ||= {
+      id: "shared-folder",
+      name: "MedNote Reader",
+      mimeType: "application/vnd.google-apps.folder",
+      modifiedTime: new Date(1).toISOString(),
+      properties: { mednoteId: "root:shared:v1" },
+    };
+    return structuredClone(this.sharedFolder);
+  };
+  downloadFile = async (_token: string, fileId: string) => {
+    const record = [...this.shared.values(), ...this.legacy.values()].find((candidate) => candidate.file.id === fileId);
+    if (!record) throw new Error(`missing remote file ${fileId}`);
+    return record.blob;
+  };
+  upsertFile: DriveRemoteGateway["upsertFile"] = async (_token, options) => {
+    if (this.failMednoteId === options.mednoteId) throw new Error(`upload failed: ${options.mednoteId}`);
+    this.upserts.push(options.mednoteId);
+    const target = options.parentId ? this.shared : this.legacy;
+    const existing = options.existingId
+      ? [...target.entries()].find(([, record]) => record.file.id === options.existingId)
+      : undefined;
+    const id = existing?.[1].file.id || `remote-${++this.sequence}`;
+    const file: DriveAppFile = {
+      id,
+      name: options.name,
+      mimeType: options.mimeType,
+      modifiedTime: new Date(10 + this.sequence).toISOString(),
+      size: String(options.blob.size),
+      ...(options.parentId
+        ? { properties: { mednoteId: options.mednoteId } }
+        : { appProperties: { mednoteId: options.mednoteId } }),
+    };
+    if (existing) target.delete(existing[0]);
+    target.set(options.mednoteId, { file, blob: options.blob });
+    return structuredClone(file);
+  };
+
+  add(space: "shared" | "legacy", mednoteId: string, blob: Blob, name = mednoteId) {
+    if (space === "shared" && !this.sharedFolder) void this.ensureSharedFolder();
+    const file: DriveAppFile = {
+      id: `${space}-${++this.sequence}`,
+      name,
+      mimeType: blob.type || "application/octet-stream",
+      modifiedTime: new Date(10 + this.sequence).toISOString(),
+      size: String(blob.size),
+      ...(space === "shared" ? { properties: { mednoteId } } : { appProperties: { mednoteId } }),
+    };
+    (space === "shared" ? this.shared : this.legacy).set(mednoteId, { file, blob });
+    return file;
+  }
+}
+
+function library(input: { body?: string; withAsset?: boolean; documentName?: string } = {}): LibraryV6 {
+  const documentName = input.documentName || "Harrison.pdf";
+  const excerpt = {
+    id: "excerpt-source",
+    kind: "image",
+    assetId: input.withAsset === false ? undefined : "asset-figure",
+    sourceKind: "pdf",
+    documentId: "doc-harrison",
+    documentName,
+    page: 42,
+  };
+  return {
+    version: 6,
+    notes: {
+      workspace: { id: "workspace", title: "MedNote" },
+      notebooks: [{ id: "nb", title: "Nội tiết", order: 0 }],
+      sections: [{ id: "sec", notebookId: "nb", title: "Đái tháo đường", order: 0 }],
+      pages: [{ id: "page", sectionId: "sec", title: "SGLT2 và thận", order: 0 }],
+      sheets: [{ id: "sheet", pageId: "page", order: 0 }],
+      active: { activeNotebookId: "nb", activeSectionId: "sec", activePageId: "page", activeSheetId: "sheet" },
+    },
+    sheetContents: { sheet: { body: input.body || "eGFR slope", excerpts: [excerpt] } },
+    documents: {
+      documents: [{ id: "doc-harrison", name: documentName, size: 12, lastModified: 7, available: true, payload: { reader: { ...DEFAULT_READER, page: 42 } } }],
+      contexts: [{ id: "ctx-harrison", kind: "document", name: "Harrison", documentIds: ["doc-harrison"], activeDocumentId: "doc-harrison", sourcePage: 42 }],
+      groups: [],
+      links: [{ id: "link-harrison", documentId: "doc-harrison", targetType: "page", targetId: "page" }],
+      linkRelations: [{ id: "relation-harrison", linkIds: ["link-harrison"], kind: "workspace", sourceType: "document", sourceId: "doc-harrison", createdAt: 1, updatedAt: 1 }],
+    },
+    preferences: { activeDocumentContextId: "ctx-harrison", readerShare: 67, workspaceMode: "split", noteZoom: 1.35 },
+    savedAt: 123,
+  };
+}
+
+function legacySnapshot(): PersistedLibrary {
+  const page = createBlankPage(42);
+  page.id = "legacy-page";
+  page.title = "Legacy title";
+  page.body = "legacy body";
+  page.excerpts = [{
+    id: "legacy-image",
+    kind: "image",
+    assetId: "asset-legacy",
+    sourceKind: "pdf",
+    documentId: "doc-legacy",
+    documentName: "Legacy.pdf",
+    page: 5,
+  }];
+  const notebook = { id: "legacy-notebook", title: "Legacy notebook", pages: [page], activePageId: page.id, createdAt: 1 };
+  const workspace: WorkspaceItem = {
+    id: "legacy-workspace",
+    kind: "document",
+    name: "Legacy",
+    documents: [{ id: "doc-legacy", name: "Legacy.pdf", size: 6, lastModified: 2, reader: { ...DEFAULT_READER, page: 5 } }],
+    activeDocumentId: "doc-legacy",
+    noteNotebookId: notebook.id,
+    notebooks: [notebook],
+    activeNotebookId: notebook.id,
+    sourcePage: 5,
+  };
+  return { workspaces: [workspace], activeWorkspaceId: workspace.id, readerShare: 58, workspaceMode: "split", noteZoom: 1.2, savedAt: 456 };
+}
+
+async function harness(seed = library(), remote = new MemoryDrive()) {
+  const dbName = `mednote-p6-${crypto.randomUUID()}`;
+  const repository = new IndexedDbNoteRepository({ dbName });
+  await repository.replaceLibrary(seed);
+  const notes = new NoteStore(repository);
+  await notes.initialize({ skipMigration: true });
+  const pdfs = new Map<string, { blob: Blob; name: string }>();
+  const assets = new Map<string, Blob>();
+  const binaries = {
+    savePdf: async (id: string, name: string, blob: Blob) => { pdfs.set(id, { name, blob }); },
+    readPdf: async (id: string) => pdfs.get(id),
+    deletePdf: async (id: string) => { pdfs.delete(id); },
+    saveAsset: async (id: string, blob: Blob) => { assets.set(id, blob); },
+    readAsset: async (id: string) => assets.get(id),
+    deleteAsset: async (id: string) => { assets.delete(id); },
+  };
+  const service = new DriveSyncService({
+    notes,
+    remote,
+    binaries,
+    now: () => 999,
+  });
+  const workspaces = workspacesFromLibraryV6(seed);
+  const snapshot: DriveSyncSnapshot = {
+    workspaces,
+    activeWorkspaceId: seed.preferences.activeDocumentContextId || workspaces[0]?.id || "",
+    readerShare: seed.preferences.readerShare,
+    workspaceMode: seed.preferences.workspaceMode || "split",
+    noteZoom: seed.preferences.noteZoom || 1,
+    savedAt: seed.savedAt,
+  };
+  return { repository, notes, service, remote, binaries, pdfs, assets, snapshot, close: () => deleteNoteRepositoryDatabase(dbName) };
+}
+
+test("empty remote syncs a canonical shared v2 bundle and excludes temporary workspaces", async () => {
+  const context = await harness();
+  try {
+    context.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["pdf-body"], { type: "application/pdf" }) });
+    context.assets.set("asset-figure", new Blob(["figure"], { type: "image/png" }));
+    const temporary: WorkspaceItem = {
+      ...context.snapshot.workspaces[0],
+      id: "temporary-session",
+      kind: "temporary",
+      documents: [{ ...context.snapshot.workspaces[0].documents[0], id: "temp-doc-x" }],
+      activeDocumentId: "temp-doc-x",
+    };
+    const result = await context.service.sync("token", {
+      ...context.snapshot,
+      workspaces: [temporary, ...context.snapshot.workspaces],
+      activeWorkspaceId: temporary.id,
+    });
+    assert.ok(context.remote.sharedFolder);
+    assert.deepEqual([...context.remote.shared.keys()].sort(), ["asset:asset-figure", DRIVE_MANIFEST_ID, "pdf:doc-harrison"].sort());
+    assert.equal(context.remote.legacy.size, 0);
+    assert.equal(result.uploadedFiles, 3);
+    const manifest = context.remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    const restored = parseDriveBackup(JSON.parse(await manifest.blob.text()));
+    assert.equal(restored.documents.contexts.some((record) => record.id.includes("temporary")), false);
+    assert.equal(restored.documents.documents.some((record) => record.id.startsWith("temp-doc-")), false);
+    assert.notEqual(restored.preferences.activeDocumentContextId, temporary.id);
+  } finally { await context.close(); }
+});
+
+test("shared v2 is interoperable between web and desktop services and preserves UI/source ownership", async () => {
+  const remote = new MemoryDrive();
+  const web = await harness(library({ body: "from web" }), remote);
+  const desktop = await harness(library({ body: "old desktop", documentName: "Old.pdf" }), remote);
+  try {
+    web.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["shared-pdf"], { type: "application/pdf" }) });
+    web.assets.set("asset-figure", new Blob(["shared-asset"], { type: "image/png" }));
+    await web.service.sync("web-token", web.snapshot);
+    const restored = await desktop.service.restore("desktop-token");
+    assert.equal(restored.sourceVersion, "v2");
+    assert.equal(restored.missingFiles, 0);
+    assert.equal(restored.snapshot.readerShare, 67);
+    assert.equal(restored.snapshot.workspaceMode, "split");
+    assert.equal(restored.snapshot.noteZoom, 1.35);
+    assert.equal(await desktop.pdfs.get("doc-harrison")?.blob.text(), "shared-pdf");
+    assert.equal(await desktop.assets.get("asset-figure")?.text(), "shared-asset");
+    const local = await desktop.repository.loadLibrary();
+    assert.equal(local?.notes.pages[0].title, "SGLT2 và thận");
+    assert.equal(local?.documents.documents[0].name, "Harrison.pdf");
+    const excerpt = local?.sheetContents.sheet.excerpts?.[0] as { sourceKind?: string; documentId?: string; documentName?: string; page?: number };
+    assert.deepEqual(excerpt, { ...excerpt, sourceKind: "pdf", documentId: "doc-harrison", documentName: "Harrison.pdf", page: 42 });
+  } finally {
+    await web.close();
+    await desktop.close();
+  }
+});
+
+test("v2 wins over v1 across storage locations", async () => {
+  const remote = new MemoryDrive();
+  const v2 = library({ body: "canonical v2" });
+  remote.add("legacy", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(v2))], { type: "application/json" }));
+  remote.add("legacy", "pdf:doc-harrison", new Blob(["legacy-appdata-pdf"], { type: "application/pdf" }));
+  remote.add("legacy", "asset:asset-figure", new Blob(["legacy-appdata-asset"], { type: "image/png" }));
+  remote.add("shared", DRIVE_LEGACY_MANIFEST_ID, new Blob([JSON.stringify(legacySnapshot())], { type: "application/json" }));
+  const context = await harness(library({ body: "local" }), remote);
+  try {
+    assert.deepEqual(await context.service.inspectRemote("token"), { hasBackup: true, sourceVersion: "v2", storage: "legacy-appdata" });
+    const restored = await context.service.restore("token");
+    assert.equal(restored.sourceVersion, "v2");
+    assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "canonical v2");
+  } finally { await context.close(); }
+});
+
+test("v1 is import-only and the next sync creates shared v2 without mutating legacy", async () => {
+  const remote = new MemoryDrive();
+  const legacy = legacySnapshot();
+  remote.add("legacy", DRIVE_LEGACY_MANIFEST_ID, new Blob([JSON.stringify(legacy)], { type: "application/json" }));
+  remote.add("legacy", "pdf:doc-legacy", new Blob(["legacy-pdf"], { type: "application/pdf" }));
+  remote.add("legacy", "asset:asset-legacy", new Blob(["legacy-asset"], { type: "image/png" }));
+  const before = await remote.legacy.get(DRIVE_LEGACY_MANIFEST_ID)!.blob.text();
+  const context = await harness(library({ body: "replace me" }), remote);
+  try {
+    const restored = await context.service.restore("token");
+    assert.equal(restored.sourceVersion, "v1");
+    assert.equal(restored.snapshot.activeWorkspaceId, "legacy-workspace");
+    assert.equal(await context.pdfs.get("doc-legacy")?.blob.text(), "legacy-pdf");
+    assert.equal(await context.assets.get("asset-legacy")?.text(), "legacy-asset");
+    await context.service.sync("token", restored.snapshot);
+    assert.ok(remote.shared.has(DRIVE_MANIFEST_ID));
+    assert.equal(await remote.legacy.get(DRIVE_LEGACY_MANIFEST_ID)!.blob.text(), before);
+  } finally { await context.close(); }
+});
+
+test("missing PDF and asset keep notes intact while incrementing missingFiles", async () => {
+  const remote = new MemoryDrive();
+  const source = library({ body: "keep note" });
+  remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(source))], { type: "application/json" }));
+  const context = await harness(library({ body: "old note" }), remote);
+  try {
+    const restored = await context.service.restore("token");
+    assert.equal(restored.missingFiles, 2);
+    const local = await context.repository.loadLibrary();
+    assert.equal(local?.sheetContents.sheet.body, "keep note");
+    assert.equal((local?.sheetContents.sheet.excerpts?.[0] as { assetId?: string }).assetId, "asset-figure");
+    assert.equal(context.pdfs.size, 0);
+    assert.equal(context.assets.size, 0);
+  } finally { await context.close(); }
+});
+
+test("corrupt v2 aborts before local cutover", async () => {
+  const remote = new MemoryDrive();
+  const source = library({ body: "remote" });
+  const corrupted = createDriveBackup(source);
+  corrupted.library.sheetContents.sheet = { body: "tampered after hash" };
+  remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(corrupted)], { type: "application/json" }));
+  remote.add("shared", "pdf:doc-harrison", new Blob(["remote-pdf"], { type: "application/pdf" }));
+  const context = await harness(library({ body: "local survives" }), remote);
+  try {
+    context.pdfs.set("doc-harrison", { name: "Local.pdf", blob: new Blob(["local-pdf"], { type: "application/pdf" }) });
+    await assert.rejects(context.service.restore("token"), /Hash nội dung Sheet/);
+    assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "local survives");
+    assert.equal(await context.pdfs.get("doc-harrison")?.blob.text(), "local-pdf");
+  } finally { await context.close(); }
+});
+
+test("failed local cutover rolls binaries and NoteStore back together", async () => {
+  const remote = new MemoryDrive();
+  const source = library({ body: "remote replacement" });
+  remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(source))], { type: "application/json" }));
+  remote.add("shared", "pdf:doc-harrison", new Blob(["new-pdf"], { type: "application/pdf" }));
+  remote.add("shared", "asset:asset-figure", new Blob(["new-asset"], { type: "image/png" }));
+  const context = await harness(library({ body: "local before cutover" }), remote);
+  try {
+    context.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["old-pdf"], { type: "application/pdf" }) });
+    context.assets.set("asset-figure", new Blob(["old-asset"], { type: "image/png" }));
+    const saveAsset = context.binaries.saveAsset;
+    let failed = false;
+    context.binaries.saveAsset = async (id, blob) => {
+      if (!failed) {
+        failed = true;
+        throw new Error("local asset write failed");
+      }
+      await saveAsset(id, blob);
+    };
+    await assert.rejects(context.service.restore("token"), /local asset write failed/);
+    assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "local before cutover");
+    assert.equal(await context.pdfs.get("doc-harrison")?.blob.text(), "old-pdf");
+    assert.equal(await context.assets.get("asset-figure")?.text(), "old-asset");
+  } finally { await context.close(); }
+});
+
+test("sync skips existing binaries and failed upload never rolls back local data", async () => {
+  const remote = new MemoryDrive();
+  remote.add("shared", "pdf:doc-harrison", new Blob(["already remote"], { type: "application/pdf" }));
+  remote.failMednoteId = DRIVE_MANIFEST_ID;
+  const context = await harness(library({ body: "local remains" }), remote);
+  try {
+    context.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["local-pdf"], { type: "application/pdf" }) });
+    context.assets.set("asset-figure", new Blob(["new asset"], { type: "image/png" }));
+    await assert.rejects(context.service.sync("token", context.snapshot), /upload failed/);
+    assert.equal(remote.upserts.includes("pdf:doc-harrison"), false);
+    assert.equal(remote.upserts.includes("asset:asset-figure"), true);
+    assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "local remains");
+    assert.equal(await context.pdfs.get("doc-harrison")?.blob.text(), "local-pdf");
+  } finally { await context.close(); }
+});
+
+test("disconnect revokes OAuth without deleting local data", async () => {
+  const context = await harness();
+  try {
+    context.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["local"]) });
+    await context.service.disconnect("token-1");
+    assert.deepEqual(context.remote.revoked, ["token-1"]);
+    assert.equal(await context.pdfs.get("doc-harrison")?.blob.text(), "local");
+    assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "eGFR slope");
+  } finally { await context.close(); }
+});
+
+test("page delegates Drive algorithms and web/desktop request the same cross-platform scopes", async () => {
+  const [page, service, browserDrive, desktopMain] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/drive-sync-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/google-drive.ts", import.meta.url), "utf8"),
+    readFile(new URL("../electron/main.cjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /driveSyncService\.connect/);
+  assert.match(page, /driveSyncService\.sync/);
+  assert.match(page, /driveSyncService\.restore/);
+  assert.match(page, /driveSyncService\.disconnect/);
+  for (const forbidden of ["listDriveAppFiles", "downloadDriveFile", "upsertDriveFile", "createDriveBackup", "stageDriveBackup", "requestDriveToken", "getDriveUser", "revokeDriveToken"]) {
+    assert.equal(page.includes(forbidden), false, `page.tsx still knows ${forbidden}`);
+    assert.equal(service.includes(forbidden), true, `DriveSyncService must own ${forbidden}`);
+  }
+  for (const scope of ["https://www.googleapis.com/auth/drive.appdata", "https://www.googleapis.com/auth/drive"]) {
+    assert.equal(browserDrive.includes(scope), true);
+    assert.equal(desktopMain.includes(scope), true);
+  }
+  assert.match(desktopMain, /credential\.driveScope === DRIVE_SCOPE/);
+  assert.match(browserDrive, /MEDNOTE_SHARED_ROOT_ID/);
+  assert.match(browserDrive, /properties:\s*\{\s*mednoteId/);
+  assert.match(service, /sourceVersion:\s*"v2"/);
+  assert.match(service, /sourceVersion:\s*"v1"/);
+});
