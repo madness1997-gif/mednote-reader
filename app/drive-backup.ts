@@ -16,10 +16,21 @@ export type DriveBackupV2 = {
   library: LibraryV6;
 };
 
+const LEGACY_PRE_JSON_HASH_CUTOFF = 1786422600000;
+
 const clone = <T,>(value: T): T => {
   if (typeof structuredClone === "function") return structuredClone(value);
   return JSON.parse(JSON.stringify(value)) as T;
 };
+
+/**
+ * Drive manifests are JSON files, so hashes must be calculated from the exact
+ * representation that survives JSON.stringify/parse. In particular, object
+ * properties whose value is undefined are removed by JSON serialization.
+ */
+function jsonSafeClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 function hashesFor(library: LibraryV6) {
   return Object.fromEntries(library.notes.sheets.map((sheet) => [sheet.id, contentHash(library.sheetContents[sheet.id])]));
@@ -57,7 +68,10 @@ function recordSignature(library: LibraryV6) {
 }
 
 export function createDriveBackup(library: LibraryV6): DriveBackupV2 {
-  const snapshot = clone(library);
+  // Hash the JSON-safe snapshot, not the in-memory object. Otherwise optional
+  // undefined fields are hashed before upload but disappear from the manifest,
+  // causing a false mismatch on restore.
+  const snapshot = jsonSafeClone(clone(library));
   assertLibrary(snapshot);
   return {
     format: DRIVE_BACKUP_FORMAT,
@@ -74,13 +88,25 @@ export function parseDriveBackup(payload: unknown): LibraryV6 {
   if (backup.format !== DRIVE_BACKUP_FORMAT || backup.schemaVersion !== NOTE_SCHEMA_VERSION || !backup.library) {
     throw new Error("Bản lưu Drive không phải manifest v2");
   }
-  const library = clone(backup.library);
+  const library = jsonSafeClone(clone(backup.library));
   assertLibrary(library);
   const actualHashes = hashesFor(library);
   const expectedHashes = backup.sheetContentHashes || {};
-  if (Object.keys(actualHashes).length !== Object.keys(expectedHashes).length
-    || Object.entries(actualHashes).some(([id, hash]) => expectedHashes[id] !== hash)) {
-    throw new Error("Hash nội dung Sheet trong bản lưu Drive không khớp");
+  const sameHashKeys = Object.keys(actualHashes).length === Object.keys(expectedHashes).length
+    && Object.keys(actualHashes).every((id) => Object.prototype.hasOwnProperty.call(expectedHashes, id));
+  const hashMismatch = !sameHashKeys
+    || Object.entries(actualHashes).some(([id, hash]) => expectedHashes[id] !== hash);
+
+  if (hashMismatch) {
+    // Manifests written before the JSON-canonical hash fix could contain hashes
+    // calculated from optional undefined properties that JSON later removed.
+    // That old hash cannot be reconstructed from the downloaded JSON. Accept
+    // only that bounded compatibility window when the Sheet ID set itself is
+    // intact; all newer manifests remain strict.
+    const isLegacyPreJsonHash = sameHashKeys
+      && Number.isFinite(backup.exportedAt)
+      && Number(backup.exportedAt) < LEGACY_PRE_JSON_HASH_CUTOFF;
+    if (!isLegacyPreJsonHash) throw new Error("Hash nội dung Sheet trong bản lưu Drive không khớp");
   }
   return library;
 }
