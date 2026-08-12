@@ -55,6 +55,21 @@ const clone = <T>(value: T): T => {
   return JSON.parse(JSON.stringify(value)) as T;
 };
 
+const normalizeNotebookTitle = (title: string) => title.normalize("NFKC").trim().replace(/\s+/g, " ");
+const notebookTitleKey = (title: string) => normalizeNotebookTitle(title).toLocaleLowerCase("vi-VN");
+
+function dedupeNotebookTitles(notebooks: NoteStructure["notebooks"]) {
+  const used = new Set<string>();
+  return ordered(notebooks).map((notebook) => {
+    const base = normalizeNotebookTitle(notebook.title) || "Sổ ghi chú";
+    let title = base;
+    let suffix = 2;
+    while (used.has(notebookTitleKey(title))) title = `${base} (${suffix++})`;
+    used.add(notebookTitleKey(title));
+    return { ...notebook, title };
+  });
+}
+
 const normalizedOrder = (value: unknown, fallback: number) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 function stableStringify(value: unknown): string {
@@ -153,7 +168,7 @@ function finishLibrary(
   savedAt: number,
   warnings: string[],
 ) {
-  const noteStructure: NoteStructure = { ...notes, active: notes.active || defaultActive(notes) };
+  const noteStructure: NoteStructure = { ...notes, notebooks: dedupeNotebookTitles(notes.notebooks), active: notes.active || defaultActive(notes) };
   const documents = collectDocuments(contexts, relation);
   const documentContexts = buildDocumentContexts(contexts, documents);
   const normalizedRelations = migrateRelationV2(noteStructure, documents, existingLinks, relation);
@@ -424,7 +439,18 @@ export async function migrateStoredLibraryToV6(options: {
   const storeName = options.storeName || "documents";
   const repository = new IndexedDbNoteRepository({ dbName, storeName });
   const current = await repository.loadLibrary();
-  if (current) return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };
+  if (current) {
+    const repairedNotebooks = dedupeNotebookTitles(current.notes.notebooks);
+    const changed = repairedNotebooks.some((notebook, index) => notebook.title !== current.notes.notebooks[index]?.title);
+    if (changed) {
+      const repaired: LibraryV6 = { ...current, notes: { ...current.notes, notebooks: repairedNotebooks }, savedAt: Math.max(Date.now(), current.savedAt + 1) };
+      await repository.replaceLibrary(repaired);
+      const reloaded = await repository.loadLibrary();
+      if (!reloaded) throw new Error("Đã sửa tên Notebook trùng nhưng không load lại được");
+      return { library: reloaded, report: migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"] ) };
+    }
+    return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };
+  }
   let result: MigrationResult | null = null;
   const v5 = await readV5Source(dbName, storeName);
   if (v5) result = migrateV5ToV6(v5, options.relation);
