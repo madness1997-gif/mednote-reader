@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
+// Regression for v6 data that already contained duplicate Notebook titles before the invariant existed.
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 test.use({ viewport: { width: 1280, height: 900 } });
 
