@@ -1,6 +1,9 @@
 export const GOOGLE_DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.appdata",
-  "https://www.googleapis.com/auth/drive",
+  // Canonical backups live in a normal Drive folder so web and desktop can
+  // share them. drive.file is enough for files created by this Cloud project
+  // and avoids asking for unrestricted access to the user's entire Drive.
+  "https://www.googleapis.com/auth/drive.file",
 ] as const;
 
 const DRIVE_SCOPE = GOOGLE_DRIVE_SCOPES.join(" ");

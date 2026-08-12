@@ -9,7 +9,7 @@ const path = require("node:path");
 // backups live in the user's visible MedNote Reader folder.
 const DRIVE_SCOPE = [
   "https://www.googleapis.com/auth/drive.appdata",
-  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -112,6 +112,12 @@ function oauthErrorMessage(error) {
   }
   if (/invalid_client/i.test(message)) {
     return "OAuth Client ID không đúng loại Desktop app. Hãy tạo Client ID loại Desktop app trong Google Cloud rồi dán lại vào MedNote.";
+  }
+  if (/deleted_client/i.test(message)) {
+    return "OAuth Client này đã bị xóa hoặc thu hồi. Hãy nhập tệp JSON của OAuth Desktop mới rồi kết nối lại.";
+  }
+  if (/access_denied|org_internal|admin_policy_enforced|app_not_configured_for_user/i.test(message)) {
+    return "Google chưa cho tài khoản này dùng ứng dụng. Nếu OAuth đang ở chế độ Testing, hãy thêm đúng tài khoản vào Test users rồi kết nối lại.";
   }
   if (/client_secret.*missing|missing.*client_secret/i.test(message)) {
     return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại MedNote, chọn Nhập tệp OAuth JSON hoặc nhập Client Secret rồi kết nối lại.";

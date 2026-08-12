@@ -169,10 +169,11 @@ export class DriveSyncService {
   }
 
   private async inspectIndexed(token: string): Promise<IndexedRemote> {
-    const [shared, legacyFiles] = await Promise.all([
-      this.remote.listSharedFiles(token),
-      this.remote.listLegacyAppDataFiles(token),
-    ]);
+    const shared = await this.remote.listSharedFiles(token);
+    // appDataFolder is import-only compatibility storage. A stale OAuth grant
+    // or organization policy may deny it; that must not block login or the
+    // canonical shared-folder backup.
+    const legacyFiles = await this.remote.listLegacyAppDataFiles(token).catch(() => []);
     const sharedIndex = indexFiles(shared.files);
     const legacyIndex = indexFiles(legacyFiles);
     const candidates = [

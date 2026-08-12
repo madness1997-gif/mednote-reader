@@ -168,6 +168,52 @@ export function serializeBlocks(blocks: FirstAidBlock[]) {
   return `<div data-mednote-first-aid-rendered="1" style="width:100%">${visible}</div><!--mednote-first-aid:${payload}-->`;
 }
 
+export function hasFirstAidBlockSerialization(html: string) {
+  return /data-mednote-first-aid-rendered|<!--\s*mednote-first-aid:/i.test(html);
+}
+
+/**
+ * First Aid stores a styled, static rendering beside its block payload. That
+ * rendering must not leak into the regular rich-text editor when the user
+ * changes the paper template. Convert the blocks to semantic rich text while
+ * keeping their order and character-level formatting.
+ */
+export function firstAidToStandardRichText(html: string, plainText: string) {
+  const rich = (value: string | undefined, text = "", textStyle: TextStyle = "paragraph") =>
+    sanitizeBlockRichTextHtml(richBlockHtml(value, text, textStyle));
+  const heading = (value: string | undefined, text = "") => `<div><b>${rich(value, text)}</b></div>`;
+
+  return parseBlocks(html, plainText).map((block) => {
+    if (block.type === "heading") return heading(block.titleHtml, block.title);
+    if (block.type === "label") return `${heading(block.labelHtml, block.label)}<div>${rich(block.textHtml, block.text)}</div>`;
+    if (block.type === "text") return `<div>${rich(block.textHtml, block.text, block.textStyle)}</div>`;
+    if (block.type === "figure") return block.caption || block.captionHtml
+      ? `<div><i>${rich(block.captionHtml, block.caption)}</i></div>`
+      : "";
+    if (block.type === "figure-text") {
+      const caption = block.caption || block.captionHtml ? `<div><i>${rich(block.captionHtml, block.caption)}</i></div>` : "";
+      return `<div>${rich(block.textHtml, block.text)}</div>${caption}`;
+    }
+    if (block.type === "table") {
+      const rows = block.rows ?? [];
+      const cells = rows.map((row, rowIndex) => `<tr>${row.map((cell, columnIndex) => {
+        const tag = rowIndex === 0 ? "th" : "td";
+        return `<${tag}>${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${tag}>`;
+      }).join("")}</tr>`).join("");
+      return `<table><tbody>${cells}</tbody></table>`;
+    }
+    if (block.type === "flow") {
+      const steps = block.steps ?? [];
+      return `${heading(block.labelHtml, block.label ?? "CƠ CHẾ")}<ol>${steps.map((step, index) => `<li>${rich(block.stepsHtml?.[index], step)}</li>`).join("")}</ol>`;
+    }
+    return `${heading(block.labelHtml, block.label ?? "HIGH-YIELD")}<div><b>${rich(block.textHtml, block.text)}</b></div>`;
+  }).join("");
+}
+
+export function regularTemplateRichText(html: string, plainText: string) {
+  return hasFirstAidBlockSerialization(html) ? firstAidToStandardRichText(html, plainText) : html;
+}
+
 function splitLegacySection(value = "") {
   const trimmed = value.trim();
   const firstLineEnd = trimmed.indexOf("\n");

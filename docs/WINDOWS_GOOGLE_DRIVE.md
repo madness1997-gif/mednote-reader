@@ -1,6 +1,6 @@
 # Kết nối MedNote Windows với Google Drive
 
-MedNote Windows dùng OAuth 2.0 cho ứng dụng cài đặt, mở đăng nhập trong trình duyệt mặc định và chỉ xin quyền `drive.appdata`. Ứng dụng hỗ trợ cả OAuth Desktop không yêu cầu Secret và OAuth Desktop được Google cấp kèm Secret.
+MedNote Windows dùng OAuth 2.0 cho ứng dụng cài đặt và mở đăng nhập trong trình duyệt mặc định. Bản sao lưu mới dùng quyền giới hạn `drive.file`, chỉ truy cập thư mục/tệp do MedNote tạo; quyền `drive.appdata` chỉ còn dùng để nhập các bản sao lưu cũ. Ứng dụng hỗ trợ cả OAuth Desktop không yêu cầu Secret và OAuth Desktop được Google cấp kèm Secret.
 
 ## 1. Tạo OAuth Client cho bản Windows
 
@@ -9,13 +9,13 @@ MedNote Windows dùng OAuth 2.0 cho ứng dụng cài đặt, mở đăng nhập
 3. Vào **APIs & Services → OAuth consent screen**. Nếu ứng dụng còn ở chế độ Testing, thêm tài khoản Google của bạn vào **Test users**.
 4. Vào **Credentials → Create credentials → OAuth client ID**.
 5. Chọn **Desktop app**, đặt tên `MedNote Windows`, rồi tạo.
-6. Bấm tải tệp JSON của client vừa tạo. Sao chép `client_id` trong mục `installed`; nếu tệp có `client_secret`, sao chép cả giá trị này.
+6. Bấm tải tệp JSON của client vừa tạo.
 
 ## 2. Kết nối trong MedNote
 
 1. Cài và mở **MedNote Reader**.
 2. Bấm **Kết nối Drive**.
-3. Dán Desktop Client ID vào ô cấu hình. Nếu Google đã cấp Client Secret trong tệp JSON, dán thêm vào ô **Client Secret** rồi bấm **Kết nối**.
+3. Chọn **Nhập tệp OAuth JSON** và chọn đúng tệp vừa tải. MedNote tự đọc `client_id` và `client_secret`, sau đó bấm **Kết nối**.
 4. Trình duyệt mặc định của Windows sẽ mở. Chọn tài khoản Google và cấp quyền.
 5. Quay lại MedNote, chọn **Lưu bản này lên Drive** hoặc **Tải bản từ Drive** khi ứng dụng hỏi cách xử lý dữ liệu đã có.
 
@@ -25,4 +25,4 @@ Client ID là định danh công khai và được lưu cục bộ trên máy. C
 
 ## 3. Dùng chung dữ liệu với bản web
 
-Hãy tạo OAuth Web client và Desktop client trong cùng một Google Cloud project. Cả hai bản đều dùng quyền `drive.appdata`, nên có thể đọc cùng bộ dữ liệu MedNote của tài khoản Google đã đăng nhập.
+Hãy tạo OAuth Web client và Desktop client trong cùng một Google Cloud project. Cả hai bản dùng `drive.file` cho thư mục **MedNote Reader**, nên có thể đọc cùng bộ dữ liệu của tài khoản Google đã đăng nhập mà không xin quyền truy cập toàn bộ Drive.

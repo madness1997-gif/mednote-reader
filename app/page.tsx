@@ -60,6 +60,7 @@ import { documentLibrary, type DocumentMutationResult } from "./document-library
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
+import { firstAidToStandardRichText } from "./first-aid-block-model";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -2306,7 +2307,12 @@ export default function Home() {
 
   const updatePaperTemplate = (template: PaperTemplate) => {
     if (template !== "first-aid") {
-      updatePaper({ template });
+      const leavingFirstAid = activeNote.paper.template === "first-aid";
+      updateActiveNote({
+        paper: { ...activeNote.paper, template },
+        ...(leavingFirstAid ? { bodyHtml: firstAidToStandardRichText(activeNote.bodyHtml ?? "", activeNote.body) } : {}),
+      });
+      setToast(leavingFirstAid ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
       return;
     }
     const shouldSeed = !activeNote.body.trim() && !activeNote.excerpts.length;

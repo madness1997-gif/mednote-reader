@@ -223,6 +223,18 @@ test("empty remote syncs a canonical shared v2 bundle and excludes temporary wor
   } finally { await context.close(); }
 });
 
+test("legacy appData inspection failure does not block canonical Drive login", async () => {
+  const remote = new MemoryDrive();
+  remote.listLegacyAppDataFiles = async () => { throw new Error("appDataFolder denied"); };
+  const context = await harness(library(), remote);
+  try {
+    const connection = await context.service.connect({ clientId: "desktop.apps.googleusercontent.com" });
+    assert.equal(connection.token, "token:desktop.apps.googleusercontent.com");
+    assert.equal(connection.user.emailAddress, "doctor@example.com");
+    assert.deepEqual(connection.remote, { hasBackup: false, sourceVersion: null, storage: null });
+  } finally { await context.close(); }
+});
+
 test("shared v2 is interoperable between web and desktop services and preserves UI/source ownership", async () => {
   const remote = new MemoryDrive();
   const web = await harness(library({ body: "from web" }), remote);
