@@ -39,6 +39,27 @@ const LEGACY_SECTION_LABELS = [
   "ĐIỂM CẦN NHỚ",
 ] as const;
 
+const LEGACY_FIRST_AID_STARTER_TEXT = [
+  "TỔNG QUAN",
+  "YẾU TỐ NGUY CƠ",
+  "CƠ CHẾ",
+  "LÂM SÀNG",
+  "CHẨN ĐOÁN",
+  "ĐIỀU TRỊ",
+  "PEARL",
+].join("\n");
+
+const LEGACY_FIRST_AID_STARTER_MARKERS = [
+  "Viết định nghĩa hoặc thông điệp cốt lõi tại đây.",
+  "Yếu tố có thể thay đổi",
+  "Yếu tố không thể thay đổi",
+  "Nguyên nhân → cơ chế trung gian → biểu hiện.",
+  "Triệu chứng, dấu hiệu và hình ảnh then chốt.",
+  "Xét nghiệm đầu tay → xác nhận → phân tầng.",
+  "Điều trị nền tảng, thuốc chính và theo dõi.",
+  "Điểm dễ nhầm hoặc mẹo nhớ.",
+] as const;
+
 export function uid(prefix = "fa-block") {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 }
@@ -218,7 +239,17 @@ export function firstAidToStandardRichText(html: string, plainText: string) {
   }).join("");
 }
 
+function isLegacyFirstAidStarterContent(html: string, plainText: string) {
+  const normalizedText = lines(plainText).join("\n");
+  return normalizedText === LEGACY_FIRST_AID_STARTER_TEXT
+    && LEGACY_FIRST_AID_STARTER_MARKERS.every((marker) => html.includes(marker));
+}
+
 export function regularTemplateRichText(html: string, plainText: string) {
+  // Old blank First Aid sheets were persisted with instructional starter text.
+  // Outside the First Aid template that content is not user data, so suppress it
+  // instead of leaking the template scaffolding onto ruled/grid/blank paper.
+  if (isLegacyFirstAidStarterContent(html, plainText)) return "";
   if (!hasFirstAidBlockSerialization(html)) return html;
   // Keep the payload as an invisible comment so switching back before editing
   // restores the exact block types. The regular editor removes it on its first
