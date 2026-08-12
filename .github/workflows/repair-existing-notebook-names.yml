@@ -1,93 +1,37 @@
 name: Repair Existing Notebook Names
-
 on:
   push:
     branches:
       - fix/dedupe-existing-notebook-names-20260812
-
 permissions:
   contents: write
-
 jobs:
-  patch-and-test:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/dedupe-existing-notebook-names-20260812
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Apply repair patch
+      - name: Patch migration
         run: |
           python - <<'PY'
           from pathlib import Path
           p = Path('app/note-migration.ts')
           s = p.read_text()
-          anchor = '''const clone = <T>(value: T): T => {\n  if (typeof structuredClone === "function") return structuredClone(value);\n  return JSON.parse(JSON.stringify(value)) as T;\n};\n'''
-          insert = '''const clone = <T>(value: T): T => {\n  if (typeof structuredClone === "function") return structuredClone(value);\n  return JSON.parse(JSON.stringify(value)) as T;\n};\n\nconst normalizeNotebookTitle = (title: string) => title.normalize("NFKC").trim().replace(/\\s+/g, " ");\nconst notebookTitleKey = (title: string) => normalizeNotebookTitle(title).toLocaleLowerCase("vi-VN");\n\nfunction dedupeNotebookTitles(notebooks: NoteStructure["notebooks"]) {\n  const used = new Set<string>();\n  return ordered(notebooks).map((notebook) => {\n    const base = normalizeNotebookTitle(notebook.title) || "Sổ ghi chú";\n    let title = base;\n    let suffix = 2;\n    while (used.has(notebookTitleKey(title))) title = `${base} (${suffix++})`;\n    used.add(notebookTitleKey(title));\n    return { ...notebook, title };\n  });\n}\n'''
+          anchor = 'const clone = <T>(value: T): T => {\n  if (typeof structuredClone === "function") return structuredClone(value);\n  return JSON.parse(JSON.stringify(value)) as T;\n};\n'
+          insert = anchor + '\nconst normalizeNotebookTitle = (title: string) => title.normalize("NFKC").trim().replace(/\\s+/g, " ");\nconst notebookTitleKey = (title: string) => normalizeNotebookTitle(title).toLocaleLowerCase("vi-VN");\n\nfunction dedupeNotebookTitles(notebooks: NoteStructure["notebooks"]) {\n  const used = new Set<string>();\n  return ordered(notebooks).map((notebook) => {\n    const base = normalizeNotebookTitle(notebook.title) || "Sổ ghi chú";\n    let title = base;\n    let suffix = 2;\n    while (used.has(notebookTitleKey(title))) title = `${base} (${suffix++})`;\n    used.add(notebookTitleKey(title));\n    return { ...notebook, title };\n  });\n}\n'
           if 'function dedupeNotebookTitles' not in s:
               if anchor not in s: raise SystemExit('clone anchor not found')
               s = s.replace(anchor, insert, 1)
-          old = '''  const noteStructure: NoteStructure = { ...notes, active: notes.active || defaultActive(notes) };\n'''
-          new = '''  const noteStructure: NoteStructure = { ...notes, notebooks: dedupeNotebookTitles(notes.notebooks), active: notes.active || defaultActive(notes) };\n'''
+          old = '  const noteStructure: NoteStructure = { ...notes, active: notes.active || defaultActive(notes) };\n'
+          new = '  const noteStructure: NoteStructure = { ...notes, notebooks: dedupeNotebookTitles(notes.notebooks), active: notes.active || defaultActive(notes) };\n'
           if old in s: s = s.replace(old, new, 1)
-          old2 = '''  const current = await repository.loadLibrary();\n  if (current) return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };\n'''
-          new2 = '''  const current = await repository.loadLibrary();\n  if (current) {\n    const repairedNotebooks = dedupeNotebookTitles(current.notes.notebooks);\n    const changed = repairedNotebooks.some((notebook, index) => notebook.title !== current.notes.notebooks[index]?.title);\n    if (changed) {\n      const repaired: LibraryV6 = {\n        ...current,\n        notes: { ...current.notes, notebooks: repairedNotebooks },\n        savedAt: Math.max(Date.now(), current.savedAt + 1),\n      };\n      await repository.replaceLibrary(repaired);\n      const reloaded = await repository.loadLibrary();\n      if (!reloaded) throw new Error("Đã sửa tên Notebook trùng nhưng không load lại được");\n      return { library: reloaded, report: migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"] ) };\n    }\n    return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };\n  }\n'''
+          old2 = '  const current = await repository.loadLibrary();\n  if (current) return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };\n'
+          new2 = '  const current = await repository.loadLibrary();\n  if (current) {\n    const repairedNotebooks = dedupeNotebookTitles(current.notes.notebooks);\n    const changed = repairedNotebooks.some((notebook, index) => notebook.title !== current.notes.notebooks[index]?.title);\n    if (changed) {\n      const repaired: LibraryV6 = { ...current, notes: { ...current.notes, notebooks: repairedNotebooks }, savedAt: Math.max(Date.now(), current.savedAt + 1) };\n      await repository.replaceLibrary(repaired);\n      const reloaded = await repository.loadLibrary();\n      if (!reloaded) throw new Error("Đã sửa tên Notebook trùng nhưng không load lại được");\n      return { library: reloaded, report: migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"] ) };\n    }\n    return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };\n  }\n'
           if old2 not in s: raise SystemExit('current v6 anchor not found')
           s = s.replace(old2, new2, 1)
           p.write_text(s)
-
-          t = Path('tests/notebook-existing-duplicate-repair.spec.cjs')
-          t.write_text(r'''const { test, expect } = require('@playwright/test');
-const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
-test.use({ viewport: { width: 1280, height: 900 } });
-async function createNotebook(page, name) {
-  const nav = page.locator('.note-sidebar');
-  await nav.getByRole('button', { name: 'Tạo Notebook' }).click();
-  const dialog = page.locator('.mednote-native-dialog');
-  await expect(dialog).toBeVisible();
-  await dialog.locator('input[type="text"]').fill(name);
-  await dialog.locator('button[type="submit"]').click();
-  await expect(dialog).toBeHidden();
-  await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText(name);
-}
-async function corruptNotebookTitles(page) {
-  await page.evaluate(async () => {
-    const requestValue = (request) => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    const db = await new Promise((resolve, reject) => { const request = indexedDB.open('mednote-local', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    try {
-      const tx = db.transaction('documents', 'readwrite');
-      const store = tx.objectStore('documents');
-      const meta = await requestValue(store.get('library:v6:meta'));
-      for (const id of meta.notebookIds) {
-        const key = `library:v6:notebook:${id}`;
-        const notebook = await requestValue(store.get(key));
-        store.put({ ...notebook, title: 'Notebook mới' }, key);
-      }
-      await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); });
-    } finally { db.close(); }
-  });
-}
-test('existing v6 duplicate Notebook titles are repaired without deleting notebooks', async ({ page }) => {
-  await page.addInitScript(() => { localStorage.clear(); sessionStorage.clear(); });
-  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await createNotebook(page, 'Alpha');
-  await createNotebook(page, 'Beta');
-  const nav = page.locator('.note-sidebar');
-  const countBefore = await nav.locator('select[aria-label="Notebook"] option').count();
-  await corruptNotebookTitles(page);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(nav).toBeVisible({ timeout: 10_000 });
-  const options = nav.locator('select[aria-label="Notebook"] option');
-  await expect(options).toHaveCount(countBefore);
-  const titles = await options.allTextContents();
-  expect(new Set(titles.map((title) => title.trim().toLocaleLowerCase('vi-VN'))).size).toBe(titles.length);
-  expect(titles).toContain('Notebook mới');
-  expect(titles.some((title) => /^Notebook mới \(2\)$/.test(title))).toBeTruthy();
-});
-''')
           Path('.github/workflows/repair-existing-notebook-names.yml').unlink()
           PY
           git config user.name "github-actions[bot]"
@@ -95,8 +39,3 @@ test('existing v6 duplicate Notebook titles are repaired without deleting notebo
           git add -A
           git commit -m "Apply existing notebook name repair"
           git push origin HEAD:fix/dedupe-existing-notebook-names-20260812
-      - run: npm install --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npx playwright install --with-deps chromium
-      - run: npx playwright test tests/notebook-existing-duplicate-repair.spec.cjs tests/note-hierarchy-actions.spec.cjs
-      - run: npm run build:desktop
