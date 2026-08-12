@@ -51,8 +51,24 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
 
   await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Sổ Nội tiết');
   await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Sổ Nội tiết');
+
+  // Notebook titles are globally unique after trimming, whitespace folding and
+  // case normalization. A duplicate create must leave the current notebook intact.
+  await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), '  sỔ   nỘI TIẾT  ');
+  await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Sổ Nội tiết' })).toHaveCount(1);
+  await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Sổ Nội tiết');
+
   nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Sổ Nội tiết');
+
+  // Rename collisions are blocked by the same invariant.
+  await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Sổ Tim mạch');
+  await nav.locator('select[aria-label="Notebook"]').selectOption({ label: 'Sổ Nội tiết' });
+  await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Sổ Nội tiết');
+  await nav.getByRole('button', { name: 'Thao tác Notebook' }).click();
+  await submitName(page, nav.getByRole('button', { name: 'Đổi tên Notebook' }), ' sỔ   TIM MẠCH ');
+  await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Sổ Nội tiết');
+  await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Sổ Tim mạch' })).toHaveCount(1);
 
   await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Nội tiết');
   await expect(nav.locator('.note-sidebar-section-open', { hasText: 'Nội tiết' })).toBeVisible();
