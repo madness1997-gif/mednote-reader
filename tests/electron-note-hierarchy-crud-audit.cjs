@@ -45,50 +45,59 @@ async function restart(app) {
   return { app: next, ...state };
 }
 
+async function ensureActivePageExpanded(nav, expectedSheetCount) {
+  const row = nav.locator('.note-sidebar-page.active');
+  const sheets = row.locator('.note-sidebar-sheet');
+  if (await sheets.count() < expectedSheetCount) {
+    const expand = row.getByRole('button', { name: 'Mở rộng Page' });
+    if (await expand.count()) await expand.click();
+  }
+  await expect(sheets).toHaveCount(expectedSheetCount, { timeout: 10_000 });
+  return sheets;
+}
+
 (async () => {
   let app = await launch();
   try {
     let { page, nav } = await ready(app);
 
-    // Notebook create + rename.
     await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Audit Notebook');
     await nav.getByRole('button', { name: 'Thao tác Notebook' }).click();
     await submitName(page, nav.getByRole('button', { name: 'Đổi tên Notebook' }), 'Audit Notebook Renamed');
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
 
-    // Section create + rename. createSection also creates one Page.
     await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Audit Section');
     await submitName(page, nav.getByRole('button', { name: 'Đổi tên Audit Section' }), 'Audit Section Renamed');
     await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Audit Section Renamed' })).toBeVisible();
 
-    // Page create + rename.
     await submitName(page, nav.getByRole('button', { name: 'Thêm Page' }), 'Audit Page');
     await submitName(page, nav.getByRole('button', { name: 'Đổi tên Audit Page' }), 'Audit Page Renamed');
     let pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
     await expect(pageRow).toBeVisible();
 
-    // Sheet create, reorder, delete. Sheet has no rename action in current UI.
+    // Sheet has create/reorder/delete but no rename control in current UI.
     await nav.getByRole('button', { name: 'Thêm tờ vào Audit Page Renamed' }).click();
     pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
     await expect(pageRow).toContainText('2 tờ');
-    await nav.locator('.note-sidebar-sheet').nth(1).getByRole('button', { name: 'Đưa tờ lên' }).click();
-    await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa tờ 2' }).click());
+    let sheets = await ensureActivePageExpanded(nav, 2);
+    await sheets.nth(1).getByRole('button', { name: 'Đưa tờ lên' }).click();
+    sheets = await ensureActivePageExpanded(nav, 2);
+    await acceptConfirm(page, () => sheets.nth(1).getByRole('button', { name: /Xóa tờ/ }).click());
     pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
     await expect(pageRow).toContainText('1 tờ');
+    await ensureActivePageExpanded(nav, 1);
 
-    // Restart must preserve creates/renames/sheet deletion.
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
     await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Audit Section Renamed' })).toBeVisible();
     await expect(nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' })).toContainText('1 tờ');
+    await ensureActivePageExpanded(nav, 1);
 
-    // Page delete and persistence.
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Audit Page Renamed' }).click());
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0);
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0);
 
-    // Create second section so deleting the audit section is allowed, then delete + restart.
     await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Section Keep');
     await nav.locator('.note-sidebar-section-open', { hasText: 'Audit Section Renamed' }).click();
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Audit Section Renamed' }).click());
@@ -97,7 +106,6 @@ async function restart(app) {
     await expect(nav.locator('.note-sidebar-section', { hasText: 'Audit Section Renamed' })).toHaveCount(0);
     await expect(nav.locator('.note-sidebar-section', { hasText: 'Section Keep' })).toBeVisible();
 
-    // Notebook delete + restart. Keep a second notebook so fallback is deterministic.
     await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Notebook Keep');
     await nav.locator('select[aria-label="Notebook"]').selectOption({ label: 'Audit Notebook Renamed' });
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
