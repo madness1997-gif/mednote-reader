@@ -1,4 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-12T10:10:00+07:00
-Base app commit: 26fab60912d108c734d0de1337dc927aad23fc31
-Reason: build newest Windows desktop from current main
+Requested: 2026-08-12T13:05:00+07:00
+Base app commit: a53f460580bbec0e7fc3c7d9970452d3b667f874
+Reason: build Windows desktop after FirstAidBlockEditor refactor
