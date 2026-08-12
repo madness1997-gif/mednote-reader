@@ -1,18 +1,18 @@
-export type NotebookIconStyle = {
+export type NotebookColorTokens = {
   background: string;
-  color: string;
-  boxShadow: string;
+  foreground: string;
+  border: string;
 };
 
 /**
  * Stable visual identity for a Notebook.
  *
- * The color is derived only from the durable Notebook ID, so every surface
- * (Library, sidebar, future navigation views) renders the same Notebook with
- * the same color even after rename or reorder. FNV-1a feeds several HSL
- * dimensions so large libraries are not limited to a short repeating palette.
+ * This is deliberately framework-agnostic: it returns semantic color tokens,
+ * not React/CSS style properties. The color is derived only from the durable
+ * Notebook ID, so every surface can render the same Notebook consistently
+ * after rename/reorder without persisting presentation state.
  */
-export function notebookIconStyle(notebookId: string): NotebookIconStyle {
+export function notebookColorTokens(notebookId: string): NotebookColorTokens {
   let hash = 0x811c9dc5;
   for (let index = 0; index < notebookId.length; index += 1) {
     hash ^= notebookId.charCodeAt(index);
@@ -26,7 +26,7 @@ export function notebookIconStyle(notebookId: string): NotebookIconStyle {
 
   return {
     background: `hsl(${hue} ${Math.max(34, saturation - 16)}% ${backgroundLightness}%)`,
-    color: `hsl(${hue} ${saturation}% ${foregroundLightness}%)`,
-    boxShadow: `inset 0 0 0 1px hsl(${hue} ${Math.max(28, saturation - 22)}% 84% / .72)`,
+    foreground: `hsl(${hue} ${saturation}% ${foregroundLightness}%)`,
+    border: `hsl(${hue} ${Math.max(28, saturation - 22)}% 84% / .72)`,
   };
 }

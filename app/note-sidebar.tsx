@@ -5,7 +5,7 @@ import {
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { NoteSidebarController } from "./note-sidebar-controller";
 import type { NoteSidebarModel } from "./note-sidebar-model";
-import { notebookIconStyle } from "./notebook-color";
+import { notebookIconStyle } from "./ui/notebook-color-style";
 import "./note-sidebar.css";
 
 type NoteSidebarProps = {

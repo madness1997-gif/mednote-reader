@@ -1,7 +1,7 @@
 import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import type { LibraryProjection } from "../library-projection";
-import { notebookIconStyle } from "../notebook-color";
+import { notebookIconStyle } from "./notebook-color-style";
 import "../library-panel.css";
 
 export type LibraryPanelProps = {
@@ -16,27 +16,6 @@ export type LibraryPanelProps = {
   onOpenNotebook: (notebookId: string) => void | Promise<unknown>;
   onRenameDocument: (contextId: string, name: string) => Promise<void>;
 };
-
-function notebookIconStyle(notebookId: string): CSSProperties {
-  // FNV-1a keeps the color tied to the durable Notebook ID, so rename/reorder
-  // never changes the notebook's visual identity. Using the full HSL space
-  // gives us hundreds of visibly distinct combinations instead of a short
-  // palette that begins repeating once a library grows large.
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < notebookId.length; index += 1) {
-    hash ^= notebookId.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  const hue = hash % 360;
-  const saturation = 56 + ((hash >>> 8) % 19);
-  const foregroundLightness = 30 + ((hash >>> 16) % 13);
-  const backgroundLightness = 92 + ((hash >>> 24) % 5);
-  return {
-    background: `hsl(${hue} ${Math.max(34, saturation - 16)}% ${backgroundLightness}%)`,
-    color: `hsl(${hue} ${saturation}% ${foregroundLightness}%)`,
-    boxShadow: `inset 0 0 0 1px hsl(${hue} ${Math.max(28, saturation - 22)}% 84% / .72)`,
-  };
-}
 
 export function LibraryPanel({
   activeDocumentContextId,
