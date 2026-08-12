@@ -7,6 +7,17 @@ on:
       - main
     paths:
       - .github/windows-build-trigger
+      - .github/workflows/windows.yml
+      - app/**
+      - electron/**
+      - src/**
+      - tests/**
+      - tests-unit/**
+      - package.json
+      - package-lock.json
+      - vite.desktop.config.ts
+      - vite.desktop-pdf-canvas-budget.ts
+      - vite.pdf-assets.ts
 
 permissions:
   contents: read
@@ -19,8 +30,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npm run dist:win
+      - run: npm ci --no-audit --no-fund
+      - name: Verify desktop source and runtime
+        run: |
+          npm run typecheck
+          npm run test:unit
+          npm run build:desktop
+          node tests/electron-smoke.cjs
+      - run: npx electron-builder --win nsis --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: MedNote-Reader-Windows

@@ -112,7 +112,9 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   const assetIdsKey = assetIds.join("|");
 
   const commit = useCallback((nextOrUpdater: FirstAidBlock[] | ((current: FirstAidBlock[]) => FirstAidBlock[])) => {
-    const next = typeof nextOrUpdater === "function" ? nextOrUpdater(blocksRef.current) : nextOrUpdater;
+    const current = blocksRef.current;
+    const next = typeof nextOrUpdater === "function" ? nextOrUpdater(current) : nextOrUpdater;
+    if (next === current) return;
     blocksRef.current = next;
     setBlocks(next);
     onChange(serializeBlocks(next), next.map(blockPlainText).filter(Boolean).join("\n\n"));

@@ -82,12 +82,17 @@ test("P8 Vite no longer patches sticker or First Aid editor models", async () =>
 });
 
 test("P8 First Aid keeps v4 serialization and canonical asset read-through", async () => {
-  const firstAid = await source("app/first-aid-block-editor.tsx");
-  assert.match(firstAid, /SERIALIZATION_VERSION = 4/);
-  assert.match(firstAid, /localBinaryStorage\.readAsset/);
-  assert.match(firstAid, /readLegacyAsset/);
-  assert.match(firstAid, /localBinaryStorage\.saveAsset/);
-  assert.doesNotMatch(firstAid, /mednote:first-aid-image-resize/);
+  const [model, imageService, view] = await Promise.all([
+    source("app/first-aid-block-model.ts"),
+    source("app/first-aid-image-service.ts"),
+    source("app/first-aid-block-editor-view.tsx"),
+  ]);
+  assert.match(model, /SERIALIZATION_VERSION = 4/);
+  assert.match(imageService, /localBinaryStorage\.readAsset/);
+  assert.match(imageService, /readLegacyAsset/);
+  assert.match(imageService, /localBinaryStorage\.saveAsset/);
+  assert.match(view, /if \(next === current\) return/);
+  assert.doesNotMatch(`${model}\n${imageService}\n${view}`, /mednote:first-aid-image-resize/);
 });
 
 test("P8 symbol and zoom shims no longer own global DOM state", async () => {

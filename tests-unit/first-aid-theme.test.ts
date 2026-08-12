@@ -37,7 +37,7 @@ test("First Aid variables travel with previews and standalone export HTML", () =
 });
 
 test("First Aid table shape controls are contextual instead of permanently occupying a row", async () => {
-  const editor = await readFile(new URL("app/first-aid-block-editor.tsx", root), "utf8");
+  const editor = await readFile(new URL("app/first-aid-block-editor-view.tsx", root), "utf8");
   const styles = await readFile(new URL("app/first-aid-block-editor.css", root), "utf8");
   assert.doesNotMatch(editor, /fa-table-actions/);
   assert.match(editor, /block\.type === "table" && renderTableToolbar\(block\)/);
