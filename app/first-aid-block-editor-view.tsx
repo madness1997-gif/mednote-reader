@@ -193,7 +193,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     const imageObjectId = blocksRef.current.find((block) => block.id === id)?.imageObjectId;
     commit((current) => {
       const next = current.filter((block) => block.id !== id);
-      return next.length ? next : [createBlock("label")];
+      return next;
     });
     if (imageObjectId) onRemoveImage(imageObjectId);
     setSelectedId(null);
@@ -242,7 +242,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
     replacement.id = id;
     if (type === "heading") replacement.title = seed || replacement.title;
     else if (type === "label" || type === "pearl" || type === "text" || type === "figure-text") replacement.text = seed || replacement.text;
-    else if (type === "flow") replacement.steps = lines(seed).length ? lines(seed) : [seed || "Bước 1"];
+    else if (type === "flow") replacement.steps = lines(seed).length ? lines(seed) : [seed];
     commit((latest) => latest.map((block) => block.id === id ? replacement : block));
     if (current.imageObjectId) onRemoveImage(current.imageObjectId);
   };
@@ -373,8 +373,8 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
       return <div className="fa-table-block"><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <BlockRichEditor key={`${rowIndex}-${columnIndex}`} editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`} className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"} html={block.rowsHtml?.[rowIndex]?.[columnIndex]} text={cell} editable={canEdit} ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`} onChange={(cellHtml, value) => updateTableCellRich(block, rowIndex, columnIndex, cellHtml, value)} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />))}</div></div>;
     }
     if (block.type === "flow") {
-      const steps = block.steps ?? ["Bước 1"];
-      return <div className="fa-flow-layout">{renderRichField(block, "label", "labelHtml", "fa-flow-label", "Nhãn diễn tiến", { placeholder: "CƠ CHẾ" })}<div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><BlockRichEditor editorId={`first-aid:${block.id}:step:${index}`} html={block.stepsHtml?.[index]} text={step} editable={canEdit} ariaLabel={`Bước ${index + 1}`} onChange={(stepHtml, value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item), stepsHtml: steps.map((item, itemIndex) => itemIndex === index ? stepHtml : block.stepsHtml?.[itemIndex] ?? plainTextToRichHtml(item)) })} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index), stepsHtml: block.stepsHtml?.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, `Bước ${steps.length + 1}`], stepsHtml: [...(block.stepsHtml ?? steps.map((step) => plainTextToRichHtml(step))), plainTextToRichHtml(`Bước ${steps.length + 1}`)] })}><Plus size={14} /> Thêm bước</button></div></div>;
+      const steps = block.steps ?? [""];
+      return <div className="fa-flow-layout">{renderRichField(block, "label", "labelHtml", "fa-flow-label", "Nhãn diễn tiến", { placeholder: "CƠ CHẾ" })}<div className="fa-flow-block">{steps.map((step, index) => <div className="fa-flow-item" key={`${block.id}-${index}`}><BlockRichEditor editorId={`first-aid:${block.id}:step:${index}`} html={block.stepsHtml?.[index]} text={step} editable={canEdit} ariaLabel={`Bước ${index + 1}`} onChange={(stepHtml, value) => updateBlock(block.id, { steps: steps.map((item, itemIndex) => itemIndex === index ? value : item), stepsHtml: steps.map((item, itemIndex) => itemIndex === index ? stepHtml : block.stepsHtml?.[itemIndex] ?? plainTextToRichHtml(item)) })} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />{canEdit && steps.length > 1 && <button onClick={() => updateBlock(block.id, { steps: steps.filter((_, itemIndex) => itemIndex !== index), stepsHtml: block.stepsHtml?.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`Xóa bước ${index + 1}`}><X size={13} /></button>}{index < steps.length - 1 && <span>↓</span>}</div>)}<button className="fa-add-step" disabled={!canEdit} onClick={() => updateBlock(block.id, { steps: [...steps, ""], stepsHtml: [...(block.stepsHtml ?? steps.map((step) => plainTextToRichHtml(step))), ""] })}><Plus size={14} /> Thêm bước</button></div></div>;
     }
     return <div className="fa-pearl-layout">{renderRichField(block, "label", "labelHtml", "fa-pearl-label", "Nhãn pearl", { placeholder: "HIGH-YIELD" })}{renderRichField(block, "text", "textHtml", "fa-pearl-text", "Nội dung pearl", { placeholder: "Điểm dễ nhầm hoặc mẹo nhớ…" })}</div>;
   };

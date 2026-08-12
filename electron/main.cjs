@@ -120,7 +120,7 @@ function oauthErrorMessage(error) {
     return "Google chưa cho tài khoản này dùng ứng dụng. Nếu OAuth đang ở chế độ Testing, hãy thêm đúng tài khoản vào Test users rồi kết nối lại.";
   }
   if (/client_secret.*missing|missing.*client_secret/i.test(message)) {
-    return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại MedNote, chọn Nhập tệp OAuth JSON hoặc nhập Client Secret rồi kết nối lại.";
+    return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại bảng Google Drive, nhập Client Secret cùng Desktop Client ID rồi kết nối lại.";
   }
   if (/redirect_uri_mismatch/i.test(message)) {
     return "OAuth Client ID không hỗ trợ địa chỉ callback của ứng dụng desktop. Hãy dùng Client ID loại Desktop app.";

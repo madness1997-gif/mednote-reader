@@ -9,6 +9,25 @@ import {
   serializeBlocks,
   stripFirstAidBlockMetadata,
 } from "../app/first-aid-block-model";
+import { createBlankPage } from "../app/note-runtime-adapter";
+
+test("new notes and empty First Aid editors never seed instructional content", () => {
+  const page = createBlankPage();
+  assert.equal(page.title, "GHI CHÚ 1");
+  assert.equal(page.body, "");
+  assert.equal(page.bodyHtml, "");
+  assert.deepEqual(parseBlocks("", ""), []);
+  assert.deepEqual(parseBlocks(serializeBlocks([]), ""), []);
+
+  for (const type of ["heading", "label", "text", "figure", "figure-text", "table", "flow", "pearl"] as const) {
+    const block = createBlock(type);
+    assert.equal(blockPlainValues(block).join(""), "");
+  }
+});
+
+function blockPlainValues(block: ReturnType<typeof createBlock>) {
+  return [block.title, block.label, block.text, block.caption, ...(block.rows?.flat() ?? []), ...(block.steps ?? [])].filter((value): value is string => typeof value === "string");
+}
 
 test("leaving First Aid removes block rendering while preserving ordered content", () => {
   const heading = { ...createBlock("heading"), title: "SUY GIÁP", titleHtml: "<b>SUY GIÁP</b>" };
@@ -58,6 +77,7 @@ test("paper template transition owns the First Aid to rich-text conversion", asy
   ]);
   assert.match(page, /activeNote\.paper\.template === "first-aid"/);
   assert.match(page, /regularTemplateRichText\(activeNote\.bodyHtml \?\? "", activeNote\.body\)/);
+  assert.doesNotMatch(page, /FIRST_AID_TEMPLATE_(?:HTML|TEXT)|shouldSeed|TÊN CHỦ ĐỀ/);
   assert.match(stage, /regularTemplateRichText/);
   assert.match(stage, /stripFirstAidBlockMetadata/);
   assert.match(preview, /regularTemplateRichText/);

@@ -66,14 +66,14 @@ export function uid(prefix = "fa-block") {
 
 export function createBlock(type: BlockType): FirstAidBlock {
   switch (type) {
-    case "heading": return { id: uid(), type, title: "TIÊU ĐỀ MỤC" };
-    case "label": return { id: uid(), type, label: "NHÃN", text: "Nhập nội dung…" };
-    case "text": return { id: uid(), type, text: "Nhập nội dung…", textStyle: "bullets" };
-    case "figure": return { id: uid(), type, caption: "Nhập chú thích hình…" };
-    case "figure-text": return { id: uid(), type, text: "Nhập nội dung liên quan đến hình…", caption: "Chú thích", imageSide: "left" };
-    case "table": return { id: uid(), type, rows: [["Tiêu đề 1", "Tiêu đề 2"], ["Nội dung", "Nội dung"]] };
-    case "flow": return { id: uid(), type, label: "CƠ CHẾ", steps: ["Bước 1", "Bước 2", "Bước 3"] };
-    case "pearl": return { id: uid(), type, label: "HIGH-YIELD", text: "Điểm dễ nhầm hoặc mẹo nhớ." };
+    case "heading": return { id: uid(), type, title: "" };
+    case "label": return { id: uid(), type, label: "", text: "" };
+    case "text": return { id: uid(), type, text: "", textStyle: "paragraph" };
+    case "figure": return { id: uid(), type, caption: "" };
+    case "figure-text": return { id: uid(), type, text: "", caption: "", imageSide: "left" };
+    case "table": return { id: uid(), type, rows: [["", ""], ["", ""]] };
+    case "flow": return { id: uid(), type, label: "", steps: [""] };
+    case "pearl": return { id: uid(), type, label: "", text: "" };
   }
 }
 
@@ -287,7 +287,7 @@ export function parseBlocks(html: string, plainText: string): FirstAidBlock[] {
   if (payload) {
     try {
       const parsed = decodePayload<{ version: number; blocks: FirstAidBlock[] }>(payload);
-      if (Array.isArray(parsed.blocks) && parsed.blocks.length) return recoverLegacySections(parsed.blocks);
+      if (Array.isArray(parsed.blocks)) return recoverLegacySections(parsed.blocks);
     } catch {
       // Fall through to legacy conversion.
     }
@@ -303,5 +303,5 @@ export function parseBlocks(html: string, plainText: string): FirstAidBlock[] {
   }
   const paragraphs = plainText.split(/\n{2,}/).map((text) => text.trim()).filter(Boolean);
   if (paragraphs.length) return recoverLegacySections(paragraphs.map((text) => ({ ...createBlock("text"), text, textStyle: "paragraph" })));
-  return [createBlock("heading"), createBlock("label"), createBlock("label"), createBlock("pearl")];
+  return [];
 }

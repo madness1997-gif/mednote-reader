@@ -1,7 +1,6 @@
-import { CloudOff, DownloadCloud, FileKey2, RefreshCw, UploadCloud, X } from "lucide-react";
-import { useRef, type Dispatch, type SetStateAction } from "react";
+import { CloudOff, DownloadCloud, RefreshCw, UploadCloud, X } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import type { DriveAccount } from "../drive-sync-service";
-import { MAX_DESKTOP_OAUTH_CONFIG_BYTES, parseDesktopOAuthConfig } from "../google-oauth-config";
 
 type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "error";
 
@@ -28,19 +27,6 @@ export type DrivePanelScope = {
 
 export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
   const { IS_DESKTOP_APP, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
-  const oauthConfigInputRef = useRef<HTMLInputElement>(null);
-
-  const importDesktopOAuthConfig = async (file: File) => {
-    try {
-      if (file.size > MAX_DESKTOP_OAUTH_CONFIG_BYTES) throw new Error("Tệp OAuth JSON quá lớn");
-      const config = parseDesktopOAuthConfig(await file.text());
-      setDesktopGoogleClientId(config.clientId);
-      setDesktopGoogleClientSecret(config.clientSecret);
-      setDriveError(null);
-    } catch (error) {
-      setDriveError(error instanceof Error ? error.message : "Không thể đọc tệp OAuth JSON");
-    }
-  };
 
   return (<><aside className="drive-panel" aria-label="Google Drive">
           <div className="drive-panel-header">
@@ -71,17 +57,8 @@ export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
               <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
               <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
               {IS_DESKTOP_APP && driveStatus !== "connecting" && <>
-                <div className="drive-oauth-import">
-                  <input ref={oauthConfigInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => {
-                    const input = event.currentTarget;
-                    const file = input.files?.[0];
-                    if (file) void importDesktopOAuthConfig(file).finally(() => { input.value = ""; });
-                  }} />
-                  <button type="button" onClick={() => oauthConfigInputRef.current?.click()}><FileKey2 size={15} />Nhập tệp OAuth JSON</button>
-                  <small>Tự lấy Client ID và Client Secret; tệp chỉ được đọc trên thiết bị này.</small>
-                </div>
                 <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
-                <label className="drive-client-id"><span>Client Secret (nếu tệp JSON có)</span><input type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Chỉ được lưu mã hóa sau khi kết nối thành công.</small></label>
+                <label className="drive-client-id"><span>Client Secret (Desktop)</span><input type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
               </>}
               {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
             </div>

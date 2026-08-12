@@ -9,17 +9,19 @@ MedNote Windows dùng OAuth 2.0 cho ứng dụng cài đặt và mở đăng nh�
 3. Vào **APIs & Services → OAuth consent screen**. Nếu ứng dụng còn ở chế độ Testing, thêm tài khoản Google của bạn vào **Test users**.
 4. Vào **Credentials → Create credentials → OAuth client ID**.
 5. Chọn **Desktop app**, đặt tên `MedNote Windows`, rồi tạo.
-6. Bấm tải tệp JSON của client vừa tạo.
+6. Bấm tải tệp JSON của client vừa tạo, rồi mở tệp bằng trình soạn thảo văn bản.
 
 ## 2. Kết nối trong MedNote
 
 1. Cài và mở **MedNote Reader**.
 2. Bấm **Kết nối Drive**.
-3. Chọn **Nhập tệp OAuth JSON** và chọn đúng tệp vừa tải. MedNote tự đọc `client_id` và `client_secret`, sau đó bấm **Kết nối**.
-4. Trình duyệt mặc định của Windows sẽ mở. Chọn tài khoản Google và cấp quyền.
-5. Quay lại MedNote, chọn **Lưu bản này lên Drive** hoặc **Tải bản từ Drive** khi ứng dụng hỏi cách xử lý dữ liệu đã có.
+3. Sao chép `installed.client_id` trong tệp JSON vào ô **OAuth Client ID (Desktop)**.
+4. Sao chép `installed.client_secret` vào ô **Client Secret (Desktop)**. Nếu tệp không có trường này thì để trống.
+5. Bấm **Kết nối**.
+6. Trình duyệt mặc định của Windows sẽ mở. Chọn tài khoản Google và cấp quyền.
+7. Quay lại MedNote, chọn **Lưu bản này lên Drive** hoặc **Tải bản từ Drive** khi ứng dụng hỏi cách xử lý dữ liệu đã có.
 
-Nếu trình duyệt quay về `127.0.0.1` nhưng báo `client_secret is missing`, OAuth Desktop của bạn yêu cầu Secret: tải tệp JSON của client đó và nhập giá trị `installed.client_secret`. Các lỗi thường gặp khác là dán nhầm Web Client ID thay vì Client ID loại **Desktop app**, hoặc VPN/proxy/tường lửa chặn kết nối từ ứng dụng tới máy chủ Google.
+Nếu trình duyệt quay về `127.0.0.1` nhưng báo `client_secret is missing`, quay lại MedNote và nhập đúng `installed.client_secret` cùng Client ID của chính tệp đó. Các lỗi thường gặp khác là dán nhầm Web Client ID thay vì Client ID loại **Desktop app**, hoặc VPN/proxy/tường lửa chặn kết nối từ ứng dụng tới máy chủ Google.
 
 Client ID là định danh công khai và được lưu cục bộ trên máy. Client Secret (nếu có) và refresh token được mã hóa bằng cơ chế bảo vệ thông tin đăng nhập của Windows; ứng dụng không ghi Secret vào mã nguồn hoặc `localStorage`.
 

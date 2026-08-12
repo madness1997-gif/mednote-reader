@@ -147,7 +147,7 @@ test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
     assert.doesNotMatch(source, /page\.titleHtml \?/);
     assert.doesNotMatch(source, /titleHtml: pageTitle/);
   }
-  assert.match(page, /noteStore\.renamePage\(activeLogicalPage\.id, "TÊN CHỦ ĐỀ"\)/);
+  assert.doesNotMatch(page, /noteStore\.renamePage\(activeLogicalPage\.id, "TÊN CHỦ ĐỀ"\)/);
   assert.match(editor, /PAGE_TITLE_DEBOUNCE_MS = 280/);
   assert.match(editor, /noteStore\.renamePage\(targetPageId, nextTitle\)/);
 });

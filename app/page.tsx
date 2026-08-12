@@ -98,8 +98,8 @@ import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered } from "./note-domain";
 import {
-  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_PAPER, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
-  FIRST_AID_TEMPLATE_HTML, FIRST_AID_TEMPLATE_TEXT, createBlankPage, defaultExcerptLayout, escapeHtml,
+  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
+  createBlankPage, defaultExcerptLayout, escapeHtml,
   normalizeExcerptAppearance, normalizeText,
   notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml,
   type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt, type Notebook,
@@ -397,45 +397,7 @@ const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof 
   { id: "signature", label: "Đặt chữ ký lên PDF", shortLabel: "Chữ ký", icon: Signature },
 ];
 
-const starterStrokes: Stroke[] = [
-  {
-    id: "starter-red-underline",
-    tool: "pen",
-    color: "#c94b50",
-    width: 2.4,
-    points: Array.from({ length: 18 }, (_, index) => ({
-      x: 0.19 + index * 0.035,
-      y: 0.135 + Math.sin(index / 2.6) * 0.002,
-      pressure: 0.55,
-    })),
-  },
-  {
-    id: "starter-blue-note",
-    tool: "pen",
-    color: "#2465a8",
-    width: 2.2,
-    points: [
-      { x: 0.7, y: 0.55, pressure: 0.5 },
-      { x: 0.75, y: 0.54, pressure: 0.5 },
-      { x: 0.79, y: 0.56, pressure: 0.5 },
-      { x: 0.83, y: 0.53, pressure: 0.5 },
-    ],
-  },
-];
-
-const initialPages: NotePage[] = [
-  {
-    id: "note-1",
-    title: "BỆNH THẦN KINH ĐÁI THÁO ĐƯỜNG",
-    body:
-      "CƠ CHẾ BỆNH SINH\n\n• Tăng đường huyết mạn tính.\n• Hoạt hóa con đường polyol → tích lũy sorbitol.\n• Sản phẩm glycat hóa nâng cao (AGEs) → tổn thương thần kinh.\n• Stress oxy hóa → tổn thương ty thể và tế bào Schwann.\n• Thiếu máu vi mạch nuôi thần kinh.\n\nĐIỂM CẦN NHỚ\n\n• Thần kinh ngoại biên thường gặp nhất: đa dây thần kinh đối xứng.\n• Biểu hiện: tê bì, kiến bò, đau rát, giảm cảm giác.\n• Đánh giá: monofilament 10 g, âm thoa 128 Hz.\n• Điều trị: kiểm soát đường huyết, giảm đau và chăm sóc bàn chân.",
-    citationPage: 126,
-    strokes: starterStrokes,
-    paper: DEFAULT_PAPER,
-    text: DEFAULT_TEXT,
-    excerpts: [],
-  },
-];
+const initialPages: NotePage[] = [createBlankPage()];
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -2315,23 +2277,12 @@ export default function Home() {
       setToast(leavingFirstAid ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
       return;
     }
-    const shouldSeed = !activeNote.body.trim() && !activeNote.excerpts.length;
-    const replaceDefaultTitle = /^GHI CHÚ(?:\s+\d+)?$/i.test(activeNote.title.trim());
     updateActiveNote({
       paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
       text: { ...activeNote.text, font: "times", size: 12, align: "left" },
-      ...(shouldSeed ? {
-        bodyHtml: FIRST_AID_TEMPLATE_HTML,
-        body: FIRST_AID_TEMPLATE_TEXT,
-      } : {}),
     });
-    if (shouldSeed && replaceDefaultTitle && activeLogicalPage?.id) {
-      void noteStore.renamePage(activeLogicalPage.id, "TÊN CHỦ ĐỀ").catch((error) => {
-        setToast(error instanceof Error ? error.message : "Không thể đổi tên Page");
-      });
-    }
     setActiveTool("text");
-    setToast(shouldSeed ? "Đã tạo khung note First Aid để điền nội dung" : "Đã áp dụng bố cục First Aid");
+    setToast("Đã áp dụng bố cục First Aid");
   };
 
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
