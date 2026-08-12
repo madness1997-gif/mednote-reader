@@ -36,6 +36,25 @@ export class NoteCommands {
     return { structure, active: structure.active };
   }
 
+  private normalizeNotebookTitle(title: string) {
+    return title.normalize("NFKC").trim().replace(/\s+/g, " ");
+  }
+
+  private notebookTitleKey(title: string) {
+    return this.normalizeNotebookTitle(title).toLocaleLowerCase("vi-VN");
+  }
+
+  private assertUniqueNotebookTitle(structure: NoteStructure, title: string, exceptNotebookId?: string) {
+    const normalizedTitle = this.normalizeNotebookTitle(title);
+    if (!normalizedTitle) throw new Error("Tên Notebook không được để trống");
+    const key = this.notebookTitleKey(normalizedTitle);
+    const duplicate = structure.notebooks.find(
+      (notebook) => notebook.id !== exceptNotebookId && this.notebookTitleKey(notebook.title) === key,
+    );
+    if (duplicate) throw new Error(`Notebook \"${normalizedTitle}\" đã tồn tại`);
+    return normalizedTitle;
+  }
+
   async flush() {
     await this.queue;
     await this.repository.flush();
@@ -43,7 +62,10 @@ export class NoteCommands {
 
   createNotebook(title: string, content: SheetContent = {}) {
     return this.enqueue(async () => {
-      await this.repository.createNotebook({ title, content });
+      const structure = await this.repository.loadNoteStructure();
+      if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
+      const normalizedTitle = this.assertUniqueNotebookTitle(structure, title);
+      await this.repository.createNotebook({ title: normalizedTitle, content });
       return this.committedResult();
     });
   }
@@ -71,7 +93,13 @@ export class NoteCommands {
 
   renameNotebook(id: string, title: string) {
     return this.enqueue(async () => {
-      await this.repository.renameNotebook(id, title);
+      const structure = await this.repository.loadNoteStructure();
+      if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
+      if (!structure.notebooks.some((notebook) => notebook.id === id)) {
+        throw new Error(`Không tìm thấy Notebook ${id}`);
+      }
+      const normalizedTitle = this.assertUniqueNotebookTitle(structure, title, id);
+      await this.repository.renameNotebook(id, normalizedTitle);
       return this.committedResult();
     });
   }
