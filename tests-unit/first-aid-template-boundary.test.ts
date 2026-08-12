@@ -29,6 +29,27 @@ test("leaving First Aid removes block rendering while preserving ordered content
   assert.equal(regularTemplateRichText("<div>Ghi chú thường</div>", "fallback"), "<div>Ghi chú thường</div>");
 });
 
+test("legacy untouched First Aid starter text stays off regular paper", () => {
+  const starterText = "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL";
+  const starterHtml = [
+    "<table>",
+    "<tr><th>TỔNG QUAN</th><td>Viết định nghĩa hoặc thông điệp cốt lõi tại đây.</td></tr>",
+    "<tr><th>YẾU TỐ NGUY CƠ</th><td>Yếu tố có thể thay đổi<br>Yếu tố không thể thay đổi</td></tr>",
+    "<tr><th>CƠ CHẾ</th><td>Nguyên nhân → cơ chế trung gian → biểu hiện.</td></tr>",
+    "<tr><th>LÂM SÀNG</th><td>Triệu chứng, dấu hiệu và hình ảnh then chốt.</td></tr>",
+    "<tr><th>CHẨN ĐOÁN</th><td>Xét nghiệm đầu tay → xác nhận → phân tầng.</td></tr>",
+    "<tr><th>ĐIỀU TRỊ</th><td>Điều trị nền tảng, thuốc chính và theo dõi.</td></tr>",
+    "<tr><th>PEARL</th><td>Điểm dễ nhầm hoặc mẹo nhớ.</td></tr>",
+    "</table>",
+  ].join("");
+
+  assert.equal(regularTemplateRichText(starterHtml, starterText), "");
+  assert.equal(
+    regularTemplateRichText(starterHtml, `${starterText}\nNội dung người dùng`),
+    starterHtml,
+  );
+});
+
 test("paper template transition owns the First Aid to rich-text conversion", async () => {
   const [page, stage, preview] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
