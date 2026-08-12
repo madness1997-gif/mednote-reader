@@ -10,6 +10,7 @@ async function launch() {
   application.process().stderr?.on('data', (chunk) => process.stderr.write(chunk));
   return application;
 }
+
 async function ready(app) {
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
@@ -17,6 +18,7 @@ async function ready(app) {
   await expect(nav).toBeVisible({ timeout: 20_000 });
   return { page, nav };
 }
+
 async function submitName(page, trigger, value) {
   await trigger.click();
   const dialog = page.locator('.mednote-native-dialog');
@@ -26,17 +28,25 @@ async function submitName(page, trigger, value) {
   await expect(dialog).toBeHidden();
   await expect(page.locator('.note-sidebar')).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
 }
+
 async function acceptConfirm(page, action) {
-  page.once('dialog', async (dialog) => { await dialog.accept(); });
+  page.once('dialog', async (dialog) => {
+    if (dialog.type() !== 'confirm') throw new Error(`Expected confirm, got ${dialog.type()}`);
+    await dialog.accept();
+  });
   await action();
   await expect(page.locator('.note-sidebar')).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
 }
+
 async function restart(app) {
   await app.close();
   const next = await launch();
-  return { app: next, ...(await ready(next)) };
+  const state = await ready(next);
+  return { app: next, ...state };
 }
-async function ensurePageExpanded(row, expectedSheetCount) {
+
+async function ensureActivePageExpanded(nav, expectedSheetCount) {
+  const row = nav.locator('.note-sidebar-page.active');
   const sheets = row.locator('.note-sidebar-sheet');
   if (await sheets.count() < expectedSheetCount) {
     const expand = row.getByRole('button', { name: 'Mở rộng Page' });
@@ -62,31 +72,29 @@ async function ensurePageExpanded(row, expectedSheetCount) {
 
     await submitName(page, nav.getByRole('button', { name: 'Thêm Page' }), 'Audit Page');
     await submitName(page, nav.getByRole('button', { name: 'Đổi tên Audit Page' }), 'Audit Page Renamed');
-    let row = nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' });
-    await expect(row).toBeVisible();
+    let pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
+    await expect(pageRow).toBeVisible();
 
+    // New Sheet becomes active. Deleting it must stay in this Page and select
+    // the remaining sibling, rather than jumping to the first Sheet globally.
     await nav.getByRole('button', { name: 'Thêm tờ vào Audit Page Renamed' }).click();
-    row = nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' });
-    await expect(row).toContainText('2 tờ');
-    let sheets = await ensurePageExpanded(row, 2);
-    await sheets.nth(1).getByRole('button', { name: 'Đưa tờ lên' }).click();
-    sheets = await ensurePageExpanded(row, 2);
-    await acceptConfirm(page, () => sheets.nth(1).getByRole('button', { name: /Xóa tờ/ }).click());
-    row = nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' });
-    await expect(row).toContainText('1 tờ');
-    if (!(await row.evaluate((el) => el.classList.contains('active')))) {
-      process.stdout.write('BUG: deleting a non-active Sheet clears active Page context\n');
-    }
+    pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
+    await expect(pageRow).toContainText('2 tờ');
+    let sheets = await ensureActivePageExpanded(nav, 2);
+    await expect(sheets.filter({ has: page.locator('button.note-sidebar-sheet-open') })).toHaveCount(2);
+    const activeSheet = pageRow.locator('.note-sidebar-sheet.active');
+    await expect(activeSheet).toHaveCount(1);
+    await acceptConfirm(page, () => activeSheet.getByRole('button', { name: /Xóa tờ/ }).click());
+    pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
+    await expect(pageRow).toContainText('1 tờ');
+    sheets = await ensureActivePageExpanded(nav, 1);
+    await expect(sheets.locator('.note-sidebar-sheet-open')).toHaveCount(1);
 
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
-    await expect(nav.locator('.note-sidebar-section', { hasText: 'Audit Section Renamed' })).toBeVisible();
-    row = nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' });
-    await expect(row).toContainText('1 tờ');
-    if (!(await row.evaluate((el) => el.classList.contains('active')))) {
-      process.stdout.write('BUG_PERSISTED: active Page context is wrong after restart\n');
-      await row.locator('.note-sidebar-page-open').click();
-    }
+    await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Audit Section Renamed' })).toBeVisible();
+    await expect(nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' })).toContainText('1 tờ');
+    await ensureActivePageExpanded(nav, 1);
 
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Audit Page Renamed' }).click());
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0);
@@ -112,8 +120,11 @@ async function ensurePageExpanded(row, expectedSheetCount) {
     await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Audit Notebook Renamed' })).toHaveCount(0);
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Notebook Keep');
 
-    process.stdout.write('Desktop Notebook/Section/Page/Sheet CRUD persistence audit passed\n');
+    process.stdout.write('Desktop Notebook/Section/Page/Sheet CRUD lifecycle audit passed\n');
   } finally {
-    try { await app.close(); } catch {}
+    try { await app.close(); } catch { /* already closed */ }
   }
-})().catch((error) => { console.error(error); process.exitCode = 1; });
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
