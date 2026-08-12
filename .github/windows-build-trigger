@@ -1,4 +1,4 @@
 Build Windows from latest main app source.
-Requested: 2026-08-10T17:09:48+07:00
-Base app commit: the main commit containing this trigger
-Reason: release desktop 1.2.10 with PDF outline default and fully collapsible note sidebar
+Requested: 2026-08-12T10:10:00+07:00
+Base app commit: 26fab60912d108c734d0de1337dc927aad23fc31
+Reason: build newest Windows desktop from current main
