@@ -172,6 +172,14 @@ export function hasFirstAidBlockSerialization(html: string) {
   return /data-mednote-first-aid-rendered|<!--\s*mednote-first-aid:/i.test(html);
 }
 
+function firstAidPayloadComment(html: string) {
+  return html.match(/<!--\s*mednote-first-aid:[A-Za-z0-9+/=]+\s*-->/i)?.[0] ?? "";
+}
+
+export function stripFirstAidBlockMetadata(html: string) {
+  return html.replace(/<!--\s*mednote-first-aid:[A-Za-z0-9+/=]+\s*-->/gi, "");
+}
+
 /**
  * First Aid stores a styled, static rendering beside its block payload. That
  * rendering must not leak into the regular rich-text editor when the user
@@ -211,7 +219,11 @@ export function firstAidToStandardRichText(html: string, plainText: string) {
 }
 
 export function regularTemplateRichText(html: string, plainText: string) {
-  return hasFirstAidBlockSerialization(html) ? firstAidToStandardRichText(html, plainText) : html;
+  if (!hasFirstAidBlockSerialization(html)) return html;
+  // Keep the payload as an invisible comment so switching back before editing
+  // restores the exact block types. The regular editor removes it on its first
+  // real change, preventing stale block data from overriding new text.
+  return `${firstAidToStandardRichText(html, plainText)}${firstAidPayloadComment(html)}`;
 }
 
 function splitLegacySection(value = "") {

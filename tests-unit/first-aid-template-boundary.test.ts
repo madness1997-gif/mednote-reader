@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   createBlock,
   firstAidToStandardRichText,
+  parseBlocks,
   regularTemplateRichText,
   serializeBlocks,
+  stripFirstAidBlockMetadata,
 } from "../app/first-aid-block-model";
 
 test("leaving First Aid removes block rendering while preserving ordered content", () => {
@@ -20,7 +22,10 @@ test("leaving First Aid removes block rendering while preserving ordered content
   assert.match(standard, /ĐIỀU TRỊ/);
   assert.match(standard, /<i>Levothyroxine<\/i>/);
   assert.ok(standard.indexOf("SUY GIÁP") < standard.indexOf("ĐIỀU TRỊ"));
-  assert.equal(regularTemplateRichText(serialized, "fallback"), standard);
+  const regular = regularTemplateRichText(serialized, "fallback");
+  assert.match(regular, /<!--mednote-first-aid:/);
+  assert.equal(stripFirstAidBlockMetadata(regular), standard);
+  assert.deepEqual(parseBlocks(regular, "fallback").map((block) => block.type), ["heading", "label"]);
   assert.equal(regularTemplateRichText("<div>Ghi chú thường</div>", "fallback"), "<div>Ghi chú thường</div>");
 });
 
@@ -31,8 +36,9 @@ test("paper template transition owns the First Aid to rich-text conversion", asy
     readFile(new URL("../app/ui/note-sheet-preview.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(page, /activeNote\.paper\.template === "first-aid"/);
-  assert.match(page, /firstAidToStandardRichText\(activeNote\.bodyHtml \?\? "", activeNote\.body\)/);
+  assert.match(page, /regularTemplateRichText\(activeNote\.bodyHtml \?\? "", activeNote\.body\)/);
   assert.match(stage, /regularTemplateRichText/);
+  assert.match(stage, /stripFirstAidBlockMetadata/);
   assert.match(preview, /regularTemplateRichText/);
 });
 
