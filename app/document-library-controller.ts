@@ -14,6 +14,7 @@ import {
   type WorkspaceItem,
   type WorkspaceMode,
 } from "./document-runtime-adapter";
+import { stableHash } from "./stable-id";
 
 export type DocumentNoteDestination =
   | { mode: "none" }
@@ -90,15 +91,6 @@ export type DocumentLibraryControllerDependencies = {
   now?: () => number;
   random?: () => number;
 };
-
-function stableId(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Math.abs(hash >>> 0).toString(36);
-}
 
 export class DocumentLibraryController {
   private ready = false;
@@ -185,10 +177,10 @@ export class DocumentLibraryController {
   findExistingPdfWorkspace(files: File[], workspaces: WorkspaceItem[]) {
     const pdfs = files.filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
     if (!pdfs.length) return undefined;
-    const documentIds = pdfs.map((file) => `doc-${stableId(`${file.name}:${file.size}:${file.lastModified}`)}`);
+    const documentIds = pdfs.map((file) => `doc-${stableHash(`${file.name}:${file.size}:${file.lastModified}`)}`);
     const workspaceId = pdfs.length === 1
       ? `workspace-${documentIds[0]}`
-      : `collection-${stableId(documentIds.sort().join(":"))}`;
+      : `collection-${stableHash(documentIds.sort().join(":"))}`;
     return workspaces.find((workspace) => workspace.id === workspaceId);
   }
 
@@ -227,7 +219,7 @@ export class DocumentLibraryController {
     const sessionToken = this.sessionId();
     const documents: LibraryDocument[] = files.map((file, index) => ({
       id: input.saveToLibrary
-        ? `doc-${stableId(`${file.name}:${file.size}:${file.lastModified}`)}`
+        ? `doc-${stableHash(`${file.name}:${file.size}:${file.lastModified}`)}`
         : `temp-doc-${sessionToken}-${index}`,
       name: file.name,
       size: file.size,
@@ -237,7 +229,7 @@ export class DocumentLibraryController {
     const workspaceId = input.saveToLibrary
       ? files.length === 1
         ? `workspace-${documents[0].id}`
-        : `collection-${stableId(documents.map((document) => document.id).sort().join(":"))}`
+        : `collection-${stableHash(documents.map((document) => document.id).sort().join(":"))}`
       : `temporary-${sessionToken}`;
     const existing = input.saveToLibrary ? input.workspaces.find((workspace) => workspace.id === workspaceId) : undefined;
     if (existing) {
@@ -334,12 +326,12 @@ export class DocumentLibraryController {
     const pendingNoteTarget = this.temporaryNoteTargets.get(temporary.id);
     const documents = temporary.documents.map((document) => ({
       ...document,
-      id: `doc-${stableId(`${document.name}:${document.size}:${document.lastModified}`)}`,
+      id: `doc-${stableHash(`${document.name}:${document.size}:${document.lastModified}`)}`,
     }));
     const idMap = new Map(temporary.documents.map((document, index) => [document.id, documents[index].id]));
     const workspaceId = documents.length === 1
       ? `workspace-${documents[0].id}`
-      : `collection-${stableId(documents.map((document) => document.id).sort().join(":"))}`;
+      : `collection-${stableHash(documents.map((document) => document.id).sort().join(":"))}`;
     const existing = input.workspaces.find((workspace) => workspace.id === workspaceId);
     if (existing) {
       const reconnectTarget = pendingNoteTarget

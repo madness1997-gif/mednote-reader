@@ -530,8 +530,6 @@ export default function Home() {
   const [toast, setToast] = useState("Đã tự lưu");
   const [ready, setReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
-  const [renamingWorkspaceName, setRenamingWorkspaceName] = useState("");
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [showNoteSidebar, setShowNoteSidebar] = useState(() => {
     try { return localStorage.getItem("mednote-note-sidebar-v6-hidden") !== "1"; } catch { return true; }
@@ -2172,14 +2170,27 @@ export default function Home() {
     }
   };
 
-  const beginWorkspaceRename = (workspace: WorkspaceItem) => {
-    setRenamingWorkspaceId(workspace.id);
-    setRenamingWorkspaceName(workspace.name);
-  };
-
-  const cancelWorkspaceRename = () => {
-    setRenamingWorkspaceId(null);
-    setRenamingWorkspaceName("");
+  const openLibraryDocument = async (workspaceId: string) => {
+    const item = libraryProjection.documents.find((document) => document.id === workspaceId);
+    const workspace = workspacesRef.current.find((candidate) => candidate.id === workspaceId);
+    if (!item || !workspace) {
+      setToast("Document runtime chưa sẵn sàng");
+      return;
+    }
+    try {
+      const currentNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || null;
+      const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
+        ? currentNotebookId
+        : item.linkedNotebookIds[0] || null;
+      if (linkedNotebookId) await noteStore.openNotebook(linkedNotebookId);
+      activeWorkspaceIdRef.current = workspace.id;
+      setActiveWorkspaceId(workspace.id);
+      workspaceModeRef.current = "reader";
+      setWorkspaceMode("reader");
+      setLibraryOpen(false);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Không thể mở tài liệu");
+    }
   };
 
   const applyDocumentMutation = (result: DocumentMutationResult) => {
@@ -2197,11 +2208,11 @@ export default function Home() {
     if (result.message) setToast(result.message);
   };
 
-  const commitWorkspaceRename = async (workspaceId: string) => {
+  const renameLibraryDocument = async (workspaceId: string, name: string) => {
     try {
       const result = await documentLibrary.renameWorkspace({
         workspaceId,
-        name: renamingWorkspaceName,
+        name,
         workspaces: workspacesRef.current,
         activeWorkspaceId: activeWorkspaceIdRef.current,
         readerShare,
@@ -2209,9 +2220,9 @@ export default function Home() {
         noteZoom,
       });
       applyDocumentMutation(result);
-      cancelWorkspaceRename();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể đổi tên tài liệu");
+      throw error;
     }
   };
 
@@ -2407,7 +2418,18 @@ export default function Home() {
       )}
 
       {libraryOpen && (
-        <LibraryPanel scope={{ activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces }} />
+        <LibraryPanel
+          activeDocumentContextId={activeWorkspace.id}
+          activeNotebookId={noteState.structure?.active.activeNotebookId || null}
+          libraryProjection={libraryProjection}
+          ready={ready}
+          onClose={() => setLibraryOpen(false)}
+          onDeleteDocument={deleteWorkspace}
+          onImportDocuments={() => libraryPdfInputRef.current?.click()}
+          onOpenDocument={openLibraryDocument}
+          onOpenNotebook={openLibraryNotebook}
+          onRenameDocument={renameLibraryDocument}
+        />
       )}
 
       {pdfSelection && (

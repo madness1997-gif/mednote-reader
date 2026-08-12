@@ -81,6 +81,66 @@ export type DocumentInvariantIssue = {
   message: string;
 };
 
+export type DocumentNotebookLinkIndex = {
+  documentIdsByNotebookId: ReadonlyMap<string, readonly string[]>;
+  notebookIdsByDocumentId: ReadonlyMap<string, readonly string[]>;
+};
+
+/**
+ * Resolve the many-to-many Document -> Page/Sheet links to their owning
+ * Notebook once. Runtime and Library projections share this domain index so
+ * neither becomes a second owner of the relationship.
+ */
+export function indexDocumentNotebookLinks(
+  graph: DocumentGraph,
+  notes: NoteStructure,
+): DocumentNotebookLinkIndex {
+  const notebookIdBySectionId = new Map(notes.sections.map((section) => [section.id, section.notebookId]));
+  const notebookIdByPageId = new Map(notes.pages.map((page) => [page.id, notebookIdBySectionId.get(page.sectionId)]));
+  const pageIdBySheetId = new Map(notes.sheets.map((sheet) => [sheet.id, sheet.pageId]));
+  const documentIds = new Set(graph.documents.map((record) => record.id));
+  const documentIdsByNotebookId = new Map<string, Set<string>>();
+  const notebookIdsByDocumentId = new Map<string, Set<string>>();
+
+  graph.links.forEach((link) => {
+    if (!documentIds.has(link.documentId)) return;
+    const pageId = link.targetType === "page" ? link.targetId : pageIdBySheetId.get(link.targetId);
+    const notebookId = pageId ? notebookIdByPageId.get(pageId) : undefined;
+    if (!notebookId) return;
+
+    const linkedDocuments = documentIdsByNotebookId.get(notebookId) || new Set<string>();
+    linkedDocuments.add(link.documentId);
+    documentIdsByNotebookId.set(notebookId, linkedDocuments);
+
+    const linkedNotebooks = notebookIdsByDocumentId.get(link.documentId) || new Set<string>();
+    linkedNotebooks.add(notebookId);
+    notebookIdsByDocumentId.set(link.documentId, linkedNotebooks);
+  });
+
+  return {
+    documentIdsByNotebookId: new Map([...documentIdsByNotebookId].map(([id, links]) => [id, [...links]])),
+    notebookIdsByDocumentId: new Map([...notebookIdsByDocumentId].map(([id, links]) => [id, [...links]])),
+  };
+}
+
+export function linkedNotebookIdsForDocuments(
+  graph: DocumentGraph,
+  notes: NoteStructure,
+  documentIds: Iterable<string>,
+) {
+  const { notebookIdsByDocumentId } = indexDocumentNotebookLinks(graph, notes);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const documentId of documentIds) {
+    (notebookIdsByDocumentId.get(documentId) || []).forEach((notebookId) => {
+      if (seen.has(notebookId)) return;
+      seen.add(notebookId);
+      result.push(notebookId);
+    });
+  }
+  return result;
+}
+
 export class DocumentInvariantError extends Error {
   readonly issues: DocumentInvariantIssue[];
 

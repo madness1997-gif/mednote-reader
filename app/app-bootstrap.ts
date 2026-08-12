@@ -25,6 +25,7 @@ import {
   persistentDocumentWorkspaces,
   readDocumentRuntimeSnapshot,
 } from "./document-runtime-storage";
+import { stableHash } from "./stable-id";
 
 const STORAGE_KEY = "mednote-library-v2";
 const LEGACY_STORAGE_KEY = "mednote-notebook-v1";
@@ -53,15 +54,6 @@ export type BootstrapResult = {
   savedAt: number;
   warnings?: string[];
 };
-
-function stableId(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Math.abs(hash >>> 0).toString(36);
-}
 
 function runtimeSettings(snapshot: PersistedLibrary | null | undefined, fallbackMode: WorkspaceMode) {
   return {
@@ -213,7 +205,7 @@ function legacyNotebook(legacy: LegacyNotebookState | null, pdf: StoredPdf | und
     ? legacy!.activeNoteId!
     : pages[0].id;
   return {
-    id: `notebook-${stableId(`${pdf?.name || "legacy-notebook"}:${activePageId}`)}`,
+    id: `notebook-${stableHash(`${pdf?.name || "legacy-notebook"}:${activePageId}`)}`,
     title: pdf ? `Ghi chú — ${pdf.name.replace(/\.pdf$/i, "")}` : workspace.notebooks[0].title,
     pages,
     activePageId,
@@ -226,7 +218,7 @@ async function migrateLegacyCurrentPdf(warnings: string[]) {
     const storedPdf = await localBinaryStorage.readLegacyCurrentPdf();
     if (!storedPdf) return undefined;
     const document: LibraryDocument = {
-      id: `doc-${stableId(`${storedPdf.name}:${storedPdf.blob.size}:legacy`)}`,
+      id: `doc-${stableHash(`${storedPdf.name}:${storedPdf.blob.size}:legacy`)}`,
       name: storedPdf.name,
       size: storedPdf.blob.size,
       lastModified: 0,

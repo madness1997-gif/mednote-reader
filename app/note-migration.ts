@@ -2,7 +2,8 @@ import { assertDocumentGraph, type DocumentGraph, type DocumentRecord } from "./
 import { assertNoteStructure, assertSheetContents, ordered, type ActiveNoteState, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
 import { IndexedDbNoteRepository } from "./indexeddb-note-repository";
 import { NOTE_SCHEMA_VERSION, type LibraryV6 } from "./note-repository";
-import { migrateRelationV2, stableMigrationId, type LegacyRelationV2 } from "./relation-v2-migration";
+import { migrateRelationV2, type LegacyRelationV2 } from "./relation-v2-migration";
+import { stableHash, stableId } from "./stable-id";
 
 export type { LegacyRelationV2 } from "./relation-v2-migration";
 
@@ -65,13 +66,7 @@ function stableStringify(value: unknown): string {
 }
 
 export function contentHash(value: SheetContent) {
-  const source = stableStringify(value);
-  let hash = 2166136261;
-  for (let index = 0; index < source.length; index += 1) {
-    hash ^= source.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
+  return stableHash(stableStringify(value));
 }
 
 function stripNavigation(record: AnyRecord): SheetContent {
@@ -259,10 +254,10 @@ export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersio
     const relationRecord = relationNotebooks.get(notebookId);
     const legacySections = Array.isArray(relationRecord?.sections) && relationRecord.sections.length
       ? relationRecord.sections
-      : [{ id: stableMigrationId("section", notebookId), title: "Phần 1", pageIds: [...physicalIds] }];
+      : [{ id: stableId("section", notebookId), title: "Phần 1", pageIds: [...physicalIds] }];
     const sectionForSheet = new Map<string, string>();
     legacySections.forEach((record: AnyRecord, order: number) => {
-      const sectionId = String(record.id || stableMigrationId("section", `${notebookId}:${order}`));
+      const sectionId = String(record.id || stableId("section", `${notebookId}:${order}`));
       sections.push({ id: sectionId, notebookId, title: String(record.title || `Phần ${order + 1}`), order });
       (record.pageIds || []).forEach((sheetId: unknown) => {
         const id = String(sheetId);

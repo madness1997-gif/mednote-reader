@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { projectLibrary, linkedNotebookIdsForDocuments } from "../app/library-projection";
+import { linkedNotebookIdsForDocuments } from "../app/document-domain";
+import { projectLibrary } from "../app/library-projection";
 import { NOTE_RUNTIME_WORKSPACE_ID, runtimeWorkspacesFromDocumentGraph } from "../app/document-runtime-adapter";
 import type { DocumentGraph } from "../app/document-domain";
 import type { NoteStructure } from "../app/note-domain";
+import { stableHash, stableId } from "../app/stable-id";
 
 function fixture() {
   const notebooks = Array.from({ length: 5 }, (_, index) => ({ id: `nb-${index + 1}`, title: `Notebook ${index + 1}`, order: index }));
@@ -44,6 +46,7 @@ test("Library notes are a total projection of NoteStructure while documents excl
   assert.deepEqual(projected.notes.map((item) => item.id), ["nb-1", "nb-2", "nb-3", "nb-4", "nb-5"]);
   assert.equal(projected.documents.length, 2);
   assert.equal(projected.documents.some((item) => item.id === "temp-ctx"), false);
+  assert.equal(projected.documents.find((item) => item.id === "ctx-1")?.documentCount, 1);
   assert.deepEqual(projected.notes.find((item) => item.id === "nb-1")?.linkedDocumentIds, ["doc-1"]);
   assert.deepEqual(projected.notes.find((item) => item.id === "nb-2")?.linkedDocumentIds, ["doc-2", "doc-1"]);
   assert.equal(projected.notes.find((item) => item.id === "nb-5")?.linkedDocumentIds.length, 0);
@@ -83,4 +86,25 @@ test("create A then B remains a two-Notebook canonical Library independent of ru
   const two = { ...structure, notebooks: structure.notebooks.slice(0, 2), sections: structure.sections.slice(0, 2), pages: structure.pages.slice(0, 2), sheets: structure.sheets.slice(0, 2) };
   const projected = projectLibrary(two, { ...graph, links: [] });
   assert.deepEqual(projected.notes.map((item) => item.id), ["nb-1", "nb-2"]);
+});
+
+test("Library ignores dangling link projections without inventing runtime ownership", () => {
+  const { structure, graph } = fixture();
+  const corrupted: DocumentGraph = {
+    ...graph,
+    links: [
+      ...graph.links,
+      { id: "missing-document", documentId: "ghost", targetType: "page", targetId: "page-1" },
+      { id: "missing-target", documentId: "doc-1", targetType: "sheet", targetId: "ghost" },
+    ],
+  };
+  const projected = projectLibrary(structure, corrupted);
+  assert.deepEqual(projected.notes.find((item) => item.id === "nb-1")?.linkedDocumentIds, ["doc-1"]);
+  assert.deepEqual(projected.documents.find((item) => item.id === "ctx-1")?.linkedNotebookIds, ["nb-1", "nb-2"]);
+});
+
+test("persisted Library identity hash remains byte-for-byte stable", () => {
+  assert.equal(stableHash(""), "ztntfp");
+  assert.equal(stableHash("independent.pdf:123:456"), "mmcl06");
+  assert.equal(stableId("link", "doc-1:page:page-1"), "link-1g75zv7");
 });

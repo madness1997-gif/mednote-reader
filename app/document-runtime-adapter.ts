@@ -1,10 +1,10 @@
 import type { PdfAnnotation, PdfFitMode, PdfViewMode } from "./pdf-domain";
-import type { DocumentGraph, DocumentRecord } from "./document-domain";
+import { linkedNotebookIdsForDocuments, type DocumentGraph, type DocumentRecord } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
 import type { DriveLibrary } from "./drive-backup";
 import type { NoteStructure } from "./note-domain";
-import { linkedNotebookIdsForDocuments } from "./library-projection";
 import { DEFAULT_NEW_NOTE_PAPER, createBlankPage, createNotebook, normalizePage, type Notebook, type NotePage } from "./note-runtime-adapter";
+import { stableId } from "./stable-id";
 
 export type LibraryDocument = {
   id: string;
@@ -54,15 +54,6 @@ export const DEFAULT_READER: ReaderState = { page: 1, zoom: 1, fitMode: "page", 
 export const NOTE_RUNTIME_WORKSPACE_ID = "note-runtime-v6";
 
 export const READER_PLACEHOLDER_PREFIX = "__mednote_reader_placeholder__:";
-
-function runtimeStableId(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Math.abs(hash >>> 0).toString(36);
-}
 
 export function normalizeReader(reader?: Partial<ReaderState>): ReaderState {
   return {
@@ -124,13 +115,13 @@ export function documentWorkspaceInput(
     updatedAt: now,
   } : undefined;
   const links = target ? documents.map((document) => ({
-    id: `link-${runtimeStableId(`${document.id}:${target.targetType}:${target.targetId}`)}`,
+    id: stableId("link", `${document.id}:${target.targetType}:${target.targetId}`),
     documentId: document.id,
     targetType: target.targetType,
     targetId: target.targetId,
   })) : [];
   const linkRelations = target && links.length ? [{
-    id: `relation-${runtimeStableId(`${workspace.id}:${target.targetType}:${target.targetId}`)}`,
+    id: stableId("relation", `${workspace.id}:${target.targetType}:${target.targetId}`),
     linkIds: links.map((link) => link.id),
     kind: "workspace" as const,
     sourceType: group ? "group" as const : "document" as const,

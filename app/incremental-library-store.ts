@@ -1,3 +1,5 @@
+import { stableId } from "./stable-id";
+
 const DB_NAME = "mednote-local";
 const DB_VERSION = 1;
 const DB_STORE = "documents";
@@ -103,15 +105,6 @@ let saveQueue: Promise<unknown> = Promise.resolve();
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const isLazyPage = (page: PageLike) => page[LAZY_PAGE_FLAG] === true;
 const normalizedOrder = (value: unknown, fallback: number) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const stableId = (prefix: string, value: string) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${prefix}-${(hash >>> 0).toString(36)}`;
-};
-
 function openDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);

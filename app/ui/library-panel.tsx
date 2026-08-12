@@ -1,95 +1,113 @@
 import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { useState } from "react";
 import type { LibraryProjection } from "../library-projection";
-import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
-import "../library-two-column.css";
+import "../library-panel.css";
 
-export type LibraryPanelScope = {
-  activeWorkspace: WorkspaceItem;
-  activeWorkspaceIdRef: { current: string };
-  beginWorkspaceRename: (workspace: WorkspaceItem) => void;
-  cancelWorkspaceRename: () => void;
-  commitWorkspaceRename: (workspaceId: string) => void;
-  deleteWorkspace: (workspaceId: string) => void | Promise<unknown>;
-  libraryPdfInputRef: RefObject<HTMLInputElement | null>;
+export type LibraryPanelProps = {
+  activeDocumentContextId: string;
+  activeNotebookId: string | null;
   libraryProjection: LibraryProjection;
-  noteState: { structure: { active: { activeNotebookId: string } } | null };
-  openLibraryNotebook: (notebookId: string) => void | Promise<unknown>;
   ready: boolean;
-  renamingWorkspaceId: string | null;
-  renamingWorkspaceName: string;
-  setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
-  setLibraryOpen: Dispatch<SetStateAction<boolean>>;
-  setRenamingWorkspaceName: Dispatch<SetStateAction<string>>;
-  setToast: Dispatch<SetStateAction<string>>;
-  setWorkspaceMode: Dispatch<SetStateAction<WorkspaceMode>>;
-  workspaceModeRef: { current: WorkspaceMode };
-  workspaces: WorkspaceItem[];
+  onClose: () => void;
+  onDeleteDocument: (contextId: string) => void | Promise<unknown>;
+  onImportDocuments: () => void;
+  onOpenDocument: (contextId: string) => void | Promise<unknown>;
+  onOpenNotebook: (notebookId: string) => void | Promise<unknown>;
+  onRenameDocument: (contextId: string, name: string) => Promise<void>;
 };
 
-export function LibraryPanel({ scope }: { scope: LibraryPanelScope }) {
-  const { activeWorkspace, activeWorkspaceIdRef, beginWorkspaceRename, cancelWorkspaceRename, commitWorkspaceRename, deleteWorkspace, libraryPdfInputRef, libraryProjection, noteState, openLibraryNotebook, ready, renamingWorkspaceId, renamingWorkspaceName, setActiveWorkspaceId, setLibraryOpen, setRenamingWorkspaceName, setToast, setWorkspaceMode, workspaceModeRef, workspaces } = scope;
-  return (<><div className="library-backdrop" onPointerDown={() => setLibraryOpen(false)}>
-          <aside className="library-panel" aria-label="Thư viện tài liệu và ghi chú" onPointerDown={(event) => event.stopPropagation()}>
-            <div className="library-header"><div><strong>Thư viện</strong><span>Tài liệu bên trái, ghi chú bên phải; liên kết giữa chúng vẫn được giữ nguyên</span></div><button className="icon-button" onClick={() => setLibraryOpen(false)} aria-label="Đóng"><X size={19} /></button></div>
-            <button className="library-import" disabled={!ready} onClick={() => libraryPdfInputRef.current?.click()}><FolderOpen size={18} /><span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>PDF được quản lý độc lập với cấu trúc Notebook / Section / Page</small></span></button>
-            <div className="library-list library-two-column">
-              <section className="library-domain library-pdf-domain" aria-label="Tài liệu">
-                <div className="library-domain-heading"><div><strong>Tài liệu</strong><span>{libraryProjection.documents.length} mục</span></div><small>DocumentGraph</small></div>
-                <div className="library-domain-scroll">
-                  {libraryProjection.documents.length ? libraryProjection.documents.map((item) => {
-                    const workspace = workspaces.find((candidate) => candidate.id === item.id);
-                    const isRenaming = renamingWorkspaceId === item.id;
-                    return (
-                      <div className="library-row" key={`document:${item.id}`}>
-                        {isRenaming && workspace ? (
-                          <form className={`library-item library-rename-item ${item.id === activeWorkspace.id ? "active" : ""}`} onSubmit={(event) => { event.preventDefault(); commitWorkspaceRename(item.id); }}>
-                            <span className="library-icon"><FileText size={19} /></span>
-                            <span><input autoFocus value={renamingWorkspaceName} onChange={(event) => setRenamingWorkspaceName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelWorkspaceRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
-                          </form>
-                        ) : (
-                          <button className={`library-item ${item.id === activeWorkspace.id ? "active" : ""}`} disabled={!workspace} onClick={() => {
-                            if (!workspace) return setToast("Document runtime chưa sẵn sàng");
-                            void (async () => {
-                              const currentNotebookId = noteState.structure?.active.activeNotebookId || null;
-                              const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
-                                ? currentNotebookId
-                                : item.linkedNotebookIds[0] || null;
-                              if (linkedNotebookId) await openLibraryNotebook(linkedNotebookId);
-                              activeWorkspaceIdRef.current = item.id;
-                              setActiveWorkspaceId(item.id);
-                              workspaceModeRef.current = "reader";
-                              setWorkspaceMode("reader");
-                              setLibraryOpen(false);
-                            })();
-                          }}>
-                            <span className="library-icon"><FileText size={19} /></span>
-                            <span><strong>{item.name}</strong><small>{item.kind === "collection" ? `${item.documents.length} tài liệu` : "1 tài liệu"} · {item.linkedNotebookIds.length ? `${item.linkedNotebookIds.length} Notebook liên kết` : "không liên kết Note"}</small></span>
-                          </button>
-                        )}
-                        {workspace && (isRenaming
-                          ? <><button className="library-action library-save" onClick={() => commitWorkspaceRename(item.id)} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" onClick={cancelWorkspaceRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
-                          : <><button className="library-action library-rename" onClick={() => beginWorkspaceRename(workspace)} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void deleteWorkspace(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>)}
-                      </div>
-                    );
-                  }) : <div className="library-domain-empty">Chưa có PDF đã lưu. PDF tạm không xuất hiện ở đây.</div>}
-                </div>
-              </section>
+export function LibraryPanel({
+  activeDocumentContextId,
+  activeNotebookId,
+  libraryProjection,
+  ready,
+  onClose,
+  onDeleteDocument,
+  onImportDocuments,
+  onOpenDocument,
+  onOpenNotebook,
+  onRenameDocument,
+}: LibraryPanelProps) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState("");
+  const [renamePending, setRenamePending] = useState(false);
 
-              <section className="library-domain library-note-domain" aria-label="Ghi chú">
-                <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>NoteStructure</small></div>
-                <div className="library-domain-scroll">
-                  {libraryProjection.notes.length ? libraryProjection.notes.map((notebook) => (
-                    <div className="library-row library-row-single" key={`note:${notebook.id}`}>
-                      <button className={`library-item ${noteState.structure?.active.activeNotebookId === notebook.id ? "active" : ""}`} onClick={() => { void openLibraryNotebook(notebook.id); }}>
-                        <span className="library-icon"><NotebookTabs size={19} /></span>
-                        <span><strong>{notebook.title}</strong><small>{notebook.sectionCount} section · {notebook.pageCount} page · {notebook.sheetCount} sheet{notebook.linkedDocuments.length ? ` · ${notebook.linkedDocuments.length} PDF liên kết` : " · độc lập"}</small></span>
+  const cancelRename = () => {
+    if (renamePending) return;
+    setRenamingId(null);
+    setRenamingName("");
+  };
+
+  const commitRename = async () => {
+    if (!renamingId || renamePending) return;
+    setRenamePending(true);
+    try {
+      await onRenameDocument(renamingId, renamingName);
+      setRenamingId(null);
+      setRenamingName("");
+    } catch {
+      // The composition root reports the mutation error and the editor remains
+      // open so the user can correct the name.
+    } finally {
+      setRenamePending(false);
+    }
+  };
+
+  return (
+    <div className="library-backdrop" onPointerDown={onClose}>
+      <aside className="library-panel" aria-label="Thư viện tài liệu và ghi chú" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="library-header">
+          <div><strong>Thư viện</strong><span>Tài liệu bên trái, ghi chú bên phải; liên kết giữa chúng vẫn được giữ nguyên</span></div>
+          <button className="icon-button" onClick={onClose} aria-label="Đóng"><X size={19} /></button>
+        </div>
+        <button className="library-import" disabled={!ready} onClick={onImportDocuments}>
+          <FolderOpen size={18} />
+          <span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>PDF được quản lý độc lập với cấu trúc Notebook / Section / Page</small></span>
+        </button>
+        <div className="library-list library-two-column">
+          <section className="library-domain library-document-domain" aria-label="Tài liệu">
+            <div className="library-domain-heading"><div><strong>Tài liệu</strong><span>{libraryProjection.documents.length} mục</span></div><small>DocumentGraph</small></div>
+            <div className="library-domain-scroll">
+              {libraryProjection.documents.length ? libraryProjection.documents.map((item) => {
+                const isRenaming = renamingId === item.id;
+                const isActive = item.id === activeDocumentContextId;
+                return (
+                  <div className="library-row" key={`document:${item.id}`}>
+                    {isRenaming ? (
+                      <form className={`library-item library-rename-item ${isActive ? "active" : ""}`} onSubmit={(event) => { event.preventDefault(); void commitRename(); }}>
+                        <span className="library-icon"><FileText size={19} /></span>
+                        <span><input autoFocus disabled={renamePending} value={renamingName} onChange={(event) => setRenamingName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
+                      </form>
+                    ) : (
+                      <button className={`library-item ${isActive ? "active" : ""}`} onClick={() => { void onOpenDocument(item.id); }}>
+                        <span className="library-icon"><FileText size={19} /></span>
+                        <span><strong>{item.name}</strong><small>{item.documentCount > 1 ? `${item.documentCount} tài liệu` : "1 tài liệu"} · {item.linkedNotebookIds.length ? `${item.linkedNotebookIds.length} Notebook liên kết` : "không liên kết Note"}</small></span>
                       </button>
-                    </div>
-                  )) : <div className="library-domain-empty">Chưa có Notebook.</div>}
-                </div>
-              </section>
+                    )}
+                    {isRenaming
+                      ? <><button className="library-action library-save" disabled={renamePending} onClick={() => { void commitRename(); }} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" disabled={renamePending} onClick={cancelRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
+                      : <><button className="library-action library-rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void onDeleteDocument(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>}
+                  </div>
+                );
+              }) : <div className="library-domain-empty">Chưa có PDF đã lưu. PDF tạm không xuất hiện ở đây.</div>}
             </div>
-          </aside>
-        </div></>);
+          </section>
+
+          <section className="library-domain library-note-domain" aria-label="Ghi chú">
+            <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>NoteStructure</small></div>
+            <div className="library-domain-scroll">
+              {libraryProjection.notes.length ? libraryProjection.notes.map((notebook) => (
+                <div className="library-row library-row-single" key={`note:${notebook.id}`}>
+                  <button className={`library-item ${activeNotebookId === notebook.id ? "active" : ""}`} onClick={() => { void onOpenNotebook(notebook.id); }}>
+                    <span className="library-icon"><NotebookTabs size={19} /></span>
+                    <span><strong>{notebook.title}</strong><small>{notebook.sectionCount} section · {notebook.pageCount} page · {notebook.sheetCount} sheet{notebook.linkedDocuments.length ? ` · ${notebook.linkedDocuments.length} PDF liên kết` : " · độc lập"}</small></span>
+                  </button>
+                </div>
+              )) : <div className="library-domain-empty">Chưa có Notebook.</div>}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  );
 }

@@ -1,6 +1,7 @@
 import type { DocumentGraph, DocumentLinkRelation, DocumentRecord, NoteDocumentLink } from "./document-domain";
 import { ordered, type NoteStructure } from "./note-domain";
 import type { LibraryV6 } from "./note-repository";
+import { stableId } from "./stable-id";
 
 export type LegacyRelationV2 = {
   version: 2;
@@ -16,15 +17,6 @@ const clone = <T>(value: T): T => {
   if (typeof structuredClone === "function") return structuredClone(value);
   return JSON.parse(JSON.stringify(value)) as T;
 };
-
-export function stableMigrationId(prefix: string, value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${prefix}-${(hash >>> 0).toString(36)}`;
-}
 
 function normalizeGroups(relation: LegacyRelationV2 | undefined, documents: DocumentRecord[]) {
   const documentIds = new Set(documents.map((record) => record.id));
@@ -89,7 +81,7 @@ export function migrateRelationV2(
     return record.id;
   };
   existingLinks.forEach((record) => addLink({
-    id: String(record.id || stableMigrationId("note-document-link", `${record.documentId}:${record.targetType}:${record.targetId}`)),
+    id: String(record.id || stableId("note-document-link", `${record.documentId}:${record.targetType}:${record.targetId}`)),
     documentId: String(record.documentId),
     targetType: record.targetType === "sheet" ? "sheet" : "page",
     targetId: String(record.targetId),
@@ -111,13 +103,13 @@ export function migrateRelationV2(
       return;
     }
     const linkIds = sourceIds.map((documentId) => addLink({
-      id: stableMigrationId("note-document-link", `${documentId}:${target.targetType}:${target.targetId}`),
+      id: stableId("note-document-link", `${documentId}:${target.targetType}:${target.targetId}`),
       documentId,
       ...target,
     }, `Relation ${legacy.id || "(không ID)"}`)).filter(Boolean);
     if (!linkIds.length) return;
     linkRelations.push({
-      id: String(legacy.id || stableMigrationId("document-link-relation", `${sourceType}:${sourceId}:${linkIds.join(",")}`)),
+      id: String(legacy.id || stableId("document-link-relation", `${sourceType}:${sourceId}:${linkIds.join(",")}`)),
       linkIds: [...new Set(linkIds)],
       kind: legacy.kind === "content" ? "content" : "workspace",
       sourceType,
@@ -181,7 +173,7 @@ export function relationV2FromV6(library: LibraryV6): LegacyRelationV2 {
   });
   const relationIds = new Set(relations.map((record) => record.id));
   library.documents.links.filter((link) => !library.documents.linkRelations.some((detail) => detail.linkIds.includes(link.id))).forEach((link) => {
-    const id = stableMigrationId("relation", link.id);
+    const id = stableId("relation", link.id);
     if (!relationIds.has(id)) relations.push({ id, kind: "workspace", source: { type: "document", id: link.documentId }, target: targetFor(link), isDefault: false, lastOpenedAt: undefined, createdAt: library.savedAt, updatedAt: library.savedAt, snapshot: {} });
   });
   return {

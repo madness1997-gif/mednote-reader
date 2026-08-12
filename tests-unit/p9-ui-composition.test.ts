@@ -61,16 +61,20 @@ test("P9 Library and Drive panels are render consumers only", async () => {
   assert.doesNotMatch(library, /noteStore|NoteStore|DriveSyncService|driveSyncService/);
   assert.doesNotMatch(drive, /DriveSyncService|driveSyncService|noteStore|NoteStore/);
   assert.match(library, /libraryProjection/);
+  assert.doesNotMatch(library, /WorkspaceItem|activeWorkspaceIdRef|workspaceModeRef|setWorkspaceMode|setActiveWorkspaceId|setToast/);
 });
 
 test("Library keeps documents on the left and notes on the right", async () => {
   const library = await source("app/ui/library-panel.tsx");
-  const layout = await source("app/library-two-column.css");
+  const layout = await source("app/library-panel.css");
   const documents = library.indexOf('aria-label="Tài liệu"');
   const notes = library.indexOf('aria-label="Ghi chú"');
   assert.ok(documents >= 0 && notes > documents);
   assert.match(library, /className="library-list library-two-column"/);
   assert.match(layout, /grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.doesNotMatch(layout, /!important|relation-library|three library groups|three-column/);
+  assert.equal(await missing("app/library-panel-fix.css"), true);
+  assert.equal(await missing("app/library-two-column.css"), true);
 });
 
 test("P9 note UI is split into toolbar, stage, preview and toolbar view model", async () => {
