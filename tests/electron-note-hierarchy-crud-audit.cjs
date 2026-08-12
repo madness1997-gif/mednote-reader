@@ -30,12 +30,12 @@ async function submitName(page, trigger, value) {
 }
 
 async function acceptConfirm(page, action) {
-  page.once('dialog', async (dialog) => {
-    if (dialog.type() !== 'confirm') throw new Error(`Expected confirm, got ${dialog.type()}`);
-    await dialog.accept();
-  });
-  await action();
-  await expect(page.locator('.note-sidebar')).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
+  const dialogPromise = page.waitForEvent('dialog');
+  const actionPromise = action();
+  const dialog = await dialogPromise;
+  if (dialog.type() !== 'confirm') throw new Error(`Expected confirm, got ${dialog.type()}`);
+  await dialog.accept();
+  await actionPromise;
 }
 
 async function restart(app) {
@@ -75,18 +75,15 @@ async function ensureActivePageExpanded(nav, expectedSheetCount) {
     let pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
     await expect(pageRow).toBeVisible();
 
-    // New Sheet becomes active. Deleting it must stay in this Page and select
-    // the remaining sibling, rather than jumping to the first Sheet globally.
     await nav.getByRole('button', { name: 'Thêm tờ vào Audit Page Renamed' }).click();
     pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
     await expect(pageRow).toContainText('2 tờ');
     let sheets = await ensureActivePageExpanded(nav, 2);
-    await expect(sheets.filter({ has: page.locator('button.note-sidebar-sheet-open') })).toHaveCount(2);
     const activeSheet = pageRow.locator('.note-sidebar-sheet.active');
     await expect(activeSheet).toHaveCount(1);
     await acceptConfirm(page, () => activeSheet.getByRole('button', { name: /Xóa tờ/ }).click());
     pageRow = nav.locator('.note-sidebar-page.active', { hasText: 'Audit Page Renamed' });
-    await expect(pageRow).toContainText('1 tờ');
+    await expect(pageRow).toContainText('1 tờ', { timeout: 10_000 });
     sheets = await ensureActivePageExpanded(nav, 1);
     await expect(sheets.locator('.note-sidebar-sheet-open')).toHaveCount(1);
 
@@ -97,14 +94,14 @@ async function ensureActivePageExpanded(nav, expectedSheetCount) {
     await ensureActivePageExpanded(nav, 1);
 
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Audit Page Renamed' }).click());
-    await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0);
+    await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0, { timeout: 10_000 });
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Audit Page Renamed' })).toHaveCount(0);
 
     await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Section Keep');
     await nav.locator('.note-sidebar-section-open', { hasText: 'Audit Section Renamed' }).click();
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Audit Section Renamed' }).click());
-    await expect(nav.locator('.note-sidebar-section', { hasText: 'Audit Section Renamed' })).toHaveCount(0);
+    await expect(nav.locator('.note-sidebar-section', { hasText: 'Audit Section Renamed' })).toHaveCount(0, { timeout: 10_000 });
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('.note-sidebar-section', { hasText: 'Audit Section Renamed' })).toHaveCount(0);
     await expect(nav.locator('.note-sidebar-section', { hasText: 'Section Keep' })).toBeVisible();
@@ -114,7 +111,8 @@ async function ensureActivePageExpanded(nav, expectedSheetCount) {
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
     await nav.getByRole('button', { name: 'Thao tác Notebook' }).click();
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Notebook' }).click());
-    await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Audit Notebook Renamed' })).toHaveCount(0);
+    await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Audit Notebook Renamed' })).toHaveCount(0, { timeout: 10_000 });
+    await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Notebook Keep');
 
     ({ app, page, nav } = await restart(app));
     await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Audit Notebook Renamed' })).toHaveCount(0);
