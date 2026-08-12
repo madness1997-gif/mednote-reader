@@ -5,6 +5,7 @@ import {
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { NoteSidebarController } from "./note-sidebar-controller";
 import type { NoteSidebarModel } from "./note-sidebar-model";
+import { notebookIconStyle } from "./notebook-color";
 import "./note-sidebar.css";
 
 type NoteSidebarProps = {
@@ -66,7 +67,7 @@ export function NoteSidebar({ status, model, controller, busy, hydratingSheetId,
   return (
     <div className="note-sidebar" data-testid="note-sidebar" aria-label="Điều hướng ghi chú" aria-busy={busy}>
       <header className="note-sidebar-bookbar">
-        <span className="note-sidebar-bookmark"><NotebookTabs size={16} /></span>
+        <span className="note-sidebar-bookmark" style={notebookIconStyle(model.activeNotebookId)}><NotebookTabs size={16} /></span>
         <select value={model.activeNotebookId} onChange={(event) => run(() => controller.openNotebook(event.target.value))} aria-label="Notebook" disabled={busy}>
           {model.notebooks.map((notebook) => <option value={notebook.id} key={notebook.id}>{notebook.title}</option>)}
         </select>
