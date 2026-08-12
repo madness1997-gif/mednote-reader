@@ -109,6 +109,8 @@ async function ensureActivePageExpanded(nav, expectedSheetCount) {
     await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Notebook Keep');
     await nav.locator('select[aria-label="Notebook"]').selectOption({ label: 'Audit Notebook Renamed' });
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Audit Notebook Renamed');
+    await expect(nav.locator('.note-sidebar-section', { hasText: 'Section Keep' })).toBeVisible({ timeout: 10_000 });
+    await expect(nav).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
     await nav.getByRole('button', { name: 'Thao tác Notebook' }).click();
     await acceptConfirm(page, () => nav.getByRole('button', { name: 'Xóa Notebook' }).click());
     await expect(nav.locator('select[aria-label="Notebook"] option', { hasText: 'Audit Notebook Renamed' })).toHaveCount(0, { timeout: 10_000 });
