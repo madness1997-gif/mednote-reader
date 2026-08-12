@@ -41,13 +41,13 @@ test.beforeEach(async ({ page }) => {
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
   const host = page.locator('.note-navigation-host');
-  const nav = host.locator(':scope > .note-sidebar-v6');
+  const nav = host.locator(':scope > .note-sidebar');
   const workspace = page.locator('.workspace');
 
   await expect(host).toHaveCount(1);
   await expect(workspace).toHaveClass(/workspace-mode-note/);
   await expect(nav).toBeVisible({ timeout: 12_000 });
-  await expect(host.locator(':scope > :not(.note-sidebar-v6)')).toHaveCount(0);
+  await expect(host.locator(':scope > :not(.note-sidebar)')).toHaveCount(0);
   await expect(page.locator('.mednote-page-sheet-nav')).toHaveCount(0);
 
   const box = await nav.boundingBox();
@@ -62,7 +62,7 @@ test.afterEach(async ({ page }) => {
 });
 
 test('React note sidebar controls are live in desktop-site mode', async ({ page }) => {
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   const bookbar = nav.locator('.note-sidebar-bookbar');
   const notebookSelect = bookbar.locator('select[aria-label="Notebook"]');
   const addNotebook = bookbar.getByRole('button', { name: 'Tạo Notebook' });
@@ -94,6 +94,8 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
   await expect(page.locator('.mednote-native-dialog')).toBeVisible();
   await page.locator('.mednote-native-dialog [data-cancel]').click();
 
+  const closeBox = await close.boundingBox();
+  expect(closeBox).not.toBeNull();
   await close.click();
   await expect(page.locator('.note-navigation-host')).toHaveCount(0);
   await expect(page.locator('.workspace')).toHaveClass(/note-sidebar-collapsed/);
@@ -103,25 +105,27 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
   expect(workspaceBox).not.toBeNull();
   expect(notesBox).not.toBeNull();
   expect(notesBox.x + notesBox.width).toBeGreaterThanOrEqual(workspaceBox.x + workspaceBox.width - 1);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('1');
-  await notesPane.getByRole('button', { name: 'Hiện thanh điều hướng Note' }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-hidden'))).toBe('1');
+  const show = notesPane.getByRole('button', { name: 'Hiện thanh điều hướng Note' });
+  const showBox = await show.boundingBox();
+  expect(showBox).not.toBeNull();
+  expect(Math.abs((showBox.x + showBox.width / 2) - (closeBox.x + closeBox.width / 2))).toBeLessThan(90);
+  expect(Math.abs((showBox.y + showBox.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThan(20);
+  await show.click();
   await expect(page.locator('.note-sidebar-bookbar')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'))).toBe('0');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('mednote-note-sidebar-hidden'))).toBe('0');
 });
 
 test('PDF sidebar defaults to the embedded outline instead of thumbnails', async ({ page }) => {
-  await page.evaluate(() => {
-    const saved = JSON.parse(localStorage.getItem('mednote-library-v2'));
-    localStorage.setItem('mednote-library-v2', JSON.stringify({ ...saved, workspaceMode: 'split' }));
-  });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Cả hai' }).click();
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
   await expect(page.getByRole('button', { name: 'Mục lục PDF' })).toHaveClass(/active/);
   await expect(page.getByRole('button', { name: 'Hình thu nhỏ các trang' })).not.toHaveClass(/active/);
 });
 
 test('search and Notebook menu remain stable without DOM maintenance loops', async ({ page }) => {
   test.setTimeout(30_000);
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   const search = nav.getByRole('textbox', { name: 'Tìm ghi chú' });
   const more = nav.getByRole('button', { name: 'Thao tác Notebook' });
 

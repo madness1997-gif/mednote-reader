@@ -6,13 +6,17 @@ on:
     paths:
       - "app/indexeddb-note-repository.ts"
       - "app/note-commands.ts"
-      - "app/note-navigation.ts"
+      - "app/note-sidebar-controller.ts"
+      - "app/note-sidebar-model.ts"
       - "app/note-sidebar.css"
       - "app/note-sidebar.tsx"
       - "app/note-store.ts"
+      - "app/ui/note-navigation-host.tsx"
       - "app/page.tsx"
+      - "tests-unit/note-sidebar.test.ts"
       - "tests/sidebar-controls.spec.cjs"
       - "tests/sidebar-active-context.spec.cjs"
+      - "tests/sidebar-toggle-mobile.spec.cjs"
       - ".github/workflows/sidebar-controls-e2e.yml"
   workflow_dispatch:
 
@@ -47,4 +51,4 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:4173/mednote-reader/ >/dev/null
-          npx playwright test tests/sidebar-controls.spec.cjs tests/sidebar-active-context.spec.cjs --reporter=line --workers=1
+          npx playwright test tests/sidebar-controls.spec.cjs tests/sidebar-active-context.spec.cjs tests/sidebar-toggle-mobile.spec.cjs --reporter=line --workers=1

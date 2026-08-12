@@ -4,7 +4,6 @@ import test from "node:test";
 import "fake-indexeddb/auto";
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository } from "../app/indexeddb-note-repository";
 import { NoteStore } from "../app/note-store";
-import { NoteNavigation } from "../app/note-navigation";
 import type { LibraryV6 } from "../app/note-repository";
 
 function library(): LibraryV6 {
@@ -45,15 +44,15 @@ async function harness(name: string) {
   await repository.replaceLibrary(library());
   const store = new NoteStore(repository);
   await store.initialize({ skipMigration: true });
-  return { dbName, repository, store, navigation: new NoteNavigation(store) };
+  return { dbName, repository, store };
 }
 
 test("NoteStore flushes the old draft before hydrating a different Sheet", async () => {
-  const { dbName, repository, store, navigation } = await harness("navigation");
+  const { dbName, repository, store } = await harness("navigation");
   try {
     assert.equal(store.getSnapshot().activeSheetContent?.body, "Metformin");
     store.updateActiveSheetContent({ body: "Metformin + GLP-1 RA" });
-    await navigation.openSheet("sheet-2");
+    await store.openSheet("sheet-2");
     assert.equal((await repository.loadSheetContent("sheet-1"))?.body, "Metformin + GLP-1 RA");
     assert.equal(store.getSnapshot().structure?.active.activeSheetId, "sheet-2");
     assert.equal(store.getSnapshot().activeSheetContent?.body, "SGLT2i");

@@ -124,6 +124,8 @@ const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
 const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
+const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
+const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
@@ -532,7 +534,10 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [showPdfRail, setShowPdfRail] = useState(true);
   const [showNoteSidebar, setShowNoteSidebar] = useState(() => {
-    try { return localStorage.getItem("mednote-note-sidebar-v6-hidden") !== "1"; } catch { return true; }
+    try {
+      const preference = localStorage.getItem(NOTE_SIDEBAR_PREFERENCE_KEY);
+      return (preference ?? localStorage.getItem(LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY)) !== "1";
+    } catch { return true; }
   });
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
   const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
@@ -2367,7 +2372,10 @@ export default function Home() {
   } as React.CSSProperties;
   const setNoteSidebarVisibility = (visible: boolean) => {
     setShowNoteSidebar(visible);
-    try { localStorage.setItem("mednote-note-sidebar-v6-hidden", visible ? "0" : "1"); } catch { /* UI preference is non-critical. */ }
+    try {
+      localStorage.setItem(NOTE_SIDEBAR_PREFERENCE_KEY, visible ? "0" : "1");
+      localStorage.removeItem(LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY);
+    } catch { /* UI preference is non-critical. */ }
   };
   const selectedPaperSize = PAPER_SIZES[activeNote.paper.size];
   const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;

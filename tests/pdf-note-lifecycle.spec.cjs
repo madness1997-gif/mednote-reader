@@ -85,7 +85,7 @@ test('preview, PDF persistence, note creation, and PDF deletion remain independe
 
   await page.locator('.save-session-button', { hasText: 'Tạo note' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   await expect(nav).toBeVisible({ timeout: 10_000 });
   await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Ghi chú — independent');
   const linkedNotebookId = await nav.locator('select[aria-label="Notebook"]').inputValue();
@@ -101,7 +101,7 @@ test('preview, PDF persistence, note creation, and PDF deletion remain independe
   await pdfRow.locator('.library-delete').click();
 
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 10_000 });
-  await expect(page.locator('.note-sidebar-v6')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => pdfKeys(page)).toEqual([]);
   await expect.poll(() => indexedRecord(page, `library:v6:notebook:${linkedNotebookId}`)).toMatchObject({ title: 'Ghi chú — independent' });
 });
@@ -124,7 +124,7 @@ test('temporary PDF can create a persistent v6 Notebook without saving the PDF',
   await dialog.locator('button[type="submit"]').click();
 
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/, { timeout: 10_000 });
-  const selector = page.locator('.note-sidebar-v6 select[aria-label="Notebook"]');
+  const selector = page.locator('.note-sidebar select[aria-label="Notebook"]');
   await expect(selector.locator('option:checked')).toHaveText('Sổ từ PDF tạm');
   const notebookId = await selector.inputValue();
   expect(await pdfKeys(page)).toEqual([]);
@@ -136,7 +136,7 @@ test('temporary PDF can create a persistent v6 Notebook without saving the PDF',
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 10_000 });
-  await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Sổ từ PDF tạm');
+  await expect(page.locator('.note-sidebar select[aria-label="Notebook"] option:checked')).toHaveText('Sổ từ PDF tạm');
   expect(await pdfKeys(page)).toEqual([]);
 });
 
@@ -166,7 +166,7 @@ test('temporary PDF can create a v6 Page or Section in an existing Notebook', as
   pdf.addPage([240, 320]);
   const bytes = Buffer.from(await pdf.save());
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Sổ nền');
+  await expect(page.locator('.note-sidebar select[aria-label="Notebook"] option:checked')).toHaveText('Sổ nền');
 
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({ name: 'page-target.pdf', mimeType: 'application/pdf', buffer: bytes });
   let dialog = page.locator('.mednote-note-destination');

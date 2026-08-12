@@ -50,7 +50,6 @@ export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
-                {!showNoteSidebar && <button className="note-sidebar-show-button" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện thanh điều hướng Note" title="Hiện thanh điều hướng Note"><PanelRightOpen size={16} /><span>Điều hướng Note</span></button>}
                 <button className="note-create-button" onClick={() => { void exportNotebook(); }}><Download size={16} /><span>Xuất note</span></button>
               </div>
               <span className="toolbar-spacer" />
@@ -72,6 +71,7 @@ export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
                 <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!canRedo} data-ink-history-version={inkHistoryVersion}><Redo2 size={19} /></button>
               </div>
               <button className={`paper-button ${notePanel === "paper" ? "active" : ""}`} onClick={() => setNotePanel((panel) => panel === "paper" ? null : "paper")} aria-expanded={notePanel === "paper"}><NotebookTabs size={17} /><span>Giấy</span><ChevronDown size={11} /></button>
+              {!showNoteSidebar && <button className="note-sidebar-show-button" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện thanh điều hướng Note" title="Hiện thanh điều hướng Note"><PanelRightOpen size={16} /><span>Điều hướng Note</span></button>}
             </div>
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster note-tool-cluster">

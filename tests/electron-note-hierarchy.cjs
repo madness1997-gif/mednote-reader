@@ -28,16 +28,16 @@ async function launch() {
     let page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
 
-    let nav = page.locator('.note-sidebar-v6');
+    let nav = page.locator('.note-sidebar');
     await expect(nav).toBeVisible({ timeout: 15_000 });
     await submitName(page, nav.getByRole('button', { name: 'Tạo Notebook' }), 'Electron Nội tiết');
-    await expect(page.locator('.note-sidebar-v6 select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
+    await expect(page.locator('.note-sidebar select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
 
-    nav = page.locator('.note-sidebar-v6');
+    nav = page.locator('.note-sidebar');
     await submitName(page, nav.getByRole('button', { name: 'Thêm Section' }), 'Chuyển hóa');
     await expect(page.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
 
-    nav = page.locator('.note-sidebar-v6');
+    nav = page.locator('.note-sidebar');
     await submitName(page, nav.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');
     await expect(page.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
 
@@ -47,7 +47,7 @@ async function launch() {
     app = await launch();
     page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    nav = page.locator('.note-sidebar-v6');
+    nav = page.locator('.note-sidebar');
     await expect(nav.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
     await expect(nav.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
     await expect(nav.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();

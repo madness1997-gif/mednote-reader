@@ -11,12 +11,12 @@ async function submitName(page, trigger, answer) {
   await dialog.locator('input[type="text"]').fill(answer);
   await dialog.locator('button[type="submit"]').click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator('.note-sidebar-v6')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 10_000 });
 }
 
 async function reloadAndFindNavigator(page) {
   await page.reload({ waitUntil: 'domcontentloaded' });
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   await expect(nav).toBeVisible({ timeout: 10_000 });
   return nav;
 }
@@ -45,7 +45,7 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
   });
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  let nav = page.locator('.note-sidebar-v6');
+  let nav = page.locator('.note-sidebar');
   await expect(nav).toBeVisible({ timeout: 10_000 });
   await expect(nav.locator('.note-sidebar-section-open', { hasText: 'Phần 1' })).toBeVisible();
 

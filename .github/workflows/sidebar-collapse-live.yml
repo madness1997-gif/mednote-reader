@@ -78,7 +78,7 @@ jobs:
             const response = await page.goto(`https://madness1997-gif.github.io/mednote-reader/?sidebar-collapse=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
             if (!response || response.status() !== 200) throw new Error(`Live status ${response?.status()}`);
 
-            const nav = page.locator('.note-sidebar-v6');
+            const nav = page.locator('.note-sidebar');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
             const close = nav.getByRole('button', { name: 'Ẩn thanh điều hướng Note' });
             await close.waitFor({ state: 'visible', timeout: 10000 });
@@ -97,8 +97,8 @@ jobs:
             await restore.click();
             await page.locator('.note-sidebar-bookbar').waitFor({ state: 'visible', timeout: 5000 });
 
-            const hiddenPreference = await page.evaluate(() => localStorage.getItem('mednote-note-sidebar-v6-hidden'));
-            if (hiddenPreference !== '0') throw new Error(`Wrong v6 sidebar preference: ${hiddenPreference}`);
+            const hiddenPreference = await page.evaluate(() => localStorage.getItem('mednote-note-sidebar-hidden'));
+            if (hiddenPreference !== '0') throw new Error(`Wrong sidebar preference: ${hiddenPreference}`);
 
             if (errors.length) throw new Error(`Browser errors: ${JSON.stringify(errors)}`);
             console.log('SIDEBAR_COLLAPSE_RESTORE_OK');

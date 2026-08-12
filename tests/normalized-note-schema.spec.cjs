@@ -52,7 +52,7 @@ test('legacy logical pages migrate into v6 Page, Sheet, and SheetContent records
   });
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.note-sidebar-v6')).toBeVisible({ timeout: 12_000 });
+  await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 12_000 });
 
   await expect.poll(async () => page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {

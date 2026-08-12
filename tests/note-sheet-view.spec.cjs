@@ -30,7 +30,7 @@ test('same-Page Sheets switch between single and continuous views without duplic
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
   const toolbar = page.getByRole('toolbar', { name: 'Công cụ ghi chú' });
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   await expect(nav).toBeVisible({ timeout: 12_000 });
   await expect(toolbar.getByRole('button', { name: 'Thêm trang' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Xóa trang note' })).toHaveCount(0);

@@ -120,9 +120,7 @@ body {
 .workspace.workspace-mode-note.note-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
 .workspace.workspace-mode-note .pdf-thumbnails, .workspace.workspace-mode-note .reader-pane, .workspace.workspace-mode-note .split-divider { display: none; }
 .workspace.pdf-rail-collapsed .pdf-thumbnails { display: none; }
-.pdf-thumbnails, .note-navigation-host { min-width: 0; background: rgba(255,255,255,.75); overflow: auto; scrollbar-width: thin; }
-.pdf-thumbnails { border-right: 1px solid var(--line); padding: 8px; }
-.note-navigation-host { border-left: 1px solid var(--line); padding: 10px 8px; }
+.pdf-thumbnails { min-width: 0; padding: 8px; overflow: auto; border-right: 1px solid var(--line); background: rgba(255,255,255,.75); scrollbar-width: thin; }
 .note-hydration-status { position: sticky; top: 12px; z-index: 20; align-self: center; width: max-content; max-width: calc(100% - 24px); margin: 8px auto -42px; padding: 8px 12px; border-radius: 999px; color: #36515b; background: rgba(255,255,255,.94); box-shadow: 0 4px 18px rgba(27,52,61,.14); font-size: 13px; pointer-events: none; }
 .rail-heading { height: 38px; justify-content: space-between; color: var(--muted); padding: 0 3px; }
 .pdf-rail-tabs { position: sticky; top: 0; z-index: 2; height: 39px; display: flex; align-items: center; justify-content: center; gap: 2px; margin: -2px -2px 7px; padding: 3px 2px 6px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); }
@@ -350,7 +348,9 @@ body {
 
 .split-divider { background: #d9e2e5; display: grid; place-items: center; cursor: col-resize; color: var(--muted); writing-mode: vertical-rl; font-size: 10px; user-select: none; }
 .split-divider:hover { background: #bed4d6; }
-.note-toolbar { flex-wrap: nowrap; overflow: visible; }
+.note-toolbar { position: relative; flex-wrap: nowrap; overflow: visible; }
+.workspace.note-sidebar-collapsed .note-toolbar .toolbar-row-primary { padding-right: 116px; }
+.workspace.note-sidebar-collapsed .note-sidebar-show-button { position: absolute; z-index: 2; top: 7px; right: 10px; }
 .note-toolbar.text-tools-open { height: 164px; flex: 0 0 164px; }
 .note-create-button { height: 34px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--navy); font-size: 12px; font-weight: 700; cursor: pointer; }
 .note-create-button.primary { border-color: var(--teal); background: var(--teal); color: white; }
@@ -743,7 +743,6 @@ body {
   .workspace.workspace-mode-reader.pdf-rail-collapsed { grid-template-columns: minmax(0, 1fr); }
   .workspace.workspace-mode-note { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
   .workspace.workspace-mode-note.note-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
-  .workspace.workspace-mode-note .note-navigation-host { display: block; }
   .note-navigation-host { display: none; }
   .search-field { width: 150px; }
   .document-title { max-width: 300px; }
@@ -761,9 +760,9 @@ body {
   .workspace { --mobile-pdf-rail-width: clamp(180px, 42vw, 286px); display: block; transition: padding-left .16s ease; }
   .workspace:not(.pdf-rail-collapsed) { padding-left: var(--mobile-pdf-rail-width); }
   .workspace.workspace-mode-note { padding-left: 0; }
-  .pdf-thumbnails, .note-navigation-host { display: none; }
+  .pdf-thumbnails { display: none; }
   .workspace:not(.pdf-rail-collapsed) .pdf-thumbnails { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; width: var(--mobile-pdf-rail-width); display: block; border-right: 1px solid var(--line); background: rgba(250,252,252,.99); box-shadow: 12px 0 30px rgba(24,50,74,.22); }
-  .workspace.workspace-mode-note .pdf-thumbnails, .workspace.workspace-mode-note .note-navigation-host { display: none; }
+  .workspace.workspace-mode-note .pdf-thumbnails { display: none; }
   .reader-pane, .notes-pane { height: auto; min-height: calc(100dvh - 56px); overflow: visible; }
   .reader-pane { border-bottom: 6px solid var(--line); }
   .split-divider { display: none; }
@@ -783,6 +782,9 @@ body {
   .workspace-mode-switcher button { width: 32px; min-width: 32px; padding: 0; }
   .workspace-mode-switcher button span { display: none; }
   .pane-toolbar, .note-toolbar { padding: 0 9px; }
+  .workspace.note-sidebar-collapsed .note-toolbar .toolbar-row-primary { padding-right: 42px; }
+  .workspace.note-sidebar-collapsed .note-sidebar-show-button { position: fixed; z-index: 34; top: 64px; right: 9px; width: 34px; justify-content: center; padding: 0; }
+  .note-sidebar-show-button span { display: none; }
   .current-document-label { max-width: 115px; }
   .document-switcher { max-width: 145px; }
   .zoom-control { display: none; }

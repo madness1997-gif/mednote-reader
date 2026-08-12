@@ -68,7 +68,7 @@ test.afterEach(async ({ page }) => {
 
 test('v6 NoteStore survives reload with only the active Sheet hydrated', async ({ page }) => {
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  const nav = page.locator('.note-sidebar-v6');
+  const nav = page.locator('.note-sidebar');
   await expect(nav).toBeVisible({ timeout: 12_000 });
   await expect(nav.locator('select[aria-label="Notebook"]')).toHaveValue('lazy-render-notebook');
 
@@ -80,7 +80,7 @@ test('v6 NoteStore survives reload with only the active Sheet hydrated', async (
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/, { timeout: 12_000 });
-  await expect(page.locator('.note-sidebar-v6')).toBeVisible();
+  await expect(page.locator('.note-sidebar')).toBeVisible();
   await expect(page.locator('[data-note-page-id="lazy-render-page-1"] .note-editor')).toContainText('ACTIVE_RENDER_CONTENT');
   await expect(page.locator('[data-note-page-id="lazy-render-page-2"]')).toHaveCount(0);
   expect(await page.evaluate(() => window.__MEDNOTE_LIVE_STATE__)).toBeUndefined();
@@ -92,7 +92,7 @@ test('v6 NoteStore survives reload with only the active Sheet hydrated', async (
 
 test('opening a lazy Sheet hydrates it without reload or React update loop', async ({ page }) => {
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.note-sidebar-v6')).toBeVisible({ timeout: 12_000 });
+  await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 12_000 });
   const token = await page.evaluate(() => {
     window.__wave2NavigationToken = crypto.randomUUID();
     return window.__wave2NavigationToken;

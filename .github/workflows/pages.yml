@@ -164,7 +164,7 @@ jobs:
             const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
             if (!response || response.status() !== 200) throw new Error(`Live page status ${response?.status()}`);
 
-            let nav = page.locator('.note-sidebar-v6');
+            let nav = page.locator('.note-sidebar');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
 
             const deadline = Date.now() + 15000;
@@ -200,7 +200,7 @@ jobs:
             const workspaceClass = await workspace.getAttribute('class') || '';
             if (!workspaceClass.includes('workspace-mode-note')) throw new Error(`Reloaded wrong workspace mode: ${workspaceClass}`);
 
-            nav = page.locator('.note-sidebar-v6');
+            nav = page.locator('.note-sidebar');
             await nav.waitFor({ state: 'visible', timeout: 15000 });
             const selectedNotebook = await nav.locator('select[aria-label="Notebook"]').inputValue();
             if (selectedNotebook !== 'live-notebook-1') throw new Error(`Wrong sidebar notebook after IndexedDB reload: ${selectedNotebook}`);
