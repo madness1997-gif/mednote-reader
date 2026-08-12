@@ -1,4 +1,5 @@
 import type { NoteRepository } from "./note-repository";
+import { noteContextForSheet } from "./note-domain";
 import type {
   ActiveNoteState,
   NoteStructure,
@@ -138,7 +139,21 @@ export class NoteCommands {
 
   deleteSheet(id: string) {
     return this.enqueue(async () => {
+      const structure = await this.repository.loadNoteStructure();
+      if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
+      const deleting = structure.sheets.find((sheet) => sheet.id === id);
+      if (!deleting) throw new Error(`Không tìm thấy Sheet ${id}`);
+
+      let replacementActive: ActiveNoteState | null = null;
+      if (structure.active.activeSheetId === id) {
+        const siblings = this.sheetsForPage(structure, structure.pages.find((page) => page.id === deleting.pageId)!);
+        const deletingIndex = siblings.findIndex((sheet) => sheet.id === id);
+        const replacement = siblings[deletingIndex + 1] || siblings[deletingIndex - 1];
+        if (replacement) replacementActive = noteContextForSheet(structure, replacement.id);
+      }
+
       await this.repository.deleteSheet(id);
+      if (replacementActive) await this.repository.setActiveState(replacementActive);
       return this.committedResult();
     });
   }
