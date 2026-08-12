@@ -1,4 +1,4 @@
-name: Desktop Note Lifecycle Audit
+name: Note Lifecycle Audit
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  desktop-note-lifecycle:
+  note-lifecycle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,5 +17,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test tests/note-sheet-delete-active.spec.cjs tests/note-hierarchy-actions.spec.cjs --project=chromium
       - run: npm run build:desktop
       - run: xvfb-run -a node tests/electron-note-hierarchy-crud-audit.cjs
