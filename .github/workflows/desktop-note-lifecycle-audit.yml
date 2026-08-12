@@ -19,6 +19,6 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test tests/note-sheet-delete-active.spec.cjs tests/note-hierarchy-actions.spec.cjs --project=chromium
+      - run: npx playwright test tests/note-sheet-delete-active.spec.cjs tests/note-hierarchy-actions.spec.cjs
       - run: npm run build:desktop
       - run: xvfb-run -a node tests/electron-note-hierarchy-crud-audit.cjs
