@@ -1,7 +1,7 @@
 import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { LibraryProjection } from "../library-projection";
-import { notebookIconStyle } from "../notebook-color";
+import { notebookIconStyle } from "./notebook-color-style";
 import "../library-panel.css";
 
 export type LibraryPanelProps = {
