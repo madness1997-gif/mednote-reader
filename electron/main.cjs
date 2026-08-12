@@ -114,7 +114,7 @@ function oauthErrorMessage(error) {
     return "OAuth Client ID không đúng loại Desktop app. Hãy tạo Client ID loại Desktop app trong Google Cloud rồi dán lại vào MedNote.";
   }
   if (/client_secret.*missing|missing.*client_secret/i.test(message)) {
-    return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại MedNote, nhập Client Secret được cấp cùng Client ID rồi kết nối lại.";
+    return "Google yêu cầu Client Secret của OAuth Desktop này. Hãy quay lại MedNote, chọn Nhập tệp OAuth JSON hoặc nhập Client Secret rồi kết nối lại.";
   }
   if (/redirect_uri_mismatch/i.test(message)) {
     return "OAuth Client ID không hỗ trợ địa chỉ callback của ứng dụng desktop. Hãy dùng Client ID loại Desktop app.";

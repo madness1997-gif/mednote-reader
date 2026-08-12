@@ -23,6 +23,19 @@ const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
 
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Kết nối Google Drive' }).click();
+    const drivePanel = page.locator('.drive-panel');
+    await expect(drivePanel.getByRole('button', { name: 'Nhập tệp OAuth JSON' })).toBeVisible();
+    await drivePanel.locator('input[type="file"]').setInputFiles({
+      name: 'oauth-desktop.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ installed: {
+        client_id: 'smoke-desktop.apps.googleusercontent.com',
+        client_secret: 'GOCSPX-smoke-secret',
+      } })),
+    });
+    await expect(drivePanel.locator('.drive-client-id input').first()).toHaveValue('smoke-desktop.apps.googleusercontent.com');
+    await expect(drivePanel.locator('input[type="password"]')).toHaveValue('GOCSPX-smoke-secret');
     await page.waitForTimeout(500);
     expect(runtimeErrors).toEqual([]);
     process.stdout.write('Electron startup smoke test passed\n');
