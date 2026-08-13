@@ -89,13 +89,14 @@ test("P8 First Aid keeps v4 serialization behind domain/codec/renderer boundarie
     source("app/first-aid-block-renderer.ts"),
     source("app/first-aid-template-adapter.ts"),
     source("app/first-aid-image-service.ts"),
-    source("app/first-aid-block-editor-v2.tsx"),
+    source("app/first-aid-block-editor.tsx"),
     source("app/use-first-aid-block-editor.ts"),
     source("app/first-aid-block-editor-components.tsx"),
   ]);
   assert.match(codec, /FIRST_AID_SERIALIZATION_VERSION = 4/);
   assert.match(codec, /migrateFirstAidPayload/);
   assert.match(domain, /export type FirstAidBlock/);
+  assert.doesNotMatch(domain, /"arrange"/);
   assert.match(renderer, /sanitizeRichTextHtml/);
   assert.match(adapter, /firstAidTemplateTransition/);
   assert.match(model, /first-aid-block-domain/);
@@ -110,6 +111,7 @@ test("P8 First Aid keeps v4 serialization behind domain/codec/renderer boundarie
   assert.match(components, /FirstAidBlockBody/);
   assert.doesNotMatch(`${domain}\n${codec}\n${renderer}\n${adapter}\n${imageService}\n${editor}\n${controller}\n${components}`, /mednote:first-aid-image-resize/);
   await assert.rejects(source("app/first-aid-block-editor-view.tsx"));
+  await assert.rejects(source("app/first-aid-block-editor-v2.tsx"));
 });
 
 test("P8 symbol and zoom shims no longer own global DOM state", async () => {
