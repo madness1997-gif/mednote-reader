@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent,
 import "./first-aid-block-editor.css";
 import type { BlockType, FirstAidBlock } from "./first-aid-block-domain";
 import type { FirstAidBlockEditorProps } from "./first-aid-block-editor-contract";
+import { firstAidImagePlacement, type FirstAidImagePlacement } from "./first-aid-image-placement";
 import {
   FIRST_AID_BLOCK_OPTIONS,
   FirstAidBlockBody,
@@ -58,7 +59,7 @@ export function FirstAidBlockEditor({
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const assetUrlsRef = useRef<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingImageBlockRef = useRef<{ blockId: string; placement: { x: number; y: number; width: number } } | null>(null);
+  const pendingImageBlockRef = useRef<{ blockId: string; placement: FirstAidImagePlacement } | null>(null);
   const pageObjectLayoutKey = pageObjectIds.map((id) => `${id}:${pageObjectLayouts[id]?.height ?? 0}`).join("|");
   const assetIds = useMemo(() => Array.from(new Set(blocks.map((block) => block.imageAssetId).filter((value): value is string => Boolean(value)))).sort(), [blocks]);
   const assetIdsKey = assetIds.join("|");
@@ -95,21 +96,13 @@ export function FirstAidBlockEditor({
 
   const blockPlacement = (blockId: string, element: HTMLElement) => {
     const page = element.closest<HTMLElement>(".typed-layer");
-    if (!page) return { x: .16, y: .28, width: .68 };
+    const blockType = blocksRef.current.find((block) => block.id === blockId)?.type;
+    if (!page) return blockType === "figure-text"
+      ? { x: .1, y: .28, width: .28, maxHeight: .22 }
+      : { x: .27, y: .28, width: .46, maxHeight: .3 };
     const elementRect = element.getBoundingClientRect();
     const pageRect = page.getBoundingClientRect();
-    const pageWidth = Math.max(1, pageRect.width);
-    const pageHeight = Math.max(1, pageRect.height);
-    const zoneX = Math.max(0, (elementRect.left - pageRect.left) / pageWidth);
-    const zoneWidth = Math.min(1 - zoneX, Math.max(.06, elementRect.width / pageWidth));
-    const blockType = blocksRef.current.find((block) => block.id === blockId)?.type;
-    const preferredWidth = blockType === "figure-text"
-      ? Math.min(.4, zoneWidth * .92)
-      : Math.min(.68, zoneWidth * .72);
-    const width = Math.max(blockType === "figure-text" ? .18 : .24, preferredWidth);
-    const x = Math.min(1 - width, Math.max(0, zoneX + Math.max(0, zoneWidth - width) / 2));
-    const y = Math.min(.94, Math.max(.04, (elementRect.top - pageRect.top) / pageHeight));
-    return { x, y, width };
+    return firstAidImagePlacement(blockType, elementRect, pageRect);
   };
 
   const openNativeImagePicker = () => {
@@ -137,7 +130,7 @@ export function FirstAidBlockEditor({
     if (canEdit) onRequestPdfCrop({ blockId, placement: blockPlacement(blockId, element) });
   };
 
-  const applyImageFile = async (blockId: string, file: File, placement: { x: number; y: number; width: number }) => {
+  const applyImageFile = async (blockId: string, file: File, placement: FirstAidImagePlacement) => {
     const looksLikeImage = file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
     if (!looksLikeImage) return;
     const { blob, aspectRatio } = await compressFirstAidImage(file);

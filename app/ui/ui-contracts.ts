@@ -1,4 +1,5 @@
 import type { PdfAnnotationHistory } from "../pdf-annotation-session";
+import type { FirstAidImagePlacement } from "../first-aid-image-placement";
 import type {
   ExcerptAppearance,
   NoteExcerpt,
@@ -26,7 +27,7 @@ export type TableBorderSettings = { style: TableBorderStyle; width: number; colo
 export type StickerPresetId = "classic-yellow" | "tape-pink" | "pin-mint" | "tab-blue" | "clinical-card" | "high-yield";
 export type TextInsertPopover = "symbols" | "equation" | "table" | "bullets" | "numbering" | "textColor" | "backgroundColor" | "tableLines" | "textBoxStyle" | "stickers" | null;
 export type EquationTemplate = "plain" | "fraction" | "root" | "power" | "subscript" | "sum" | "integral" | "matrix";
-export type FirstAidCropPlacement = { x: number; y: number; width: number };
+export type FirstAidCropPlacement = FirstAidImagePlacement;
 export type FirstAidCropTarget = { noteId: string; blockId: string; placement: FirstAidCropPlacement };
 export type FirstAidCropResult = { token: string; blockId: string; excerptId: string; imageName: string; aspectRatio: number };
 

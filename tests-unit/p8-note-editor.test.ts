@@ -55,6 +55,10 @@ test("P8 object operations preserve PDF provenance", () => {
   assert.equal(front.at(-1)?.documentId, "doc-1");
   assert.equal(front.at(-1)?.page, 9);
   assert.equal(session.rotate(layout, 90).rotation, 90);
+  assert.equal(session.move(layout, .25, 0).x, .35);
+  assert.equal(session.move(layout, 1, 0).x, .7);
+  assert.equal(session.move(layout, -.4, 0).x, 0);
+  assert.equal(session.move(layout, 0, .3).y, .5);
 });
 
 test("P8 source boundary keeps Note editor engines outside page.tsx", async () => {

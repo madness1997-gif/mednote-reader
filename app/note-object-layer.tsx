@@ -130,11 +130,7 @@ function DraggableExcerpt({ excerpt, source, index, selected, selectable, movabl
       };
     } else if (state.mode === "move") {
       if (Math.abs(dx) > .002 || Math.abs(dy) > .002) state.moved = true;
-      state.current = {
-          ...state.origin,
-          x: Math.min(1 - state.origin.width, Math.max(0, state.origin.x + dx)),
-          y: Math.min(1 - state.origin.height, Math.max(0, state.origin.y + dy)),
-      };
+      state.current = objectSession.move(state.origin, dx, dy);
     } else if (state.origin.aspectRatio) {
       const widthFromX = state.origin.width + dx;
       const widthFromY = state.origin.width + dy * state.hostHeight * state.origin.aspectRatio / state.hostWidth;
@@ -372,7 +368,8 @@ export function NoteObjectLayer({ excerpts, resolveSource, selectedId, activeToo
     {excerpts.map((excerpt, index) => {
       const selected = interactive && excerpt.id === selectedId;
       const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
-      return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveSource(excerpt)} index={index} selected={selected} selectable={interactive && (activeTool === "pointer" || activeTool === "text")} movable={interactive && (activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && (excerpt.kind === "text" || excerpt.kind === "image")))} editable={interactive && activeTool === "text" && selected && excerpt.kind === "text"} onSelect={onSelect} onMove={onMove} onEdit={onEdit} onTextActivate={onTextActivate} onNormalizeTextInput={onNormalizeTextInput} onOpenSource={onOpenSource} onDelete={onDelete} />;
+      const imageTextMode = excerpt.kind === "image" && activeTool === "text";
+      return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveSource(excerpt)} index={index} selected={selected} selectable={interactive && (activeTool === "pointer" || activeTool === "text")} movable={interactive && (activeTool === "pointer" || calloutTextMode || imageTextMode || (selected && activeTool === "text" && excerpt.kind === "text"))} editable={interactive && activeTool === "text" && selected && excerpt.kind === "text"} onSelect={onSelect} onMove={onMove} onEdit={onEdit} onTextActivate={onTextActivate} onNormalizeTextInput={onNormalizeTextInput} onOpenSource={onOpenSource} onDelete={onDelete} />;
     })}
   </div>;
 }

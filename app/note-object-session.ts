@@ -1,6 +1,14 @@
 import type { ExcerptLayout, NoteExcerpt } from "./note-runtime-adapter";
 
 export class NoteObjectSession {
+  move(layout: ExcerptLayout, deltaX: number, deltaY: number): ExcerptLayout {
+    return {
+      ...layout,
+      x: Math.min(1 - layout.width, Math.max(0, layout.x + deltaX)),
+      y: Math.min(1 - layout.height, Math.max(0, layout.y + deltaY)),
+    };
+  }
+
   contentScale(layout: ExcerptLayout, step: number): ExcerptLayout {
     return { ...layout, contentScale: Math.min(2.4, Math.max(.65, Number((layout.contentScale + step).toFixed(2)))) };
   }

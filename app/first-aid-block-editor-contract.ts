@@ -1,14 +1,15 @@
 import type { EditorMode } from "./first-aid-block-domain";
 import type { FirstAidDocument } from "./first-aid-document";
+import type { FirstAidImagePlacement } from "./first-aid-image-placement";
 import type { FirstAidPdfCropResult } from "./use-first-aid-block-editor";
 
 export type FirstAidBlockEditorProps = {
   document: FirstAidDocument;
   mode: EditorMode;
   onChange: (document: FirstAidDocument) => void;
-  onInsertImage: (image: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => Promise<{ excerptId: string } | null>;
+  onInsertImage: (image: { blob: Blob; name: string; aspectRatio: number; placement: FirstAidImagePlacement }) => Promise<{ excerptId: string } | null>;
   onRemoveImage: (excerptId: string) => void;
-  onRequestPdfCrop: (request: { blockId: string; placement: { x: number; y: number; width: number } }) => void;
+  onRequestPdfCrop: (request: { blockId: string; placement: FirstAidImagePlacement }) => void;
   pdfCropResult: FirstAidPdfCropResult | null;
   onPdfCropHandled: (token: string) => void;
   pageObjectIds: string[];

@@ -61,6 +61,7 @@ import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
 import { firstAidDocumentFromLegacy, firstAidTemplateTransition, normalizeFirstAidDocument } from "./first-aid-block-model";
+import { fitFirstAidImageLayout } from "./first-aid-image-placement";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -1371,11 +1372,10 @@ export default function Home() {
       const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
       layout.aspectRatio = aspectRatio;
       if (cropTarget) {
-        layout.width = Math.min(.9, Math.max(.06, cropTarget.placement.width));
-        layout.x = Math.min(1 - layout.width, Math.max(0, cropTarget.placement.x));
+        Object.assign(layout, fitFirstAidImageLayout(cropTarget.placement, aspectRatio, paperWidth, paperHeight));
+      } else {
+        layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / aspectRatio));
       }
-      layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / aspectRatio));
-      if (cropTarget) layout.y = Math.min(1 - layout.height, Math.max(.04, cropTarget.placement.y));
       const excerptId = uid("excerpt");
       const excerpt: NoteExcerpt = {
         id: excerptId,
@@ -1423,7 +1423,7 @@ export default function Home() {
     setFirstAidCropResult((current) => current?.token === token ? null : current);
   };
 
-  const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => {
+  const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: FirstAidCropPlacement }) => {
     const assetId = uid("note-image");
     try {
       await localBinaryStorage.saveAsset(assetId, blob);
@@ -1432,10 +1432,7 @@ export default function Home() {
       const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
       const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
       layout.aspectRatio = Math.max(.01, aspectRatio);
-      layout.width = Math.min(.9, Math.max(.06, placement.width));
-      layout.x = Math.min(1 - layout.width, Math.max(0, placement.x));
-      layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / layout.aspectRatio));
-      layout.y = Math.min(1 - layout.height, Math.max(.04, placement.y));
+      Object.assign(layout, fitFirstAidImageLayout(placement, layout.aspectRatio, paperWidth, paperHeight));
       const excerptId = uid("excerpt");
       const excerpt: NoteExcerpt = {
         id: excerptId,
