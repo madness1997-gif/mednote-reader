@@ -60,7 +60,7 @@ import { documentLibrary, type DocumentMutationResult } from "./document-library
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
-import { regularTemplateRichText } from "./first-aid-block-model";
+import { firstAidDocumentFromLegacy, firstAidDocumentPlainText, firstAidDocumentStandardRichText, normalizeFirstAidDocument } from "./first-aid-block-model";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -2272,7 +2272,7 @@ export default function Home() {
       const leavingFirstAid = activeNote.paper.template === "first-aid";
       updateActiveNote({
         paper: { ...activeNote.paper, template },
-        ...(leavingFirstAid ? { bodyHtml: regularTemplateRichText(activeNote.bodyHtml ?? "", activeNote.body) } : {}),
+        ...(leavingFirstAid ? { body: firstAidDocumentPlainText(activeNote.firstAid), bodyHtml: firstAidDocumentStandardRichText(activeNote.firstAid) } : {}),
       });
       setToast(leavingFirstAid ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
       return;
@@ -2280,6 +2280,7 @@ export default function Home() {
     updateActiveNote({
       paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
       text: { ...activeNote.text, font: "times", size: 12, align: "left" },
+      firstAid: normalizeFirstAidDocument(activeNote.firstAid) ?? firstAidDocumentFromLegacy(activeNote.bodyHtml ?? "", activeNote.body),
     });
     setActiveTool("text");
     setToast("Đã áp dụng bố cục First Aid");
