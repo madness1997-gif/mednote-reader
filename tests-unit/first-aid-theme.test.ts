@@ -44,3 +44,19 @@ test("First Aid table shape controls are contextual instead of permanently occup
   assert.match(styles, /\.fa-block-toolbar\s*\{[\s\S]*?display:\s*none/);
   assert.match(styles, /\.fa-block\.selected \.fa-block-toolbar\s*\{\s*display:\s*flex/);
 });
+
+test("FA1 keeps First Aid presentation in one canonical stylesheet without global hint leakage", async () => {
+  const [entry, styles] = await Promise.all([
+    readFile(new URL("app/first-aid-block-editor.tsx", root), "utf8"),
+    readFile(new URL("app/first-aid-block-editor.css", root), "utf8"),
+  ]);
+
+  assert.doesNotMatch(entry, /first-aid-block-editor-ui-fix\.css|first-aid-signature-polish\.css/);
+  assert.match(styles, /\.template-first-aid \.note-title-input/);
+  assert.match(styles, /\.template-first-aid \.mode-hint\s*\{/);
+  assert.doesNotMatch(styles, /(?:^|\n)\.mode-hint\s*\{/);
+  assert.match(styles, /\.fa-block-editor:not\(\.mode-view\) > \.fa-insert-slot\.first:last-child/);
+
+  await assert.rejects(readFile(new URL("app/first-aid-block-editor-ui-fix.css", root), "utf8"));
+  await assert.rejects(readFile(new URL("app/first-aid-signature-polish.css", root), "utf8"));
+});
