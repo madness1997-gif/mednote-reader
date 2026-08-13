@@ -109,6 +109,8 @@ test('First Aid keeps the approved layout metrics', async ({ page }) => {
     return {
       titleHeight: style('.note-title-input').minHeight,
       titleSize: style('.note-title-input').fontSize,
+      titleDirection: style('.note-title-input').direction,
+      titleAlignment: style('.note-title-input').textAlign,
       labelColumns: style('.fa-label-layout').gridTemplateColumns,
       labelSize: style('.fa-label-input').fontSize,
       contentSize: style('.fa-content-input').fontSize,
@@ -128,6 +130,8 @@ test('First Aid keeps the approved layout metrics', async ({ page }) => {
   expect(metrics).toEqual({
     titleHeight: '34px',
     titleSize: '13px',
+    titleDirection: 'ltr',
+    titleAlignment: 'left',
     labelColumns: '138.453px 463.547px',
     labelSize: '9.5px',
     contentSize: '11.5px',
