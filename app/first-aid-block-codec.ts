@@ -1,5 +1,5 @@
 import { createBlock, lines, type FirstAidBlock } from "./first-aid-block-domain";
-import { renderFirstAidBlocksHtml } from "./first-aid-block-renderer";
+import { renderFirstAidBlocksHtml, sanitizeBlockRichTextHtml } from "./first-aid-block-renderer";
 
 export const FIRST_AID_SERIALIZATION_VERSION = 4;
 
@@ -82,6 +82,81 @@ function recoverLegacySections(blocks: FirstAidBlock[]) {
   });
 }
 
+function normalizedNodeText(value: string | null | undefined) {
+  return (value ?? "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").trim();
+}
+
+function legacyTableBlocks(table: HTMLTableElement) {
+  const rows = Array.from(table.querySelectorAll("tr"));
+  const labels = rows.map((row) => normalizedNodeText(row.querySelector("th")?.textContent).toLocaleUpperCase("vi-VN").replace(/\s+/g, " "));
+  const recognized = labels.filter((label) => LEGACY_SECTION_LABELS.some((candidate) => label === candidate || label.startsWith(`${candidate}:`))).length;
+  if (recognized < 3 || recognized < Math.ceil(rows.length / 2)) return null;
+  return rows.map((row) => {
+    const header = row.querySelector("th");
+    const cell = row.querySelector("td");
+    const label = normalizedNodeText(header?.textContent) || "NHÃN";
+    const text = normalizedNodeText(cell?.textContent);
+    const labelHtml = header ? sanitizeBlockRichTextHtml(header.innerHTML) : undefined;
+    const textHtml = cell ? sanitizeBlockRichTextHtml(cell.innerHTML) : undefined;
+    if (["PEARL", "CLINICAL PEARL", "HIGH-YIELD", "ĐIỂM CẦN NHỚ"].some((candidate) => label.toLocaleUpperCase("vi-VN").includes(candidate))) {
+      return { ...createBlock("pearl"), label, labelHtml, text, textHtml };
+    }
+    return { ...createBlock("label"), label, labelHtml, text, textHtml };
+  });
+}
+
+function regularTableBlock(table: HTMLTableElement): FirstAidBlock | null {
+  const rows = Array.from(table.querySelectorAll("tr"));
+  if (!rows.length) return null;
+  const rowCells = rows.map((row) => Array.from(row.querySelectorAll(":scope > th, :scope > td")));
+  const width = Math.max(0, ...rowCells.map((cells) => cells.length));
+  if (!width) return null;
+  const values = rowCells.map((cells) => Array.from({ length: width }, (_, index) => normalizedNodeText(cells[index]?.textContent)));
+  const valuesHtml = rowCells.map((cells) => Array.from({ length: width }, (_, index) => sanitizeBlockRichTextHtml(cells[index]?.innerHTML ?? "")));
+  return { ...createBlock("table"), rows: values, rowsHtml: valuesHtml };
+}
+
+function listBlock(element: HTMLElement): FirstAidBlock {
+  const ordered = element.tagName === "OL";
+  const items = Array.from(element.querySelectorAll(":scope > li"));
+  const text = items.map((item) => normalizedNodeText(item.textContent)).filter(Boolean).join("\n");
+  return {
+    ...createBlock("text"),
+    text,
+    textHtml: sanitizeBlockRichTextHtml(element.outerHTML),
+    textStyle: ordered ? "numbered" : "bullets",
+  };
+}
+
+function regularElementBlocks(element: HTMLElement): FirstAidBlock[] {
+  if (element.tagName === "TABLE") {
+    const legacy = legacyTableBlocks(element as HTMLTableElement);
+    if (legacy) return legacy;
+    const table = regularTableBlock(element as HTMLTableElement);
+    return table ? [table] : [];
+  }
+  if (element.tagName === "UL" || element.tagName === "OL") return [listBlock(element)];
+  const text = normalizedNodeText(element.textContent);
+  const html = sanitizeBlockRichTextHtml(element.outerHTML);
+  if (!text && !html.replace(/<br\s*\/?>/gi, "").replace(/<[^>]+>/g, "").trim()) return [];
+  return [{ ...createBlock("text"), text, textHtml: html, textStyle: "paragraph" }];
+}
+
+function regularRichTextBlocks(html: string) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const blocks: FirstAidBlock[] = [];
+  parsed.body.childNodes.forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = normalizedNodeText(node.textContent);
+      if (text) blocks.push({ ...createBlock("text"), text, textStyle: "paragraph" });
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    blocks.push(...regularElementBlocks(node as HTMLElement));
+  });
+  return recoverLegacySections(blocks);
+}
+
 /**
  * Central migration boundary for persisted First Aid payloads.
  * v1-v4 share the same block envelope; legacy semantic repair is applied here,
@@ -91,7 +166,7 @@ function recoverLegacySections(blocks: FirstAidBlock[]) {
 export function migrateFirstAidPayload(payload: FirstAidPayload): FirstAidBlock[] | null {
   if (!Array.isArray(payload.blocks)) return null;
   const version = Number(payload.version ?? 1);
-  if (!Number.isFinite(version) || version < 1) return null;
+  if (!Number.isFinite(version) || version < 1 || version > FIRST_AID_SERIALIZATION_VERSION) return null;
   return recoverLegacySections(payload.blocks);
 }
 
@@ -131,13 +206,8 @@ export function parseBlocks(html: string, plainText: string): FirstAidBlock[] {
     }
   }
   if (typeof DOMParser !== "undefined" && html.trim()) {
-    const document = new DOMParser().parseFromString(html, "text/html");
-    const rows = Array.from(document.querySelectorAll("table tr"));
-    if (rows.length) return rows.map((row) => {
-      const label = row.querySelector("th")?.textContent?.trim() ?? "NHÃN";
-      const text = row.querySelector("td")?.textContent?.trim() ?? "";
-      return label.toUpperCase().includes("PEARL") ? { ...createBlock("pearl"), label, text } : { ...createBlock("label"), label, text };
-    });
+    const imported = regularRichTextBlocks(html);
+    if (imported.length) return imported;
   }
   const paragraphs = plainText.split(/\n{2,}/).map((text) => text.trim()).filter(Boolean);
   if (paragraphs.length) return recoverLegacySections(paragraphs.map((text) => ({ ...createBlock("text"), text, textStyle: "paragraph" })));
