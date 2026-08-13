@@ -93,17 +93,25 @@ export function FirstAidBlockEditor({
     assetUrlsRef.current = {};
   }, []);
 
-  const blockPlacement = (element: HTMLElement) => {
+  const blockPlacement = (blockId: string, element: HTMLElement) => {
     const page = element.closest<HTMLElement>(".typed-layer");
-    if (!page) return { x: .1, y: .28, width: .8 };
+    if (!page) return { x: .16, y: .28, width: .68 };
     const elementRect = element.getBoundingClientRect();
     const pageRect = page.getBoundingClientRect();
-    const width = Math.min(.9, Math.max(.06, elementRect.width / Math.max(1, pageRect.width)));
-    return {
-      x: Math.min(1 - width, Math.max(0, (elementRect.left - pageRect.left) / Math.max(1, pageRect.width))),
-      y: Math.min(.94, Math.max(.04, (elementRect.top - pageRect.top) / Math.max(1, pageRect.height))),
-      width,
-    };
+    const pageWidth = Math.max(1, pageRect.width);
+    const pageHeight = Math.max(1, pageRect.height);
+    const zoneX = Math.max(0, (elementRect.left - pageRect.left) / pageWidth);
+    const zoneWidth = Math.min(1 - zoneX, Math.max(.06, elementRect.width / pageWidth));
+    const blockType = blocksRef.current.find((block) => block.id === blockId)?.type;
+    const preferredWidth = blockType === "figure-text"
+      ? Math.min(.4, zoneWidth * .92)
+      : Math.min(.68, zoneWidth * .72);
+    const width = Math.max(blockType === "figure-text" ? .18 : .24, preferredWidth);
+    const x = Math.min(1 - width, Math.max(0, zoneX + Math.max(0, zoneWidth - width) / 2));
+    const blockSection = element.closest<HTMLElement>(".fa-block");
+    const toolbarHeight = blockSection?.querySelector<HTMLElement>(".fa-block-toolbar")?.offsetHeight ?? 0;
+    const y = Math.min(.94, Math.max(.04, (elementRect.top - pageRect.top - toolbarHeight) / pageHeight));
+    return { x, y, width };
   };
 
   const openNativeImagePicker = () => {
@@ -123,12 +131,12 @@ export function FirstAidBlockEditor({
 
   const requestImage = (blockId: string, element: HTMLElement) => {
     if (!canEdit) return;
-    pendingImageBlockRef.current = { blockId, placement: blockPlacement(element) };
+    pendingImageBlockRef.current = { blockId, placement: blockPlacement(blockId, element) };
     openNativeImagePicker();
   };
 
   const requestPdfCrop = (blockId: string, element: HTMLElement) => {
-    if (canEdit) onRequestPdfCrop({ blockId, placement: blockPlacement(element) });
+    if (canEdit) onRequestPdfCrop({ blockId, placement: blockPlacement(blockId, element) });
   };
 
   const applyImageFile = async (blockId: string, file: File, placement: { x: number; y: number; width: number }) => {
@@ -204,7 +212,7 @@ export function FirstAidBlockEditor({
             updateBlock={updateBlock}
             onBrowseImage={requestImage}
             onPdfCrop={requestPdfCrop}
-            onDropImage={(blockId, file, element) => { void applyImageFile(blockId, file, blockPlacement(element)); }}
+            onDropImage={(blockId, file, element) => { void applyImageFile(blockId, file, blockPlacement(blockId, element)); }}
             onTextActivate={onTextActivate}
             onNormalizeTextInput={onNormalizeTextInput}
           />
