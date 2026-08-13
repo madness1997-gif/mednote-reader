@@ -7,7 +7,7 @@ import {
   type BlockType,
   type FirstAidBlock,
 } from "./first-aid-block-domain";
-import { parseBlocks, serializeBlocks } from "./first-aid-block-codec";
+import { createFirstAidDocument, type FirstAidDocument } from "./first-aid-document";
 
 export type FirstAidPdfCropResult = {
   token: string;
@@ -18,41 +18,38 @@ export type FirstAidPdfCropResult = {
 };
 
 type UseFirstAidBlockEditorInput = {
-  html: string;
-  plainText: string;
-  onChange: (html: string, plainText: string) => void;
+  document: FirstAidDocument;
+  onChange: (document: FirstAidDocument) => void;
   onRemoveImage: (excerptId: string) => void;
   pageObjectIds: string[];
   pdfCropResult: FirstAidPdfCropResult | null;
   onPdfCropHandled: (token: string) => void;
 };
 
-function plainTextForBlocks(blocks: FirstAidBlock[]) {
-  return blocks.map(blockPlainText).filter(Boolean).join("\n\n");
+function documentSignature(document: FirstAidDocument) {
+  return JSON.stringify(document);
 }
 
 export function useFirstAidBlockEditor({
-  html,
-  plainText,
+  document,
   onChange,
   onRemoveImage,
   pageObjectIds,
   pdfCropResult,
   onPdfCropHandled,
 }: UseFirstAidBlockEditorInput) {
-  const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => parseBlocks(html, plainText));
+  const [blocks, setBlocks] = useState<FirstAidBlock[]>(() => document.blocks);
   const blocksRef = useRef(blocks);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const lastEmittedHtmlRef = useRef<string | null>(null);
-  const normalizedSourceRef = useRef<string | null>(null);
+  const appliedSignatureRef = useRef(documentSignature(document));
   const handledCropTokenRef = useRef<string | null>(null);
 
   const emit = useCallback((next: FirstAidBlock[]) => {
-    const serialized = serializeBlocks(next);
-    lastEmittedHtmlRef.current = serialized;
-    onChange(serialized, plainTextForBlocks(next));
+    const nextDocument = createFirstAidDocument(next);
+    appliedSignatureRef.current = documentSignature(nextDocument);
+    onChange(nextDocument);
   }, [onChange]);
 
   const commit = useCallback((nextOrUpdater: FirstAidBlock[] | ((current: FirstAidBlock[]) => FirstAidBlock[])) => {
@@ -64,29 +61,18 @@ export function useFirstAidBlockEditor({
     emit(next);
   }, [emit]);
 
-  // External restore/sync may replace the content of the same Sheet id. Reconcile
-  // that source instead of treating the editor's mount-time parse as permanent.
+  // Restore/sync can replace the canonical document of the same Sheet id.
+  // Equivalent object clones are ignored so unrelated page updates do not
+  // clear the current block selection or insert menu.
   useEffect(() => {
-    if (html === lastEmittedHtmlRef.current) return;
-    const parsed = parseBlocks(html, plainText);
-    blocksRef.current = parsed;
-    setBlocks(parsed);
+    const signature = documentSignature(document);
+    if (signature === appliedSignatureRef.current) return;
+    appliedSignatureRef.current = signature;
+    blocksRef.current = document.blocks;
+    setBlocks(document.blocks);
     setSelectedId(null);
     setInsertAt(null);
-    normalizedSourceRef.current = null;
-  }, [html, plainText]);
-
-  // Normalize legacy input once per external source, while keeping v4 stable.
-  useEffect(() => {
-    const sourceKey = `${html}\u0000${plainText}`;
-    if (normalizedSourceRef.current === sourceKey) return;
-    normalizedSourceRef.current = sourceKey;
-    const normalizedHtml = serializeBlocks(blocksRef.current);
-    if (html !== normalizedHtml) {
-      lastEmittedHtmlRef.current = normalizedHtml;
-      onChange(normalizedHtml, plainTextForBlocks(blocksRef.current));
-    }
-  }, [html, plainText, onChange]);
+  }, [document]);
 
   const pageObjectKey = [...pageObjectIds].sort().join("|");
   useEffect(() => {

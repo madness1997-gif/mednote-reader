@@ -3,21 +3,30 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   createBlock,
+  createFirstAidDocument,
+  firstAidDocumentPlainText,
+  firstAidDocumentProjectionHtml,
   firstAidToStandardRichText,
   parseBlocks,
   regularTemplateRichText,
   serializeBlocks,
-  stripFirstAidBlockMetadata,
 } from "../app/first-aid-block-model";
-import { createBlankPage } from "../app/note-runtime-adapter";
+import { createBlankPage, normalizePage, notePageToSheetContent } from "../app/note-runtime-adapter";
 
-test("new notes and empty First Aid editors never seed instructional content", () => {
+test("new First Aid notes start with a canonical document and persist no duplicate body fields", () => {
   const page = createBlankPage();
   assert.equal(page.title, "GHI CHÚ 1");
   assert.equal(page.body, "");
   assert.equal(page.bodyHtml, "");
+  assert.equal(page.firstAid?.version, 1);
+  assert.deepEqual(page.firstAid?.blocks, []);
   assert.deepEqual(parseBlocks("", ""), []);
   assert.deepEqual(parseBlocks(serializeBlocks([]), ""), []);
+
+  const persisted = notePageToSheetContent(page) as Record<string, unknown>;
+  assert.deepEqual((persisted.firstAid as { blocks: unknown[] }).blocks, []);
+  assert.equal(Object.hasOwn(persisted, "body"), false);
+  assert.equal(Object.hasOwn(persisted, "bodyHtml"), false);
 
   for (const type of ["heading", "label", "text", "figure", "figure-text", "table", "flow", "pearl"] as const) {
     const block = createBlock(type);
@@ -29,26 +38,74 @@ function blockPlainValues(block: ReturnType<typeof createBlock>) {
   return [block.title, block.label, block.text, block.caption, ...(block.rows?.flat() ?? []), ...(block.steps ?? [])].filter((value): value is string => typeof value === "string");
 }
 
-test("leaving First Aid removes block rendering while preserving ordered content", () => {
+test("legacy v4 First Aid payloads lazily migrate to canonical document storage", () => {
   const heading = { ...createBlock("heading"), title: "SUY GIÁP", titleHtml: "<b>SUY GIÁP</b>" };
   const label = { ...createBlock("label"), label: "ĐIỀU TRỊ", text: "Levothyroxine", textHtml: "<i>Levothyroxine</i>" };
   const serialized = serializeBlocks([heading, label]);
-  const standard = firstAidToStandardRichText(serialized, "SUY GIÁP\n\nĐIỀU TRỊ\nLevothyroxine");
+  const legacy = createBlankPage();
+  legacy.firstAid = undefined;
+  legacy.body = "SUY GIÁP\n\nĐIỀU TRỊ\nLevothyroxine";
+  legacy.bodyHtml = serialized;
 
-  assert.doesNotMatch(standard, /data-mednote-first-aid|mednote-first-aid:/);
-  assert.doesNotMatch(standard, /grid-template-columns|--fa-/);
-  assert.match(standard, /SUY GIÁP/);
-  assert.match(standard, /ĐIỀU TRỊ/);
-  assert.match(standard, /<i>Levothyroxine<\/i>/);
-  assert.ok(standard.indexOf("SUY GIÁP") < standard.indexOf("ĐIỀU TRỊ"));
-  const regular = regularTemplateRichText(serialized, "fallback");
-  assert.match(regular, /<!--mednote-first-aid:/);
-  assert.equal(stripFirstAidBlockMetadata(regular), standard);
-  assert.deepEqual(parseBlocks(regular, "fallback").map((block) => block.type), ["heading", "label"]);
-  assert.equal(regularTemplateRichText("<div>Ghi chú thường</div>", "fallback"), "<div>Ghi chú thường</div>");
+  const migrated = normalizePage(legacy);
+  assert.equal(migrated.firstAid?.version, 1);
+  assert.deepEqual(migrated.firstAid?.blocks.map((block) => block.type), ["heading", "label"]);
+  assert.match(migrated.bodyHtml ?? "", /mednote-first-aid:/);
+
+  const persisted = notePageToSheetContent(migrated) as Record<string, unknown>;
+  assert.equal(Object.hasOwn(persisted, "body"), false);
+  assert.equal(Object.hasOwn(persisted, "bodyHtml"), false);
+  assert.deepEqual((persisted.firstAid as { blocks: { type: string }[] }).blocks.map((block) => block.type), ["heading", "label"]);
 });
 
-test("legacy untouched First Aid starter text stays off regular paper", () => {
+test("canonical First Aid document wins over a stale runtime HTML projection", () => {
+  const oldBlock = { ...createBlock("heading"), title: "NỘI DUNG CŨ" };
+  const page = createBlankPage();
+  page.firstAid = createFirstAidDocument([oldBlock]);
+  const hydrated = normalizePage(page);
+  assert.match(hydrated.bodyHtml ?? "", /NỘI DUNG CŨ/);
+
+  const newBlock = { ...createBlock("heading"), title: "NỘI DUNG MỚI" };
+  hydrated.firstAid = createFirstAidDocument([newBlock]);
+  // Simulate the one-render window where body/bodyHtml still contain the old projection.
+  const persisted = notePageToSheetContent(hydrated) as Record<string, unknown>;
+  const storedBlocks = (persisted.firstAid as { blocks: { title?: string }[] }).blocks;
+  assert.equal(storedBlocks[0]?.title, "NỘI DUNG MỚI");
+  assert.equal(Object.hasOwn(persisted, "body"), false);
+  assert.equal(Object.hasOwn(persisted, "bodyHtml"), false);
+});
+
+test("leaving First Aid uses semantic rich text while structured blocks stay dormant", () => {
+  const heading = { ...createBlock("heading"), title: "SUY GIÁP", titleHtml: "<b>SUY GIÁP</b>" };
+  const label = { ...createBlock("label"), label: "ĐIỀU TRỊ", text: "Levothyroxine", textHtml: "<i>Levothyroxine</i>" };
+  const document = createFirstAidDocument([heading, label]);
+  const serialized = firstAidDocumentProjectionHtml(document);
+  const plainText = firstAidDocumentPlainText(document);
+  const standard = firstAidToStandardRichText(serialized, plainText);
+  const regular = regularTemplateRichText(serialized, plainText);
+
+  assert.equal(regular, standard);
+  assert.doesNotMatch(regular, /data-mednote-first-aid|mednote-first-aid:/);
+  assert.doesNotMatch(regular, /grid-template-columns|--fa-/);
+  assert.match(regular, /SUY GIÁP/);
+  assert.match(regular, /ĐIỀU TRỊ/);
+  assert.match(regular, /<i>Levothyroxine<\/i>/);
+
+  const page = createBlankPage();
+  page.firstAid = document;
+  page.paper = { ...page.paper, template: "blank" };
+  page.body = plainText;
+  page.bodyHtml = regular;
+  const untouched = notePageToSheetContent(page) as Record<string, unknown>;
+  assert.equal((untouched.firstAid as { version: number }).version, 1);
+  assert.equal(untouched.bodyHtml, regular);
+
+  page.bodyHtml = `${regular}<div>Nội dung sửa ở giấy thường</div>`;
+  const edited = notePageToSheetContent(page) as Record<string, unknown>;
+  assert.equal(Object.hasOwn(edited, "firstAid"), false);
+});
+
+test("legacy untouched First Aid starter content stays off regular paper", () => {
   const starterText = "TỔNG QUAN\nYẾU TỐ NGUY CƠ\nCƠ CHẾ\nLÂM SÀNG\nCHẨN ĐOÁN\nĐIỀU TRỊ\nPEARL";
   const starterHtml = [
     "<table>",
@@ -67,20 +124,58 @@ test("legacy untouched First Aid starter text stays off regular paper", () => {
     regularTemplateRichText(starterHtml, `${starterText}\nNội dung người dùng`),
     starterHtml,
   );
+
+  const legacy = createBlankPage();
+  legacy.firstAid = undefined;
+  legacy.body = starterText;
+  legacy.bodyHtml = starterHtml;
+  const canonical = normalizePage(legacy);
+  assert.equal(canonical.firstAid?.legacyStarter, true);
+  canonical.paper = { ...canonical.paper, template: "blank" };
+  const persisted = notePageToSheetContent(canonical) as Record<string, unknown>;
+  assert.equal(persisted.body, "");
+  assert.equal(persisted.bodyHtml, "");
+  assert.equal(Object.hasOwn(persisted, "firstAid"), false);
 });
 
-test("paper template transition owns the First Aid to rich-text conversion", async () => {
-  const [page, stage, preview] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+test("FA3 owns canonical persistence and editor state from document to SheetContent", async () => {
+  const [runtime, document, adapter, renderer, editor, controller, stage, preview, page, repository, drive] = await Promise.all([
+    readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/first-aid-document.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/first-aid-template-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/first-aid-block-renderer.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/first-aid-block-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/use-first-aid-block-editor.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/note-sheet-preview.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/indexeddb-note-repository.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/drive-backup.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /activeNote\.paper\.template === "first-aid"/);
-  assert.match(page, /regularTemplateRichText\(activeNote\.bodyHtml \?\? "", activeNote\.body\)/);
-  assert.doesNotMatch(page, /FIRST_AID_TEMPLATE_(?:HTML|TEXT)|shouldSeed|TÊN CHỦ ĐỀ/);
-  assert.match(stage, /regularTemplateRichText/);
-  assert.match(stage, /stripFirstAidBlockMetadata/);
-  assert.match(preview, /regularTemplateRichText/);
+  assert.match(runtime, /firstAid\?: FirstAidDocument/);
+  assert.match(runtime, /delete persisted\.body;/);
+  assert.match(runtime, /delete persisted\.bodyHtml;/);
+  assert.match(runtime, /firstAidDocumentMatchesRegularProjection/);
+  assert.match(runtime, /if \(stored && !stored\.legacyStarter\) return stored/);
+  assert.match(document, /FIRST_AID_DOCUMENT_VERSION = 1/);
+  assert.match(document, /Runtime\/editor projection only/);
+  assert.doesNotMatch(adapter, /firstAidPayloadComment/);
+  assert.doesNotMatch(renderer, /from "\.\/note-runtime-adapter"/);
+
+  assert.match(editor, /useFirstAidBlockEditor\(\{ document, onChange/);
+  assert.doesNotMatch(editor, /plainText/);
+  assert.doesNotMatch(editor, /html,/);
+  assert.match(controller, /createFirstAidDocument\(next\)/);
+  assert.doesNotMatch(controller, /parseBlocks|serializeBlocks/);
+  assert.match(stage, /document=\{activeNote\.firstAid \?\? createFirstAidDocument\(\)\}/);
+  assert.match(stage, /onChange=\{\(firstAid\) => updateActiveNote\(\{ firstAid \}\)\}/);
+  assert.match(stage, /firstAid: undefined/);
+  assert.match(preview, /firstAidDocumentProjectionHtml\(note\.firstAid\)/);
+  assert.match(page, /body: firstAidDocumentPlainText\(activeNote\.firstAid\)/);
+  assert.match(page, /firstAid: normalizeFirstAidDocument\(activeNote\.firstAid\) \?\? firstAidDocumentFromLegacy/);
+
+  assert.match(repository, /const snapshot = clone\(content\)/);
+  assert.match(drive, /contentHash\(library\.sheetContents\[sheet\.id\]\)/);
 });
 
 test("Drive OAuth uses least-privilege shared-file scope", async () => {

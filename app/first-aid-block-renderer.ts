@@ -1,7 +1,7 @@
-import { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./note-runtime-adapter";
+import { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./rich-text-html";
 import { lines, type FirstAidBlock, type TextStyle } from "./first-aid-block-domain";
 
-export { plainTextToRichHtml } from "./note-runtime-adapter";
+export { plainTextToRichHtml } from "./rich-text-html";
 
 export function sanitizeBlockRichTextHtml(value: string) {
   return sanitizeRichTextHtml(value);

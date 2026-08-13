@@ -1,26 +1,24 @@
 import type { PaperTemplate } from "./note-runtime-adapter";
 import {
-  firstAidPayloadComment,
   hasFirstAidBlockSerialization,
   isLegacyFirstAidStarterContent,
   parseBlocks,
 } from "./first-aid-block-codec";
 import { firstAidBlocksToStandardRichText } from "./first-aid-block-renderer";
 
-/** Convert persisted First Aid content to semantic rich text for regular paper. */
+/** Convert a legacy/runtime First Aid HTML projection to semantic rich text. */
 export function firstAidToStandardRichText(html: string, plainText: string) {
   return firstAidBlocksToStandardRichText(parseBlocks(html, plainText));
 }
 
 /**
- * Preserve the v4 payload as an invisible comment until regular rich text is
- * actually edited. This keeps a template toggle reversible without letting the
- * First Aid static rendering leak onto ordinary paper.
+ * Regular paper no longer carries an invisible First Aid payload in HTML.
+ * FA3 keeps the reversible block document as structured SheetContent instead.
  */
 export function regularTemplateRichText(html: string, plainText: string) {
   if (isLegacyFirstAidStarterContent(html, plainText)) return "";
   if (!hasFirstAidBlockSerialization(html)) return html;
-  return `${firstAidToStandardRichText(html, plainText)}${firstAidPayloadComment(html)}`;
+  return firstAidToStandardRichText(html, plainText);
 }
 
 export type FirstAidTemplateTransitionInput = {
@@ -31,8 +29,8 @@ export type FirstAidTemplateTransitionInput = {
 };
 
 /**
- * Template-specific content transition boundary. React callers only apply the
- * returned patch; they do not need to know how First Aid serialization works.
+ * Template-specific projection boundary. Canonical First Aid blocks are owned
+ * by NotePage.firstAid / SheetContent.firstAid, not by this HTML conversion.
  */
 export function firstAidTemplateTransition(input: FirstAidTemplateTransitionInput): { bodyHtml?: string } {
   if (input.currentTemplate !== "first-aid" || input.nextTemplate === "first-aid") return {};

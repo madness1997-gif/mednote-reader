@@ -1,5 +1,20 @@
 import type { PdfRect } from "./pdf-domain";
 import { ordered, type NoteStructure, type SheetContent, type SheetContentMap } from "./note-domain";
+import { hasFirstAidBlockSerialization } from "./first-aid-block-codec";
+import {
+  createFirstAidDocument,
+  firstAidDocumentFromLegacy,
+  firstAidDocumentMatchesRegularProjection,
+  firstAidDocumentPlainText,
+  firstAidDocumentProjectionHtml,
+  firstAidDocumentStandardRichText,
+  normalizeFirstAidDocument,
+  resolveFirstAidDocument,
+  type FirstAidDocument,
+} from "./first-aid-document";
+import { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./rich-text-html";
+
+export { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./rich-text-html";
 
 export type InkTool = "pen" | "highlight" | "shape";
 
@@ -80,6 +95,7 @@ export type NotePage = {
   titleHtml?: string;
   body: string;
   bodyHtml?: string;
+  firstAid?: FirstAidDocument;
   citationPage: number | null;
   strokes: Stroke[];
   paper: PaperSettings;
@@ -146,45 +162,27 @@ function runtimeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]!);
+function firstAidBlocksEqual(left: FirstAidDocument, right: FirstAidDocument) {
+  return JSON.stringify(left.blocks) === JSON.stringify(right.blocks);
 }
 
-export function plainTextToRichHtml(value: string) {
-  return escapeHtml(value).replace(/\r\n?|\n/g, "<br>");
-}
+function latestFirstAidDocument(page: NotePage) {
+  const stored = normalizeFirstAidDocument(page.firstAid);
+  const body = page.body ?? "";
+  const bodyHtml = page.bodyHtml ?? "";
 
-export function sanitizeRichTextHtml(value: string) {
-  if (typeof document === "undefined") return value;
-  const template = document.createElement("template");
-  template.innerHTML = value;
-  const allowedTags = new Set(["DIV", "P", "BR", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "FONT", "SUB", "SUP", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD"]);
-  const allowedStyles = ["fontFamily", "fontSize", "color", "backgroundColor", "fontWeight", "fontStyle", "textDecoration", "textAlign", "lineHeight", "listStyleType", "borderCollapse", "borderColor", "borderStyle", "borderWidth", "borderTop", "borderBottom", "width", "minWidth", "padding", "margin", "display", "alignItems", "gridTemplateColumns", "columnGap", "rowGap", "verticalAlign", "whiteSpace"] as const;
-  Array.from(template.content.querySelectorAll<HTMLElement>("*")).forEach((element) => {
-    if (!allowedTags.has(element.tagName)) {
-      if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(element.tagName)) {
-        element.remove();
-        return;
-      }
-      const parent = element.parentNode;
-      while (parent && element.firstChild) parent.insertBefore(element.firstChild, element);
-      element.remove();
-      return;
-    }
-    const styles = Object.fromEntries(allowedStyles.map((property) => [property, element.style[property]]));
-    const face = element.tagName === "FONT" ? element.getAttribute("face") : null;
-    const color = element.tagName === "FONT" ? element.getAttribute("color") : null;
-    const size = element.tagName === "FONT" ? element.getAttribute("size") : null;
-    Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
-    allowedStyles.forEach((property) => {
-      const styleValue = styles[property];
-      if (styleValue) element.style[property] = styleValue;
-    });
-    if (face) element.setAttribute("face", face);
-    if (color) element.setAttribute("color", color);
-    if (size && /^[1-7]$/.test(size)) element.setAttribute("size", size);
-  });
-  return template.innerHTML;
+  // Once the editor owns a structured document, it is the source of truth.
+  // body/bodyHtml may still be a one-render-old projection and must never win.
+  if (stored && !stored.legacyStarter) return stored;
+
+  if (hasFirstAidBlockSerialization(bodyHtml)) {
+    const projected = firstAidDocumentFromLegacy(bodyHtml, body);
+    return createFirstAidDocument(
+      projected.blocks,
+      Boolean(stored?.legacyStarter && firstAidBlocksEqual(stored, projected)),
+    );
+  }
+  return stored ?? firstAidDocumentFromLegacy(bodyHtml, body);
 }
 
 export function normalizePaper(paper?: Partial<PaperSettings>): PaperSettings {
@@ -256,12 +254,26 @@ export function normalizeCalloutSettings(callout: Partial<CalloutSettings> | und
 
 export function normalizePage(page: NotePage): NotePage {
   const normalizedText = normalizeText(page.text);
+  const paper = normalizePaper(page.paper);
+  const rawBody = page.body ?? "";
+  const rawBodyHtml = page.bodyHtml ?? plainTextToRichHtml(rawBody);
+  const resolvedFirstAid = resolveFirstAidDocument(page.firstAid, rawBodyHtml, rawBody, paper.template === "first-aid");
+  const firstAid = resolvedFirstAid.document ?? undefined;
+  const canonicalFirstAidPage = paper.template === "first-aid" && firstAid;
+  const migratedDormantPayload = paper.template !== "first-aid" && resolvedFirstAid.source === "legacy-payload" && firstAid;
+  const body = canonicalFirstAidPage || migratedDormantPayload ? firstAidDocumentPlainText(firstAid) : rawBody;
+  const bodyHtml = canonicalFirstAidPage
+    ? firstAidDocumentProjectionHtml(firstAid)
+    : migratedDormantPayload
+      ? sanitizeRichTextHtml(firstAidDocumentStandardRichText(firstAid))
+      : sanitizeRichTextHtml(rawBodyHtml);
   return {
     ...page,
-    body: page.body ?? "",
-    bodyHtml: sanitizeRichTextHtml(page.bodyHtml ?? plainTextToRichHtml(page.body ?? "")),
+    body,
+    bodyHtml,
+    firstAid,
     strokes: Array.isArray(page.strokes) ? page.strokes : [],
-    paper: normalizePaper(page.paper),
+    paper,
     text: page.bodyHtml == null && normalizedText.font === "handwriting" ? { ...normalizedText, font: "times" } : normalizedText,
     excerpts: Array.isArray(page.excerpts)
       ? page.excerpts.map((excerpt, index) => {
@@ -287,6 +299,7 @@ export function createBlankPage(citationPage: number | null = 1, index = 1, pape
     title: `GHI CHÚ ${index}`,
     body: "",
     bodyHtml: "",
+    ...(paper.template === "first-aid" ? { firstAid: createFirstAidDocument() } : {}),
     citationPage,
     strokes: [],
     paper: { ...paper },
@@ -303,11 +316,41 @@ export function notePageToSheetContent(page: NotePage): SheetContent {
     __mednoteLazyPage: _lazy,
     ...content
   } = page;
-  return content as SheetContent;
+  const persisted = content as SheetContent & {
+    body?: string;
+    bodyHtml?: string;
+    firstAid?: FirstAidDocument;
+  };
+
+  if (page.paper.template === "first-aid") {
+    persisted.firstAid = latestFirstAidDocument(page);
+    delete persisted.body;
+    delete persisted.bodyHtml;
+    return persisted;
+  }
+
+  const dormant = normalizeFirstAidDocument(page.firstAid);
+  if (!dormant) {
+    delete persisted.firstAid;
+    return persisted;
+  }
+  if (dormant.legacyStarter) {
+    persisted.body = "";
+    persisted.bodyHtml = "";
+    delete persisted.firstAid;
+    return persisted;
+  }
+  if (!firstAidDocumentMatchesRegularProjection(dormant, persisted.bodyHtml ?? "", persisted.body ?? "")) {
+    delete persisted.firstAid;
+  }
+  return persisted;
 }
 
 export function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetContent, lazy = false): NotePage {
-  const fallback = createBlankPage(null, 1);
+  const hasPersistedPaper = Boolean(content && Object.hasOwn(content, "paper"));
+  const hasPersistedFirstAid = Boolean(content && Object.hasOwn(content, "firstAid"));
+  const fallbackPaper = hasPersistedPaper || hasPersistedFirstAid ? DEFAULT_NEW_NOTE_PAPER : DEFAULT_PAPER;
+  const fallback = createBlankPage(null, 1, fallbackPaper, DEFAULT_NEW_NOTE_TEXT);
   const page = normalizePage({
     ...fallback,
     ...(content || {}),

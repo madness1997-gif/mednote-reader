@@ -1,11 +1,11 @@
 import type { EditorMode } from "./first-aid-block-domain";
+import type { FirstAidDocument } from "./first-aid-document";
 import type { FirstAidPdfCropResult } from "./use-first-aid-block-editor";
 
 export type FirstAidBlockEditorProps = {
-  html: string;
-  plainText: string;
+  document: FirstAidDocument;
   mode: EditorMode;
-  onChange: (html: string, plainText: string) => void;
+  onChange: (document: FirstAidDocument) => void;
   onInsertImage: (image: { blob: Blob; name: string; aspectRatio: number; placement: { x: number; y: number; width: number } }) => Promise<{ excerptId: string } | null>;
   onRemoveImage: (excerptId: string) => void;
   onRequestPdfCrop: (request: { blockId: string; placement: { x: number; y: number; width: number } }) => void;
