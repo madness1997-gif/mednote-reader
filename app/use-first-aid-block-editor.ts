@@ -43,12 +43,12 @@ export function useFirstAidBlockEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const lastEmittedSignatureRef = useRef<string | null>(null);
+  const appliedSignatureRef = useRef(documentSignature(document));
   const handledCropTokenRef = useRef<string | null>(null);
 
   const emit = useCallback((next: FirstAidBlock[]) => {
     const nextDocument = createFirstAidDocument(next);
-    lastEmittedSignatureRef.current = documentSignature(nextDocument);
+    appliedSignatureRef.current = documentSignature(nextDocument);
     onChange(nextDocument);
   }, [onChange]);
 
@@ -62,10 +62,12 @@ export function useFirstAidBlockEditor({
   }, [emit]);
 
   // Restore/sync can replace the canonical document of the same Sheet id.
-  // Reconcile structured blocks directly; no HTML parse round-trip is involved.
+  // Equivalent object clones are ignored so unrelated page updates do not
+  // clear the current block selection or insert menu.
   useEffect(() => {
     const signature = documentSignature(document);
-    if (signature === lastEmittedSignatureRef.current) return;
+    if (signature === appliedSignatureRef.current) return;
+    appliedSignatureRef.current = signature;
     blocksRef.current = document.blocks;
     setBlocks(document.blocks);
     setSelectedId(null);
