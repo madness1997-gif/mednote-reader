@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { RichTextEditor } from "./rich-text-editor";
+import { FirstAidHeadingInput } from "./first-aid-heading-input";
 import {
   type BlockType,
   type FirstAidBlock,
@@ -164,21 +165,7 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     </div>;
   };
 
-  if (block.type === "heading") return <input
-    className="fa-heading-input fa-heading-native-input"
-    type="text"
-    value={block.title ?? ""}
-    readOnly={!canEdit}
-    placeholder="TIÊU ĐỀ MỤC"
-    aria-label="Tiêu đề mục"
-    spellCheck={false}
-    autoComplete="off"
-    autoCorrect="off"
-    onChange={(event) => {
-      const title = event.target.value;
-      updateBlock(block.id, { title, titleHtml: plainTextToRichHtml(title) });
-    }}
-  />;
+  if (block.type === "heading") return <FirstAidHeadingInput block={block} canEdit={canEdit} updateBlock={updateBlock} />;
 
   if (block.type === "label") return <div className="fa-label-layout">
     {renderRichField("label", "labelHtml", "fa-label-input", "Nhãn block", { placeholder: "NHÃN" })}
