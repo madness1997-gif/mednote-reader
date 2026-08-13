@@ -55,7 +55,7 @@ test("FA1 keeps First Aid presentation in one canonical stylesheet without globa
   assert.match(styles, /\.template-first-aid \.note-title-input/);
   assert.match(styles, /\.template-first-aid \.mode-hint\s*\{/);
   assert.doesNotMatch(styles, /(?:^|\n)\.mode-hint\s*\{/);
-  assert.match(styles, /\.fa-block-editor:not\(\.mode-view\) > \.fa-insert-slot\.first:last-child/);
+  assert.match(styles, /\.fa-block-editor:not\(\.mode-view\) > \.fa-insert-slot\.first:last-child[\s\S]*?\.fa-insert-button:not\(:disabled\)[\s\S]*?opacity:\s*1/);
 
   await assert.rejects(readFile(new URL("app/first-aid-block-editor-ui-fix.css", root), "utf8"));
   await assert.rejects(readFile(new URL("app/first-aid-signature-polish.css", root), "utf8"));
