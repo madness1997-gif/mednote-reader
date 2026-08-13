@@ -343,6 +343,22 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
 
   const renderRichField = (block: FirstAidBlock, field: "title" | "label" | "text" | "caption", htmlField: "titleHtml" | "labelHtml" | "textHtml" | "captionHtml", className: string, ariaLabel: string, options?: { singleLine?: boolean; placeholder?: string; textStyle?: TextStyle }) => <BlockRichEditor editorId={`first-aid:${block.id}:${field}`} className={className} html={block[htmlField]} text={block[field]} textStyle={options?.textStyle} editable={canEdit} singleLine={options?.singleLine} placeholder={options?.placeholder} ariaLabel={ariaLabel} onChange={(fieldHtml, fieldText) => updateBlock(block.id, { [field]: fieldText, [htmlField]: fieldHtml } as Partial<FirstAidBlock>)} onActivate={onTextActivate} onNormalizeInput={onNormalizeTextInput} />;
 
+  const renderHeadingInput = (block: FirstAidBlock) => <input
+    className="fa-heading-input fa-heading-native-input"
+    type="text"
+    value={block.title ?? ""}
+    readOnly={!canEdit}
+    placeholder="TIÊU ĐỀ MỤC"
+    aria-label="Tiêu đề mục"
+    spellCheck={false}
+    autoComplete="off"
+    autoCorrect="off"
+    onChange={(event) => {
+      const title = event.target.value;
+      updateBlock(block.id, { title, titleHtml: plainTextToRichHtml(title) });
+    }}
+  />;
+
   const renderImageZone = (block: FirstAidBlock) => {
     if (block.imageObjectId) {
       const objectHeight = pageObjectLayouts[block.imageObjectId]?.height;
@@ -362,7 +378,7 @@ export function FirstAidBlockEditor({ html, plainText, mode, onChange, onInsertI
   };
 
   const renderBlockBody = (block: FirstAidBlock) => {
-    if (block.type === "heading") return renderRichField(block, "title", "titleHtml", "fa-heading-input", "Tiêu đề mục", { singleLine: true, placeholder: "TIÊU ĐỀ MỤC" });
+    if (block.type === "heading") return renderHeadingInput(block);
     if (block.type === "label") return <div className="fa-label-layout">{renderRichField(block, "label", "labelHtml", "fa-label-input", "Nhãn block", { placeholder: "NHÃN" })}{renderRichField(block, "text", "textHtml", "fa-content-input", "Nội dung block", { placeholder: "Nhập nội dung…" })}</div>;
     if (block.type === "text") return <div className="fa-text-block"><div className="fa-text-style-switch">{(["paragraph", "bullets", "numbered"] as TextStyle[]).map((style) => <button key={style} className={block.textStyle === style ? "selected" : ""} disabled={!canEdit} onClick={() => updateBlock(block.id, { textStyle: style, textHtml: richBlockHtml(undefined, block.text, style) })}>{style === "paragraph" ? "Đoạn" : style === "bullets" ? "• Danh sách" : "1. Đánh số"}</button>)}</div>{renderRichField(block, "text", "textHtml", "fa-content-input", "Đoạn hoặc danh sách", { placeholder: "Nhập đoạn văn hoặc dùng Bullet / Đánh số trên thanh Type…", textStyle: block.textStyle })}</div>;
     if (block.type === "figure") return <div className="fa-figure-block">{renderImageZone(block)}{renderRichField(block, "caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Nhập chú thích hình…" })}</div>;
