@@ -24,12 +24,17 @@ function insertPlainText(editor: HTMLElement, value: string) {
   controller.insertText(value);
 }
 
+function editorText(editor: HTMLElement) {
+  return editor.innerText.replace(/\u00a0/g, " ").replace(/\u200b/g, "");
+}
+
 export function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, singleLine = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const composingRef = useRef(false);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || editor.innerHTML === html || document.activeElement === editor) return;
+    if (!editor || editor.innerHTML === html || document.activeElement === editor || composingRef.current) return;
     editor.innerHTML = html;
   }, [html]);
 
@@ -67,7 +72,17 @@ export function RichTextEditor({ editorId, className, html, editable, placeholde
     const editor = editorRef.current;
     if (!editor) return;
     onNormalizeInput(editorId, editor);
-    onChange(sanitizeRichTextHtml(editor.innerHTML), editor.innerText.replace(/\u00a0/g, " "));
+    const text = editorText(editor);
+    if (!text.trim()) {
+      // Browsers/IMEs often leave <div><br></div>, NBSP or zero-width chars in
+      // contenteditable after deleting the final composed word. Persist a truly
+      // empty value so stale Vietnamese composition fragments cannot reappear.
+      if (editor.innerHTML) editor.innerHTML = "";
+      onChange("", "");
+      captureSelection();
+      return;
+    }
+    onChange(sanitizeRichTextHtml(editor.innerHTML), text);
     captureSelection();
   };
 
@@ -84,12 +99,26 @@ export function RichTextEditor({ editorId, className, html, editable, placeholde
       aria-label={ariaLabel}
       spellCheck={false}
       onFocus={captureSelection}
+      onBlur={() => {
+        if (!composingRef.current) return;
+        composingRef.current = false;
+        emitChange();
+      }}
       onMouseUp={captureSelection}
       onKeyUp={captureSelection}
       onKeyDown={(event) => {
         if (singleLine && event.key === "Enter") event.preventDefault();
       }}
-      onInput={emitChange}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={() => {
+        composingRef.current = false;
+        emitChange();
+      }}
+      onInput={() => {
+        if (!composingRef.current) emitChange();
+      }}
       onPaste={(event) => {
         if (!editable) return;
         event.preventDefault();
