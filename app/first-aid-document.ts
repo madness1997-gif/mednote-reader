@@ -13,21 +13,26 @@ export const FIRST_AID_DOCUMENT_VERSION = 1 as const;
 export type FirstAidDocument = {
   version: typeof FIRST_AID_DOCUMENT_VERSION;
   blocks: FirstAidBlock[];
+  legacyStarter?: true;
 };
 
-export function createFirstAidDocument(blocks: FirstAidBlock[] = []): FirstAidDocument {
-  return { version: FIRST_AID_DOCUMENT_VERSION, blocks };
+export function createFirstAidDocument(blocks: FirstAidBlock[] = [], legacyStarter = false): FirstAidDocument {
+  return {
+    version: FIRST_AID_DOCUMENT_VERSION,
+    blocks,
+    ...(legacyStarter ? { legacyStarter: true as const } : {}),
+  };
 }
 
 export function normalizeFirstAidDocument(value: unknown): FirstAidDocument | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = value as { version?: unknown; blocks?: unknown };
+  const candidate = value as { version?: unknown; blocks?: unknown; legacyStarter?: unknown };
   if (candidate.version !== FIRST_AID_DOCUMENT_VERSION || !Array.isArray(candidate.blocks)) return null;
-  return createFirstAidDocument(candidate.blocks as FirstAidBlock[]);
+  return createFirstAidDocument(candidate.blocks as FirstAidBlock[], candidate.legacyStarter === true);
 }
 
-export function firstAidDocumentFromLegacy(html: string, plainText: string) {
-  return createFirstAidDocument(parseBlocks(html, plainText));
+export function firstAidDocumentFromLegacy(html: string, plainText: string, legacyStarter = false) {
+  return createFirstAidDocument(parseBlocks(html, plainText), legacyStarter);
 }
 
 export function firstAidDocumentPlainText(document: FirstAidDocument) {
@@ -49,7 +54,6 @@ export function firstAidDocumentStandardRichText(document: FirstAidDocument) {
 export type ResolvedFirstAidDocument = {
   document: FirstAidDocument | null;
   source: "stored" | "legacy-payload" | "template-migration" | "none";
-  untouchedLegacyStarter: boolean;
 };
 
 export function resolveFirstAidDocument(
@@ -59,20 +63,18 @@ export function resolveFirstAidDocument(
   templateIsFirstAid: boolean,
 ): ResolvedFirstAidDocument {
   const normalized = normalizeFirstAidDocument(stored);
-  if (normalized) return { document: normalized, source: "stored", untouchedLegacyStarter: false };
-  const legacyPayload = hasFirstAidBlockSerialization(html);
-  if (legacyPayload) {
+  if (normalized) return { document: normalized, source: "stored" };
+  if (hasFirstAidBlockSerialization(html)) {
     return {
       document: firstAidDocumentFromLegacy(html, plainText),
       source: "legacy-payload",
-      untouchedLegacyStarter: false,
     };
   }
-  if (!templateIsFirstAid) return { document: null, source: "none", untouchedLegacyStarter: false };
+  if (!templateIsFirstAid) return { document: null, source: "none" };
+  const legacyStarter = isLegacyFirstAidStarterContent(html, plainText);
   return {
-    document: firstAidDocumentFromLegacy(html, plainText),
+    document: firstAidDocumentFromLegacy(html, plainText, legacyStarter),
     source: "template-migration",
-    untouchedLegacyStarter: isLegacyFirstAidStarterContent(html, plainText),
   };
 }
 
