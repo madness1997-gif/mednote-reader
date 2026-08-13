@@ -37,10 +37,14 @@ test("First Aid variables travel with previews and standalone export HTML", () =
 });
 
 test("First Aid table shape controls are contextual instead of permanently occupying a row", async () => {
-  const editor = await readFile(new URL("app/first-aid-block-editor-view.tsx", root), "utf8");
-  const styles = await readFile(new URL("app/first-aid-block-editor.css", root), "utf8");
-  assert.doesNotMatch(editor, /fa-table-actions/);
-  assert.match(editor, /block\.type === "table" && renderTableToolbar\(block\)/);
+  const [editor, components, styles] = await Promise.all([
+    readFile(new URL("app/first-aid-block-editor-v2.tsx", root), "utf8"),
+    readFile(new URL("app/first-aid-block-editor-components.tsx", root), "utf8"),
+    readFile(new URL("app/first-aid-block-editor.css", root), "utf8"),
+  ]);
+  assert.doesNotMatch(`${editor}\n${components}`, /fa-table-actions/);
+  assert.match(editor, /block\.type === "table" && <FirstAidTableToolbar/);
+  assert.match(components, /export function FirstAidTableToolbar/);
   assert.match(styles, /\.fa-block-toolbar\s*\{[\s\S]*?display:\s*none/);
   assert.match(styles, /\.fa-block\.selected \.fa-block-toolbar\s*\{\s*display:\s*flex/);
 });
@@ -59,4 +63,19 @@ test("FA1 keeps First Aid presentation in one canonical stylesheet without globa
 
   await assert.rejects(readFile(new URL("app/first-aid-block-editor-ui-fix.css", root), "utf8"));
   await assert.rejects(readFile(new URL("app/first-aid-signature-polish.css", root), "utf8"));
+});
+
+test("FA2 runtime is composed from controller and block components", async () => {
+  const [entry, editor, controller, components] = await Promise.all([
+    readFile(new URL("app/first-aid-block-editor.tsx", root), "utf8"),
+    readFile(new URL("app/first-aid-block-editor-v2.tsx", root), "utf8"),
+    readFile(new URL("app/use-first-aid-block-editor.ts", root), "utf8"),
+    readFile(new URL("app/first-aid-block-editor-components.tsx", root), "utf8"),
+  ]);
+  assert.match(entry, /first-aid-block-editor-v2/);
+  assert.match(editor, /useFirstAidBlockEditor/);
+  assert.match(editor, /FirstAidBlockBody/);
+  assert.match(controller, /External restore\/sync may replace the content of the same Sheet id/);
+  assert.match(components, /fa-heading-native-input/);
+  await assert.rejects(readFile(new URL("app/first-aid-block-editor-view.tsx", root), "utf8"));
 });
