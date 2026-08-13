@@ -170,7 +170,6 @@ export function FirstAidBlockEditor({
       type="file"
       accept="image/*"
       tabIndex={-1}
-      style={{ position: "fixed", left: "-10000px", top: 0, width: "1px", height: "1px", display: "block", opacity: 0, pointerEvents: "none" }}
       onChange={onFileChange}
     />
     <div className="fa-insert-slot first">
@@ -193,7 +192,6 @@ export function FirstAidBlockEditor({
         >
           {canManage && <div
             className="fa-block-toolbar"
-            style={{ position: "absolute", top: 2, right: 3, width: "auto", maxWidth: "calc(100% - 6px)", border: "1px solid var(--fa-border, #c5d3d6)", borderRadius: 7, background: "color-mix(in srgb, var(--fa-toolbar-bg, #f8fbfb) 94%, transparent)", boxShadow: "0 3px 10px color-mix(in srgb, var(--fa-primary, #1b7184) 14%, transparent)" }}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >

@@ -156,7 +156,7 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     }}>
       {assetUrl ? <img src={assetUrl} alt={block.imageName || "Hình trong note"} /> : <>
         <ImageIcon size={24} /><b>Thả hình vào đây</b>
-        <div className="fa-image-actions" style={{ position: "static", left: "auto", bottom: "auto", zIndex: "auto", flexWrap: "wrap", transform: "none" }}>
+        <div className="fa-image-actions">
           <button
             type="button"
             disabled={!canEdit}
