@@ -156,9 +156,27 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     }}>
       {assetUrl ? <img src={assetUrl} alt={block.imageName || "Hình trong note"} /> : <>
         <ImageIcon size={24} /><b>Thả hình vào đây</b>
-        <div className="fa-image-actions">
-          <button type="button" disabled={!canEdit} onClick={(event) => onBrowseImage(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget)}><ImageIcon size={14} /> Browse từ máy</button>
-          <button type="button" disabled={!canEdit} onClick={(event) => onPdfCrop(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget)}><Crop size={14} /> Crop từ PDF</button>
+        <div className="fa-image-actions" style={{ position: "static", left: "auto", bottom: "auto", zIndex: "auto", flexWrap: "wrap", transform: "none" }}>
+          <button
+            type="button"
+            disabled={!canEdit}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onBrowseImage(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget);
+            }}
+          ><ImageIcon size={14} /> Browse từ máy</button>
+          <button
+            type="button"
+            disabled={!canEdit}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onPdfCrop(block.id, event.currentTarget.closest<HTMLElement>(".fa-image-zone") ?? event.currentTarget);
+            }}
+          ><Crop size={14} /> Crop từ PDF</button>
         </div>
         <small>Ảnh sẽ thành đối tượng kéo, resize, xoay và xếp lớp được</small>
       </>}
