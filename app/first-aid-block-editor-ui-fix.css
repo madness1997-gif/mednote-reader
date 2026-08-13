@@ -37,3 +37,12 @@
   border-color: var(--fa-primary, #13808b) !important;
   background: var(--fa-focus-bg, #edf8f8) !important;
 }
+
+/* Floating tool hints obscure the actual editing surface on narrow touch
+   screens once the on-screen keyboard is open. The toolbar already shows the
+   active tool, so these overlays add no value on mobile. */
+@media (max-width: 900px), (pointer: coarse) {
+  .mode-hint {
+    display: none !important;
+  }
+}
