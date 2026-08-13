@@ -156,6 +156,9 @@ async function seed() {
     page.id = "legacy-sheet";
     page.title = "Legacy page";
     page.body = "legacy notebook body";
+    // The v1 fixture predates FirstAidDocument. Do not let today's helper add
+    // a structured empty document that could never exist in that legacy data.
+    page.firstAid = undefined;
     localStorage.setItem("mednote-notebook-v1", JSON.stringify({ pages: [page], activeNoteId: page.id, readerShare: 43 }));
   }
   if (scenario === "legacy-pdf") {
