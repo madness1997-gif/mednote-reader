@@ -1,0 +1,32 @@
+name: Apply FA3 Stale Projection Fix
+
+on:
+  push:
+    branches: [agent/fa3-canonical-first-aid-blocks]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[fa3-stale-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fa3-canonical-first-aid-blocks
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fa3-fix-stale-projection.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No stale projection patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/note-runtime-adapter.ts
+          git commit -m "FA3 prefer canonical document over stale projection [fa3-stale-fix]"
+          git push origin HEAD:agent/fa3-canonical-first-aid-blocks
