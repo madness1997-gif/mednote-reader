@@ -342,7 +342,10 @@ export function notePageToSheetContent(page: NotePage): SheetContent {
 }
 
 export function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetContent, lazy = false): NotePage {
-  const fallback = createBlankPage(null, 1);
+  const hasPersistedPaper = Boolean(content && Object.hasOwn(content, "paper"));
+  const hasPersistedFirstAid = Boolean(content && Object.hasOwn(content, "firstAid"));
+  const fallbackPaper = hasPersistedPaper || hasPersistedFirstAid ? DEFAULT_NEW_NOTE_PAPER : DEFAULT_PAPER;
+  const fallback = createBlankPage(null, 1, fallbackPaper, DEFAULT_NEW_NOTE_TEXT);
   const page = normalizePage({
     ...fallback,
     ...(content || {}),
