@@ -35,20 +35,20 @@ export function firstAidDocumentFromLegacy(html: string, plainText: string, lega
   return createFirstAidDocument(parseBlocks(html, plainText), legacyStarter);
 }
 
-export function firstAidDocumentPlainText(document: FirstAidDocument) {
-  return document.blocks.map(blockPlainText).filter(Boolean).join("\n\n");
+export function firstAidDocumentPlainText(document: FirstAidDocument | null | undefined) {
+  return (document?.blocks ?? []).map(blockPlainText).filter(Boolean).join("\n\n");
 }
 
 /**
  * Runtime/editor projection only. The v4 comment remains readable during the
  * FA3 migration, but this HTML is never the canonical SheetContent payload.
  */
-export function firstAidDocumentProjectionHtml(document: FirstAidDocument) {
-  return serializeBlocks(document.blocks);
+export function firstAidDocumentProjectionHtml(document: FirstAidDocument | null | undefined) {
+  return serializeBlocks(document?.blocks ?? []);
 }
 
-export function firstAidDocumentStandardRichText(document: FirstAidDocument) {
-  return firstAidBlocksToStandardRichText(document.blocks);
+export function firstAidDocumentStandardRichText(document: FirstAidDocument | null | undefined) {
+  return firstAidBlocksToStandardRichText(document?.blocks ?? []);
 }
 
 export type ResolvedFirstAidDocument = {
