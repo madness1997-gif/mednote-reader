@@ -132,10 +132,13 @@ export function FirstAidBlockEditor({
   };
 
   const applyImageFile = async (blockId: string, file: File, placement: { x: number; y: number; width: number }) => {
-    if (!file.type.startsWith("image/")) return;
+    const looksLikeImage = file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
+    if (!looksLikeImage) return;
     const { blob, aspectRatio } = await compressFirstAidImage(file);
     const inserted = await onInsertImage({ blob, name: file.name, aspectRatio, placement });
-    if (inserted) updateBlock(blockId, { imageObjectId: inserted.excerptId, imageAssetId: undefined, imageName: file.name, imageAspectRatio: aspectRatio });
+    if (!inserted) return;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    updateBlock(blockId, { imageObjectId: inserted.excerptId, imageAssetId: undefined, imageName: file.name, imageAspectRatio: aspectRatio });
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
