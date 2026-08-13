@@ -4,6 +4,7 @@ import test from "node:test";
 import type { DocumentGraph } from "../app/document-domain";
 import { ordered, type NoteStructure } from "../app/note-domain";
 import {
+  DEFAULT_PAPER,
   createBlankPage,
   notePageToSheetContent,
   notebookFromStructure,
@@ -56,6 +57,7 @@ test("P2 v6 structure keeps full runtime navigation while unsupplied Sheets stay
   assert.deepEqual(runtime.pages.map((page) => page.id), ["sh1", "sh2", "sh3", "sh4"]);
   assert.deepEqual(runtime.pages.map((page) => page.title), ["Page 1", "Page 1", "Page 2", "Page 3"]);
   assert.equal(runtime.pages[0].body, "Sheet 1");
+  assert.equal(runtime.pages[0].paper.template, "ruled");
   assert.equal(runtime.pages[0].__mednoteLazyPage, undefined);
   assert.equal(runtime.pages[1].__mednoteLazyPage, true);
   assert.equal(runtime.pages[2].__mednoteLazyPage, true);
@@ -64,7 +66,7 @@ test("P2 v6 structure keeps full runtime navigation while unsupplied Sheets stay
 });
 
 test("P2 note runtime round-trip never writes navigation metadata into SheetContent", () => {
-  const page = createBlankPage(null, 1);
+  const page = createBlankPage(null, 1, DEFAULT_PAPER);
   page.id = "sheet-1";
   page.title = "Current Page title";
   page.titleHtml = "<b>legacy</b>";
