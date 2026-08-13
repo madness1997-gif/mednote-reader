@@ -21,8 +21,7 @@ import { compressFirstAidImage, readFirstAidAsset } from "./first-aid-image-serv
 import { useFirstAidBlockEditor } from "./use-first-aid-block-editor";
 
 export function FirstAidBlockEditor({
-  html,
-  plainText,
+  document,
   mode,
   onChange,
   onInsertImage,
@@ -54,7 +53,7 @@ export function FirstAidBlockEditor({
     moveBlock,
     moveToIndex,
     convertBlock,
-  } = useFirstAidBlockEditor({ html, plainText, onChange, onRemoveImage, pageObjectIds, pdfCropResult, onPdfCropHandled });
+  } = useFirstAidBlockEditor({ document, onChange, onRemoveImage, pageObjectIds, pdfCropResult, onPdfCropHandled });
 
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const assetUrlsRef = useRef<Record<string, string>>({});
