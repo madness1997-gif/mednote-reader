@@ -1,0 +1,32 @@
+name: Apply FA3 Runtime Patch
+
+on:
+  push:
+    branches: [agent/fa3-canonical-first-aid-blocks]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[fa3-runtime-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fa3-canonical-first-aid-blocks
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fa3-canonical-runtime-patch.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No runtime patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/ui/note-stage.tsx app/ui/note-sheet-preview.tsx app/page.tsx
+          git commit -m "FA3 wire canonical First Aid document runtime [fa3-runtime-patch]"
+          git push origin HEAD:agent/fa3-canonical-first-aid-blocks
