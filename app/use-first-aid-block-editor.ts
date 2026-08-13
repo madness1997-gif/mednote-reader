@@ -46,6 +46,8 @@ export function useFirstAidBlockEditor({
   const appliedSignatureRef = useRef(documentSignature(document));
   const handledCropTokenRef = useRef<string | null>(null);
 
+  // Image insertion is async. Always emit through callbacks from the latest
+  // render so a completed upload cannot overwrite a newer NotePage.
   const onChangeRef = useRef(onChange);
   const onRemoveImageRef = useRef(onRemoveImage);
   const onPdfCropHandledRef = useRef(onPdfCropHandled);
@@ -68,6 +70,9 @@ export function useFirstAidBlockEditor({
     emit(next);
   }, [emit]);
 
+  // Restore/sync can replace the canonical document of the same Sheet id.
+  // Equivalent object clones are ignored so unrelated page updates do not
+  // clear the current block selection or insert menu.
   useEffect(() => {
     const signature = documentSignature(document);
     if (signature === appliedSignatureRef.current) return;
