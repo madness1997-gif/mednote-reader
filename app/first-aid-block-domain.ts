@@ -1,4 +1,4 @@
-export type EditorMode = "edit" | "arrange" | "view";
+export type EditorMode = "edit" | "view";
 export type BlockType = "heading" | "label" | "text" | "figure" | "figure-text" | "table" | "flow" | "pearl";
 export type TextStyle = "paragraph" | "bullets" | "numbered";
 
