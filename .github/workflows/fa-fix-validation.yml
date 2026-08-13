@@ -1,0 +1,31 @@
+name: Validate First Aid conversion and IME fix
+
+on:
+  push:
+    branches:
+      - fix/fa-conversion-heading-ime
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck and unit regression
+        run: |
+          npm run typecheck
+          npm run test:unit
+      - name: Browser conversion regression
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test tests/first-aid-conversion.spec.cjs
+      - name: Build web and desktop
+        run: |
+          npm run build:pages
+          npm run build:desktop
