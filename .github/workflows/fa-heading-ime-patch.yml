@@ -21,6 +21,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('app/first-aid-block-editor-components.tsx')
           source = path.read_text()
@@ -31,24 +32,10 @@ jobs:
               assert import_anchor in source
               source = source.replace(import_anchor, import_anchor + import_line, 1)
 
-          old = '''  if (block.type === "heading") return <input
-            className="fa-heading-input fa-heading-native-input"
-            type="text"
-            value={block.title ?? ""}
-            readOnly={!canEdit}
-            placeholder="TIÊU ĐỀ MỤC"
-            aria-label="Tiêu đề mục"
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            onChange={(event) => {
-              const title = event.target.value;
-              updateBlock(block.id, { title, titleHtml: plainTextToRichHtml(title) });
-            }}
-          />;'''
-          new = '''  if (block.type === "heading") return <FirstAidHeadingInput block={block} canEdit={canEdit} updateBlock={updateBlock} />;'''
-          assert old in source, 'heading block source changed unexpectedly'
-          source = source.replace(old, new, 1)
+          pattern = r'  if \(block\.type === "heading"\) return <input\n.*?\n  />;\n\n  if \(block\.type === "label"\)'
+          replacement = '  if (block.type === "heading") return <FirstAidHeadingInput block={block} canEdit={canEdit} updateBlock={updateBlock} />;\n\n  if (block.type === "label")'
+          source, count = re.subn(pattern, replacement, source, count=1, flags=re.S)
+          assert count == 1, f'expected one heading block, replaced {count}'
           path.write_text(source)
 
           workflow = Path('.github/workflows/fa-heading-ime-patch.yml')
