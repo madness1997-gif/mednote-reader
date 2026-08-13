@@ -1,0 +1,49 @@
+name: Update dormant First Aid boundary assertions
+
+on:
+  push:
+    branches:
+      - fix/fa-dormant-semantics
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'Assert First Aid transition boundary'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/fa-dormant-semantics
+      - name: Patch stale boundary test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests-unit/first-aid-template-boundary.test.ts')
+          source = path.read_text()
+
+          old = '''  const [domainSource, editorSource, controllerSource, runtimeSource, pageSource] = await Promise.all([\n    readFile(new URL("../app/first-aid-block-domain.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/first-aid-block-editor.tsx", import.meta.url), "utf8"),\n    readFile(new URL("../app/use-first-aid-block-editor.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),\n  ]);'''
+          new = '''  const [domainSource, editorSource, controllerSource, runtimeSource, pageSource, transitionSource] = await Promise.all([\n    readFile(new URL("../app/first-aid-block-domain.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/first-aid-block-editor.tsx", import.meta.url), "utf8"),\n    readFile(new URL("../app/use-first-aid-block-editor.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8"),\n    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),\n    readFile(new URL("../app/first-aid-template-adapter.ts", import.meta.url), "utf8"),\n  ]);'''
+          assert old in source, 'boundary source list changed unexpectedly'
+          source = source.replace(old, new, 1)
+
+          old_assertions = '''  assert.match(pageSource, /firstAid: normalizeFirstAidDocument\\(activeNote\\.firstAid\\) \\?\\? firstAidDocumentFromLegacy/);\n  assert.match(pageSource, /body: firstAidDocumentPlainText\\(activeNote\\.firstAid\\)/);\n  assert.match(pageSource, /bodyHtml: firstAidDocumentStandardRichText\\(activeNote\\.firstAid\\)/);'''
+          new_assertions = '''  assert.match(pageSource, /firstAidTemplateTransition\\(\\{/);\n  assert.match(pageSource, /firstAid: activeNote\\.firstAid/);\n  assert.match(pageSource, /\\.\\.\\.transition/);\n  assert.doesNotMatch(pageSource, /body: firstAidDocumentPlainText\\(activeNote\\.firstAid\\)/);\n  assert.match(transitionSource, /firstAidDocumentMatchesRegularProjection/);\n  assert.match(transitionSource, /dormantStillRepresentsActiveBody/);\n  assert.match(transitionSource, /firstAidDocumentFromLegacy\\(input\\.bodyHtml, input\\.body\\)/);'''
+          assert old_assertions in source, 'old transition assertions changed unexpectedly'
+          source = source.replace(old_assertions, new_assertions, 1)
+          path.write_text(source)
+
+          workflow = Path('.github/workflows/fa-dormant-test-patch.yml')
+          if workflow.exists(): workflow.unlink()
+          PY
+      - name: Commit boundary test
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests-unit/first-aid-template-boundary.test.ts .github/workflows/fa-dormant-test-patch.yml
+          git commit -m "Assert First Aid transition boundary"
+          git push origin HEAD:fix/fa-dormant-semantics
