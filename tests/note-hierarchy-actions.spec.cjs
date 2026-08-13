@@ -132,3 +132,62 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
   await expect(page.locator('[data-page-title-editor]')).toHaveText('');
   await expect(page.locator('[data-page-title-editor]')).toHaveAttribute('data-placeholder', 'Nhập tiêu đề');
 });
+
+test('First Aid title keeps its trailing space and caret position through autosave', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    const now = Date.now();
+    const notePage = {
+      id: 'first-aid-caret-page', title: 'Tiêu đề ban đầu', titleHtml: 'Tiêu đề ban đầu',
+      body: '', bodyHtml: '', citationPage: null, strokes: [], excerpts: [],
+      paper: { size: 'a4', orientation: 'portrait', template: 'first-aid', color: 'white' },
+      text: { font: 'times', size: 12, color: 'auto', bold: false, italic: false, underline: false, align: 'left' },
+    };
+    const notebook = { id: 'first-aid-caret-notebook', title: 'FIRST AID', pages: [notePage], activePageId: notePage.id, createdAt: now };
+    localStorage.setItem('mednote-library-v2', JSON.stringify({
+      workspaces: [{
+        id: 'first-aid-caret-workspace', kind: 'empty', name: notebook.title, documents: [], activeDocumentId: null,
+        notebooks: [notebook], activeNotebookId: notebook.id, sourcePage: 1,
+      }],
+      activeWorkspaceId: 'first-aid-caret-workspace', readerShare: 50, workspaceMode: 'note', noteZoom: 1, savedAt: now,
+    }));
+  });
+
+  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  const titleEditor = page.locator('[data-page-title-editor]');
+  await expect(titleEditor).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.note-paper')).toHaveClass(/template-first-aid/);
+
+  await titleEditor.fill('ABC');
+  await titleEditor.press('End');
+  await titleEditor.press('Space');
+  await page.waitForTimeout(650);
+
+  const editorState = async () => titleEditor.evaluate((element) => {
+    const selection = getSelection();
+    let caret = -1;
+    if (selection?.rangeCount && element.contains(selection.anchorNode)) {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.setEnd(selection.anchorNode, selection.anchorOffset);
+      caret = range.toString().length;
+    }
+    return {
+      text: (element.textContent || '').replace(/\u00a0/g, ' '),
+      focused: document.activeElement === element,
+      caret,
+    };
+  });
+
+  await expect.poll(editorState).toEqual({ text: 'ABC ', focused: true, caret: 4 });
+
+  await titleEditor.pressSequentially('DEF');
+  await page.waitForTimeout(650);
+  await expect.poll(editorState).toEqual({ text: 'ABC DEF', focused: true, caret: 7 });
+
+  await titleEditor.blur();
+  await expect(titleEditor).toHaveText('ABC DEF');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('ABC DEF');
+});

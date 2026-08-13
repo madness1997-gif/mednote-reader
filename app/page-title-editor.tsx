@@ -33,9 +33,12 @@ export default function PageTitleEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const pageIdRef = useRef(pageId);
   const draftRef = useRef(title);
+  const committedTitleRef = useRef(title);
   const dirtyRef = useRef(false);
+  const focusedRef = useRef(false);
   const revisionRef = useRef(0);
   const timerRef = useRef<number | null>(null);
+  const pendingCommitRef = useRef<Promise<void> | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current === null) return;
@@ -43,28 +46,38 @@ export default function PageTitleEditor({
     timerRef.current = null;
   }, []);
 
+  const syncEditor = useCallback((nextTitle: string) => {
+    draftRef.current = nextTitle;
+    const editor = editorRef.current;
+    if (editor && editor.textContent !== nextTitle) editor.textContent = nextTitle;
+  }, []);
+
   const commit = useCallback((targetPageId: string, nextTitle: string, revision: number) => {
-    if (!targetPageId) return;
+    if (!targetPageId) return Promise.resolve();
     if (pageIdRef.current === targetPageId && revisionRef.current === revision) dirtyRef.current = false;
-    void noteStore.renamePage(targetPageId, nextTitle).then((result) => {
+    const operation = noteStore.renamePage(targetPageId, nextTitle).then((result) => {
       if (pageIdRef.current !== targetPageId || revisionRef.current !== revision) return;
       const committedTitle = result.structure.pages.find((page) => page.id === targetPageId)?.title;
       if (committedTitle === undefined) return;
-      draftRef.current = committedTitle;
+      committedTitleRef.current = committedTitle;
       const editor = editorRef.current;
-      if (editor && (document.activeElement !== editor || committedTitle !== nextTitle) && editor.textContent !== committedTitle) {
-        editor.textContent = committedTitle;
-      }
+      if (focusedRef.current || document.activeElement === editor) return;
+      syncEditor(committedTitle);
     }).catch((error) => {
       if (pageIdRef.current === targetPageId && revisionRef.current === revision) dirtyRef.current = true;
       onError?.(errorMessage(error));
     });
-  }, [onError]);
+    pendingCommitRef.current = operation;
+    void operation.finally(() => {
+      if (pendingCommitRef.current === operation) pendingCommitRef.current = null;
+    });
+    return operation;
+  }, [onError, syncEditor]);
 
   const flush = useCallback(() => {
     clearTimer();
-    if (!dirtyRef.current || !pageIdRef.current) return;
-    commit(pageIdRef.current, draftRef.current, revisionRef.current);
+    if (!dirtyRef.current || !pageIdRef.current) return pendingCommitRef.current ?? Promise.resolve();
+    return commit(pageIdRef.current, draftRef.current, revisionRef.current);
   }, [clearTimer, commit]);
 
   const schedule = useCallback(() => {
@@ -75,7 +88,7 @@ export default function PageTitleEditor({
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       if (!dirtyRef.current) return;
-      commit(targetPageId, nextTitle, revision);
+      void commit(targetPageId, nextTitle, revision);
     }, PAGE_TITLE_DEBOUNCE_MS);
   }, [clearTimer, commit]);
 
@@ -84,16 +97,16 @@ export default function PageTitleEditor({
     revisionRef.current += 1;
     clearTimer();
     dirtyRef.current = false;
-    draftRef.current = title;
-    if (editorRef.current && editorRef.current.textContent !== title) editorRef.current.textContent = title;
-  }, [clearTimer, pageId]);
+    committedTitleRef.current = title;
+    syncEditor(title);
+  }, [clearTimer, pageId, syncEditor]);
 
   useEffect(() => {
     if (pageIdRef.current !== pageId) return;
-    if (dirtyRef.current && document.activeElement === editorRef.current) return;
-    draftRef.current = title;
-    if (editorRef.current && editorRef.current.textContent !== title) editorRef.current.textContent = title;
-  }, [pageId, title]);
+    committedTitleRef.current = title;
+    if (focusedRef.current || document.activeElement === editorRef.current) return;
+    syncEditor(title);
+  }, [pageId, syncEditor, title]);
 
   useEffect(() => () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -115,14 +128,24 @@ export default function PageTitleEditor({
     contentEditable={editable}
     suppressContentEditableWarning
     spellCheck={false}
-    onFocus={onActivate}
+    onFocus={() => {
+      focusedRef.current = true;
+      onActivate?.();
+    }}
     onInput={(event) => {
-      draftRef.current = (event.currentTarget.textContent || "").replace(/[\r\n]+/g, " ");
+      draftRef.current = (event.currentTarget.textContent || "").replace(/\u00a0/g, " ").replace(/[\r\n]+/g, " ");
       dirtyRef.current = true;
       revisionRef.current += 1;
       schedule();
     }}
-    onBlur={flush}
+    onBlur={() => {
+      focusedRef.current = false;
+      void flush().then(() => {
+        const editor = editorRef.current;
+        if (!editor || dirtyRef.current || focusedRef.current || document.activeElement === editor) return;
+        syncEditor(committedTitleRef.current);
+      });
+    }}
     onKeyDown={(event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
