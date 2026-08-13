@@ -38,11 +38,10 @@
   background: var(--fa-focus-bg, #edf8f8) !important;
 }
 
-/* Floating tool hints obscure the actual editing surface on narrow touch
-   screens once the on-screen keyboard is open. The toolbar already shows the
-   active tool, so these overlays add no value on mobile. */
-@media (max-width: 900px), (pointer: coarse) {
-  .mode-hint {
-    display: none !important;
-  }
+/* The floating mode-hint sits directly on top of the page content and can
+   leave clipped/ghost text around an active contenteditable, especially with
+   mobile IMEs. The active tool is already visible in the toolbar, so keep the
+   paper surface clean on every platform, including desktop. */
+.mode-hint {
+  display: none !important;
 }
