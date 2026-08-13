@@ -170,6 +170,11 @@ function latestFirstAidDocument(page: NotePage) {
   const stored = normalizeFirstAidDocument(page.firstAid);
   const body = page.body ?? "";
   const bodyHtml = page.bodyHtml ?? "";
+
+  // Once the editor owns a structured document, it is the source of truth.
+  // body/bodyHtml may still be a one-render-old projection and must never win.
+  if (stored && !stored.legacyStarter) return stored;
+
   if (hasFirstAidBlockSerialization(bodyHtml)) {
     const projected = firstAidDocumentFromLegacy(bodyHtml, body);
     return createFirstAidDocument(
