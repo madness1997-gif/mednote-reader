@@ -527,3 +527,216 @@
   .fa-block-toolbar { max-width: 100%; overflow-x: auto; }
   .fa-block-toolbar select { max-width: 104px; }
 }
+
+/* First Aid signature: all template-specific presentation belongs here. */
+.template-first-aid {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .paper-background {
+  background: var(--fa-paper-bg) !important;
+}
+
+.template-first-aid .typed-layer {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .note-title-input {
+  min-height: 38px;
+  margin: 0 0 9px;
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: linear-gradient(90deg, var(--fa-band-primary) 0 74%, var(--fa-band-secondary) 74% 100%) !important;
+  color: var(--fa-title-ink) !important;
+  box-shadow: none !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 850 !important;
+  line-height: 1.15 !important;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.template-first-aid .note-title-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--fa-band-secondary) 66%, white);
+  outline-offset: 2px;
+}
+
+.template-first-aid .fa-block-editor {
+  margin-top: 8px;
+  color: var(--fa-ink);
+}
+
+.template-first-aid .fa-block {
+  background: var(--fa-block-bg);
+}
+
+.template-first-aid .fa-block-heading {
+  background: linear-gradient(90deg, var(--fa-heading-bg), color-mix(in srgb, var(--fa-heading-bg) 82%, var(--fa-secondary)));
+  border-bottom: 1px solid color-mix(in srgb, var(--fa-heading-bg) 72%, black);
+}
+
+.template-first-aid .fa-heading-input {
+  min-height: 32px;
+  padding: 7px 10px !important;
+  letter-spacing: .055em;
+}
+
+.template-first-aid .fa-label-layout {
+  background: linear-gradient(90deg, var(--fa-label-bg) 0 22%, var(--fa-block-bg) 22% 100%);
+  border-bottom-color: var(--fa-border);
+}
+
+.template-first-aid .fa-label-input {
+  color: var(--fa-label-ink, var(--fa-primary)) !important;
+  background: transparent !important;
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--fa-primary) 42%, var(--fa-block-bg));
+}
+
+.template-first-aid .fa-content-input,
+.template-first-aid .fa-rich-editor {
+  color: var(--fa-ink);
+}
+
+.template-first-aid .fa-text-block,
+.template-first-aid .fa-block-figure,
+.template-first-aid .fa-table-block {
+  background: var(--fa-block-bg);
+  border-bottom-color: var(--fa-border);
+}
+
+.template-first-aid .fa-table-grid {
+  border-color: var(--fa-border);
+  background: var(--fa-block-bg);
+}
+
+.template-first-aid .fa-table-head {
+  background: var(--fa-table-head-bg) !important;
+  color: var(--fa-table-head-ink, var(--fa-primary)) !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-weight: 800 !important;
+}
+
+.template-first-aid .fa-table-cell {
+  background: var(--fa-block-bg) !important;
+  color: var(--fa-ink) !important;
+}
+
+.template-first-aid .fa-caption-input {
+  background: var(--fa-caption-bg) !important;
+  color: var(--fa-caption-ink) !important;
+}
+
+.template-first-aid .fa-pearl-layout {
+  background: var(--fa-pearl-bg);
+  color: var(--fa-pearl-ink);
+  border-color: var(--fa-pearl-border);
+}
+
+/* Table shape controls stay contextual instead of permanently occupying space. */
+.fa-table-toolbar-group {
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: max-width .14s ease, opacity .12s ease, transform .12s ease;
+}
+
+.fa-block.selected:hover .fa-table-toolbar-group,
+.fa-table-toolbar-group:focus-within {
+  width: auto;
+  max-width: 112px;
+  opacity: 1;
+  overflow: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.fa-table-toolbar-action {
+  position: relative;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px;
+  display: inline-grid !important;
+  grid-template-columns: 8px 12px;
+  place-content: center;
+  gap: 0;
+  padding: 0 !important;
+  border-radius: 5px !important;
+  color: var(--fa-toolbar-ink) !important;
+}
+
+.fa-table-toolbar-action:hover:not(:disabled) {
+  background: var(--fa-focus-bg) !important;
+  color: var(--fa-primary) !important;
+}
+
+.fa-table-toolbar-action:disabled {
+  opacity: .28 !important;
+}
+
+.template-first-aid .fa-block-toolbar {
+  min-height: 26px;
+  background: color-mix(in srgb, var(--fa-toolbar-bg) 96%, transparent);
+  border-bottom-color: var(--fa-soft-border);
+}
+
+.template-first-aid .fa-block.selected {
+  outline-width: 1.5px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--fa-primary) 13%, transparent);
+}
+
+.template-first-aid .fa-insert-slot:not(.last) .fa-insert-button {
+  opacity: 0;
+}
+
+.template-first-aid .fa-insert-slot:not(.last):hover .fa-insert-button,
+.template-first-aid .fa-insert-slot:not(.last) .fa-insert-button:focus-visible {
+  opacity: 1;
+}
+
+/* An empty First Aid page must always expose an obvious add-block action. */
+.template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child {
+  height: 40px;
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+}
+
+.template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled) {
+  position: static;
+  inset: auto;
+  transform: none;
+  width: auto;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px;
+  border-color: var(--fa-border, #a9c4c8);
+  border-radius: 8px;
+  background: var(--fa-block-bg, #fff);
+  color: var(--fa-primary, #147783);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--fa-primary, #175b65) 14%, transparent);
+}
+
+.template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled)::after {
+  content: "Thêm block";
+  font: 700 10px/1 "Segoe UI", Arial, sans-serif;
+  white-space: nowrap;
+}
+
+.template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled):hover,
+.template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled):focus-visible {
+  border-color: var(--fa-primary, #13808b);
+  background: var(--fa-focus-bg, #edf8f8);
+}
+
+/* Keep the First Aid paper surface clean without changing other templates. */
+.template-first-aid .mode-hint {
+  display: none !important;
+}
