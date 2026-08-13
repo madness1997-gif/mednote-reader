@@ -722,6 +722,7 @@
   background: var(--fa-block-bg, #fff);
   color: var(--fa-primary, #147783);
   box-shadow: 0 2px 7px color-mix(in srgb, var(--fa-primary, #175b65) 14%, transparent);
+  opacity: 1;
 }
 
 .template-first-aid .fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled)::after {
