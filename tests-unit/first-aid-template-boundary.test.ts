@@ -58,6 +58,23 @@ test("legacy v4 First Aid payloads lazily migrate to canonical document storage"
   assert.deepEqual((persisted.firstAid as { blocks: { type: string }[] }).blocks.map((block) => block.type), ["heading", "label"]);
 });
 
+test("canonical First Aid document wins over a stale runtime HTML projection", () => {
+  const oldBlock = { ...createBlock("heading"), title: "NỘI DUNG CŨ" };
+  const page = createBlankPage();
+  page.firstAid = createFirstAidDocument([oldBlock]);
+  const hydrated = normalizePage(page);
+  assert.match(hydrated.bodyHtml ?? "", /NỘI DUNG CŨ/);
+
+  const newBlock = { ...createBlock("heading"), title: "NỘI DUNG MỚI" };
+  hydrated.firstAid = createFirstAidDocument([newBlock]);
+  // Simulate the one-render window where body/bodyHtml still contain the old projection.
+  const persisted = notePageToSheetContent(hydrated) as Record<string, unknown>;
+  const storedBlocks = (persisted.firstAid as { blocks: { title?: string }[] }).blocks;
+  assert.equal(storedBlocks[0]?.title, "NỘI DUNG MỚI");
+  assert.equal(Object.hasOwn(persisted, "body"), false);
+  assert.equal(Object.hasOwn(persisted, "bodyHtml"), false);
+});
+
 test("leaving First Aid uses semantic rich text while structured blocks stay dormant", () => {
   const heading = { ...createBlock("heading"), title: "SUY GIÁP", titleHtml: "<b>SUY GIÁP</b>" };
   const label = { ...createBlock("label"), label: "ĐIỀU TRỊ", text: "Levothyroxine", textHtml: "<i>Levothyroxine</i>" };
@@ -139,6 +156,7 @@ test("FA3 owns canonical persistence and editor state from document to SheetCont
   assert.match(runtime, /delete persisted\.body;/);
   assert.match(runtime, /delete persisted\.bodyHtml;/);
   assert.match(runtime, /firstAidDocumentMatchesRegularProjection/);
+  assert.match(runtime, /if \(stored && !stored\.legacyStarter\) return stored/);
   assert.match(document, /FIRST_AID_DOCUMENT_VERSION = 1/);
   assert.match(document, /Runtime\/editor projection only/);
   assert.doesNotMatch(adapter, /firstAidPayloadComment/);
