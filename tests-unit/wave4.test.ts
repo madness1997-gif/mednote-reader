@@ -135,6 +135,31 @@ test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent"
   }
 });
 
+test("First Aid Page title stays empty after deleting the legacy Page mới title", async () => {
+  const dbName = `mednote-page-title-empty-${crypto.randomUUID()}`;
+  const repository = new IndexedDbNoteRepository({ dbName });
+  const firstAidLibrary = library();
+  firstAidLibrary.notes.pages[0].title = "Page mới";
+  firstAidLibrary.sheetContents["sheet-a1"] = {
+    ...firstAidLibrary.sheetContents["sheet-a1"],
+    paper: { size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
+    firstAid: { version: 1, blocks: [] },
+  };
+  await repository.replaceLibrary(firstAidLibrary);
+  const store = new NoteStore(repository);
+  try {
+    await store.initialize({ skipMigration: true });
+    await store.renamePage("page-a", "");
+
+    assert.equal(store.getSnapshot().structure?.pages.find((page) => page.id === "page-a")?.title, "");
+    assert.equal((await repository.loadNoteStructure())?.pages.find((page) => page.id === "page-a")?.title, "");
+    assert.equal((await repository.loadLibrary())?.notes.pages.find((page) => page.id === "page-a")?.title, "");
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
 test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const stage = await readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8");

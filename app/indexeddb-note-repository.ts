@@ -579,7 +579,14 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
 
   renameNotebook(id: string, title: string) { return this.renameRecord<Notebook>(V6_KEYS.notebook, id, title, "Notebook"); }
   renameSection(id: string, title: string) { return this.renameRecord<Section>(V6_KEYS.section, id, title, "Section"); }
-  renamePage(id: string, title: string) { return this.renameRecord<Page>(V6_KEYS.page, id, title, "Page"); }
+  renamePage(id: string, title: string) {
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const record = await this.requireRecord<Page>(store, `${V6_KEYS.page}${id}`, `Page ${id}`);
+      store.put({ ...record, title: title.trim() }, `${V6_KEYS.page}${id}`);
+      store.put(touchMeta(meta), V6_KEYS.meta);
+    }));
+  }
 
   private renameRecord<T extends { id: string; title: string }>(prefix: string, id: string, title: string, label: string) {
     return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
