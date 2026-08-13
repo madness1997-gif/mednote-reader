@@ -83,6 +83,18 @@ test('First Aid signature matches the approved reading surface', async ({ page }
   await renderSample(page);
   const paper = page.locator('.visual-paper');
 
+  // Keep text in the layout while removing platform-specific glyph rasterization.
+  // Typography is covered by the metric contract below; this snapshot protects
+  // the remaining geometry, spacing, borders, bands, and surface colors.
+  await paper.evaluate((element) => element.classList.add('visual-snapshot-geometry'));
+  await page.addStyleTag({ content: `
+    .visual-paper.visual-snapshot-geometry,
+    .visual-paper.visual-snapshot-geometry * {
+      color: transparent !important;
+      text-shadow: none !important;
+    }
+  ` });
+
   await expect(paper).toHaveScreenshot('first-aid-signature.png', {
     animations: 'disabled',
     caret: 'hide',
@@ -100,6 +112,14 @@ test('First Aid keeps the approved layout metrics', async ({ page }) => {
       labelColumns: style('.fa-label-layout').gridTemplateColumns,
       labelSize: style('.fa-label-input').fontSize,
       contentSize: style('.fa-content-input').fontSize,
+      titleWeight: style('.note-title-input').fontWeight,
+      headingWeight: style('.fa-heading-input').fontWeight,
+      labelWeight: style('.fa-label-input').fontWeight,
+      tableHeadWeight: style('.fa-table-head').fontWeight,
+      titleInk: style('.note-title-input').color,
+      headingInk: style('.fa-heading-input').color,
+      contentInk: style('.fa-content-input').color,
+      pearlTextInk: style('.fa-pearl-text').color,
       flowAlignment: style('.fa-flow-item .fa-rich-editor').textAlign,
       imageHeight: style('.fa-image-zone').minHeight,
     };
@@ -111,6 +131,14 @@ test('First Aid keeps the approved layout metrics', async ({ page }) => {
     labelColumns: '138.453px 463.547px',
     labelSize: '9.5px',
     contentSize: '11.5px',
+    titleWeight: '850',
+    headingWeight: '800',
+    labelWeight: '800',
+    tableHeadWeight: '800',
+    titleInk: 'rgb(255, 255, 255)',
+    headingInk: 'rgb(255, 255, 255)',
+    contentInk: 'rgb(32, 58, 49)',
+    pearlTextInk: 'rgb(32, 58, 49)',
     flowAlignment: 'center',
     imageHeight: '68px',
   });
