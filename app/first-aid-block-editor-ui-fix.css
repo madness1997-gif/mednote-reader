@@ -1,0 +1,39 @@
+/* Keep the First Aid empty state discoverable on mouse and touch devices.
+   The base insert affordance is intentionally hover-only between existing
+   blocks, but on an empty page there is nothing else to hover or select. */
+.fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child {
+  height: 40px !important;
+  min-height: 40px !important;
+  display: grid;
+  place-items: center;
+}
+
+.fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled) {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  width: auto !important;
+  height: 30px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px !important;
+  border-color: var(--fa-border, #a9c4c8) !important;
+  border-radius: 8px !important;
+  background: var(--fa-block-bg, #fff) !important;
+  color: var(--fa-primary, #147783) !important;
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--fa-primary, #175b65) 14%, transparent) !important;
+}
+
+.fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled)::after {
+  content: "Thêm block";
+  font: 700 10px/1 "Segoe UI", Arial, sans-serif;
+  white-space: nowrap;
+}
+
+.fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled):hover,
+.fa-block-editor:not(.mode-view) > .fa-insert-slot.first:last-child .fa-insert-button:not(:disabled):focus-visible {
+  border-color: var(--fa-primary, #13808b) !important;
+  background: var(--fa-focus-bg, #edf8f8) !important;
+}
