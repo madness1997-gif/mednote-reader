@@ -28,15 +28,27 @@ function editorText(editor: HTMLElement) {
   return editor.innerText.replace(/\u00a0/g, " ").replace(/\u200b/g, "");
 }
 
+function editorIsTrulyEmpty(editor: HTMLElement) {
+  // textContent stays empty for browser caret sentinels such as <div><br></div>,
+  // but still preserves an actual user-entered space. Do not use trim() here:
+  // Space is a real editing input and clearing the DOM on Space loses the caret.
+  return (editor.textContent ?? "").replace(/\u200b/g, "").length === 0;
+}
+
 export function RichTextEditor({ editorId, className, html, editable, placeholder, ariaLabel, autoFocus = false, singleLine = false, onChange, onActivate, onNormalizeInput }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
+  const compositionCommitFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || editor.innerHTML === html || document.activeElement === editor || composingRef.current) return;
     editor.innerHTML = html;
   }, [html]);
+
+  useEffect(() => () => {
+    if (compositionCommitFrameRef.current !== null) window.cancelAnimationFrame(compositionCommitFrameRef.current);
+  }, []);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -68,22 +80,30 @@ export function RichTextEditor({ editorId, className, html, editable, placeholde
     onActivate(editorId, editor, range && richTextRangeBelongsToEditor(range, editor) ? range.cloneRange() : null);
   };
 
-  const emitChange = () => {
+  const emitChange = (clearEmptyDom = false) => {
     const editor = editorRef.current;
     if (!editor) return;
     onNormalizeInput(editorId, editor);
-    const text = editorText(editor);
-    if (!text.trim()) {
-      // Browsers/IMEs often leave <div><br></div>, NBSP or zero-width chars in
-      // contenteditable after deleting the final composed word. Persist a truly
-      // empty value so stale Vietnamese composition fragments cannot reappear.
-      if (editor.innerHTML) editor.innerHTML = "";
+    if (editorIsTrulyEmpty(editor)) {
+      // Persist an empty value, but never rewrite the focused contenteditable.
+      // Browsers and Vietnamese IMEs need their invisible caret sentinel to stay
+      // in place while editing. It is safe to clean that sentinel after blur.
+      if (clearEmptyDom && document.activeElement !== editor && editor.innerHTML) editor.innerHTML = "";
       onChange("", "");
       captureSelection();
       return;
     }
-    onChange(sanitizeRichTextHtml(editor.innerHTML), text);
+    onChange(sanitizeRichTextHtml(editor.innerHTML), editorText(editor));
     captureSelection();
+  };
+
+  const finishComposition = (clearEmptyDom = false) => {
+    composingRef.current = false;
+    if (compositionCommitFrameRef.current !== null) window.cancelAnimationFrame(compositionCommitFrameRef.current);
+    compositionCommitFrameRef.current = window.requestAnimationFrame(() => {
+      compositionCommitFrameRef.current = null;
+      emitChange(clearEmptyDom);
+    });
   };
 
   return (
@@ -100,24 +120,30 @@ export function RichTextEditor({ editorId, className, html, editable, placeholde
       spellCheck={false}
       onFocus={captureSelection}
       onBlur={() => {
-        if (!composingRef.current) return;
-        composingRef.current = false;
-        emitChange();
+        if (composingRef.current) {
+          finishComposition(true);
+          return;
+        }
+        emitChange(true);
       }}
       onMouseUp={captureSelection}
-      onKeyUp={captureSelection}
+      onKeyUp={() => {
+        if (!composingRef.current && compositionCommitFrameRef.current === null) captureSelection();
+      }}
       onKeyDown={(event) => {
         if (singleLine && event.key === "Enter") event.preventDefault();
       }}
       onCompositionStart={() => {
+        if (compositionCommitFrameRef.current !== null) {
+          window.cancelAnimationFrame(compositionCommitFrameRef.current);
+          compositionCommitFrameRef.current = null;
+        }
         composingRef.current = true;
       }}
-      onCompositionEnd={() => {
-        composingRef.current = false;
+      onCompositionEnd={() => finishComposition()}
+      onInput={(event) => {
+        if (composingRef.current || event.nativeEvent.isComposing || compositionCommitFrameRef.current !== null) return;
         emitChange();
-      }}
-      onInput={() => {
-        if (!composingRef.current) emitChange();
       }}
       onPaste={(event) => {
         if (!editable) return;
