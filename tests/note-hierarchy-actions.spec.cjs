@@ -121,4 +121,14 @@ test('v6 CRUD for Notebook, Section, Page, and Sheet survives reload', async ({ 
   nav = await reloadAndFindNavigator(page);
   await expect(nav.locator('.note-sidebar-page.active', { hasText: 'ĐTĐ type 2' })).toContainText('2 tờ');
   await expect(page.locator('[data-page-title-editor]')).toHaveText('ĐTĐ type 2');
+
+  titleEditor = page.locator('[data-page-title-editor]');
+  await titleEditor.evaluate((element) => element.setAttribute('contenteditable', 'true'));
+  await titleEditor.fill('');
+  await titleEditor.blur();
+  await expect(titleEditor).toHaveText('');
+
+  await reloadAndFindNavigator(page);
+  await expect(page.locator('[data-page-title-editor]')).toHaveText('');
+  await expect(page.locator('[data-page-title-editor]')).toHaveAttribute('data-placeholder', 'Nhập tiêu đề');
 });
