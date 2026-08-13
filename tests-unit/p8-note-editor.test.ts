@@ -85,7 +85,7 @@ test("P8 Vite no longer patches sticker or First Aid editor models", async () =>
   }
 });
 
-test("P8 First Aid keeps v4 serialization behind domain/codec/renderer boundaries", async () => {
+test("P8 First Aid keeps v5 serialization behind domain/codec/renderer boundaries", async () => {
   const [model, domain, codec, renderer, adapter, imageService, editor, controller, components] = await Promise.all([
     source("app/first-aid-block-model.ts"),
     source("app/first-aid-block-domain.ts"),
@@ -97,7 +97,7 @@ test("P8 First Aid keeps v4 serialization behind domain/codec/renderer boundarie
     source("app/use-first-aid-block-editor.ts"),
     source("app/first-aid-block-editor-components.tsx"),
   ]);
-  assert.match(codec, /FIRST_AID_SERIALIZATION_VERSION = 4/);
+  assert.match(codec, /FIRST_AID_SERIALIZATION_VERSION = 5/);
   assert.match(codec, /migrateFirstAidPayload/);
   assert.match(domain, /export type FirstAidBlock/);
   assert.doesNotMatch(domain, /"arrange"/);

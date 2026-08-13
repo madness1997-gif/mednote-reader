@@ -174,6 +174,7 @@ export function FirstAidBlockEditor({
       return <div className={`fa-block-wrap ${selected ? "has-selected-block" : ""}`} key={block.id}>
         <section
           className={`fa-block fa-block-${block.type} ${selected ? "selected" : ""}`}
+          onPointerDown={() => { if (canManage) setSelectedId(block.id); }}
           onClick={(event) => { event.stopPropagation(); if (canManage) setSelectedId(block.id); }}
           onKeyDown={(event) => onBlockKeyDown(event, block)}
           onDragOver={(event) => { if (draggedId) event.preventDefault(); }}

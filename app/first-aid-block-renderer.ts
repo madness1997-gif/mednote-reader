@@ -1,5 +1,6 @@
 import { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./rich-text-html";
 import { lines, type FirstAidBlock, type TextStyle } from "./first-aid-block-domain";
+import { firstAidTableLayout } from "./first-aid-table-layout";
 
 export { plainTextToRichHtml } from "./rich-text-html";
 
@@ -13,6 +14,8 @@ export function richBlockHtml(html: string | undefined, text = "", textStyle: Te
   const tag = textStyle === "numbered" ? "ol" : "ul";
   return `<${tag}>${lines(text).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</${tag}>`;
 }
+
+const roundPercent = (value: number) => Number((value * 100).toFixed(2));
 
 function blockStaticHtml(block: FirstAidBlock) {
   const border = "border-bottom:1px solid var(--fa-border,#b8c3c7);";
@@ -28,7 +31,14 @@ function blockStaticHtml(block: FirstAidBlock) {
     const text = `<div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div>`;
     return `<div style="display:grid;grid-template-columns:44% 1fr;column-gap:8px;padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
   }
-  if (block.type === "table") return `<div style="padding:5px;background-color:var(--fa-block-bg,#fff);${border}"><table style="width:100%;border-collapse:collapse;${content}">${(block.rows ?? []).map((row, rowIndex) => `<tr>${row.map((cell, columnIndex) => `<${rowIndex === 0 ? "th" : "td"} style="padding:4px 5px;border-style:solid;border-width:1px;border-color:var(--fa-border,#b9c4c8);${rowIndex === 0 ? "color:var(--fa-primary,#1b7184);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.2;text-align:left;background-color:var(--fa-table-head-bg,#f2f6f7)" : "background-color:var(--fa-block-bg,#fff)"}">${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("")}</table></div>`;
+  if (block.type === "table") {
+    const rows = block.rows ?? [];
+    const columns = Math.max(1, rows[0]?.length ?? 1);
+    const layout = firstAidTableLayout(block, rows.length, columns);
+    const columnLayout = `<colgroup>${layout.columnWidths.map((width) => `<col style="width:${roundPercent(width)}%">`).join("")}</colgroup>`;
+    const tableRows = rows.map((row, rowIndex) => `<tr style="height:${layout.rowHeights[rowIndex]}px">${row.map((cell, columnIndex) => `<${rowIndex === 0 ? "th" : "td"} style="padding:4px 5px;border-style:solid;border-width:1px;border-color:var(--fa-border,#b9c4c8);${rowIndex === 0 ? "color:var(--fa-primary,#1b7184);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.2;text-align:left;background-color:var(--fa-table-head-bg,#f2f6f7)" : "background-color:var(--fa-block-bg,#fff)"}">${rich(block.rowsHtml?.[rowIndex]?.[columnIndex], cell)}</${rowIndex === 0 ? "th" : "td"}>`).join("")}</tr>`).join("");
+    return `<div style="padding:5px;background-color:var(--fa-block-bg,#fff);${border}"><table style="width:100%;border-collapse:collapse;table-layout:fixed;${content}">${columnLayout}${tableRows}</table></div>`;
+  }
   if (block.type === "flow") {
     const flow = `<div style="display:flex;align-items:stretch;column-gap:4px;padding:5px 6px;${content}">${(block.steps ?? []).map((step, index, all) => `<div style="padding:5px;border-style:solid;border-width:1px;border-color:var(--fa-border,#b7c4c8);text-align:center;background-color:var(--fa-flow-step-bg,#fff)">${rich(block.stepsHtml?.[index], step)}</div>${index < all.length - 1 ? '<div style="display:grid;align-items:center;color:var(--fa-secondary,#8b2c58);font-weight:800">→</div>' : ""}`).join("")}</div>`;
     return `<div style="display:grid;grid-template-columns:22% 1fr;background-color:var(--fa-block-bg,#fff);${border}"><div style="padding:5px 6px;background-color:var(--fa-label-bg,#eff7f8);color:var(--fa-primary,#1b7184);border-right:1px solid var(--fa-soft-border,#d3e1e4);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:800;line-height:1.25">${rich(block.labelHtml, block.label ?? "CƠ CHẾ")}</div>${flow}</div>`;

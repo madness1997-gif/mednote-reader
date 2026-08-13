@@ -40,7 +40,7 @@ export function firstAidDocumentPlainText(document: FirstAidDocument | null | un
 }
 
 /**
- * Runtime/editor projection only. The v4 comment remains readable during the
+ * Runtime/editor projection only. The v5 comment remains readable during the
  * FA3 migration, but this HTML is never the canonical SheetContent payload.
  */
 export function firstAidDocumentProjectionHtml(document: FirstAidDocument | null | undefined) {

@@ -346,6 +346,10 @@ export function notePageToSheetContent(page: NotePage): SheetContent {
   return persisted;
 }
 
+export function createDefaultSheetContent(citationPage: number | null = 1): SheetContent {
+  return notePageToSheetContent(createBlankPage(citationPage));
+}
+
 export function notePageFromSheet(sheetId: string, pageTitle: string, content?: SheetContent, lazy = false): NotePage {
   const hasPersistedPaper = Boolean(content && Object.hasOwn(content, "paper"));
   const hasPersistedFirstAid = Boolean(content && Object.hasOwn(content, "firstAid"));

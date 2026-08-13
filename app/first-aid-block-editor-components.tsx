@@ -14,6 +14,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { RichTextEditor } from "./rich-text-editor";
 import { FirstAidHeadingInput } from "./first-aid-heading-input";
 import {
@@ -26,6 +27,15 @@ import {
   richBlockHtml,
   sanitizeBlockRichTextHtml,
 } from "./first-aid-block-renderer";
+import {
+  DEFAULT_FIRST_AID_ROW_HEIGHT,
+  appendEmptyTableColumn,
+  appendEmptyTableRow,
+  firstAidTableLayout,
+  normalizeTableColumnWidths,
+  resizeTableColumn,
+  resizeTableRow,
+} from "./first-aid-table-layout";
 
 export type BlockOption = { type: BlockType; label: string; description: string; icon: LucideIcon };
 
@@ -87,19 +97,24 @@ function tableRowsHtml(block: FirstAidBlock) {
 export function FirstAidTableToolbar({ block, canEdit, updateBlock }: { block: FirstAidBlock; canEdit: boolean; updateBlock: (id: string, changes: Partial<FirstAidBlock>) => void }) {
   const rows = tableRows(block);
   const columns = Math.max(1, rows[0]?.length ?? 2);
+  const layout = firstAidTableLayout(block, rows.length, columns);
   const addRow = () => updateBlock(block.id, {
-    rows: [...rows, Array.from({ length: columns }, () => "Nội dung")],
-    rowsHtml: [...tableRowsHtml(block), Array.from({ length: columns }, () => plainTextToRichHtml("Nội dung"))],
+    rows: appendEmptyTableRow(rows, columns, () => ""),
+    rowsHtml: appendEmptyTableRow(tableRowsHtml(block), columns, () => ""),
+    columnWidths: layout.columnWidths,
+    rowHeights: [...layout.rowHeights, DEFAULT_FIRST_AID_ROW_HEIGHT],
   });
   const addColumn = () => updateBlock(block.id, {
-    rows: rows.map((row, rowIndex) => [...row, rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung"]),
-    rowsHtml: tableRowsHtml(block).map((row, rowIndex) => [...row, plainTextToRichHtml(rowIndex === 0 ? `Tiêu đề ${columns + 1}` : "Nội dung")]),
+    rows: appendEmptyTableColumn(rows, () => ""),
+    rowsHtml: appendEmptyTableColumn(tableRowsHtml(block), () => ""),
+    columnWidths: normalizeTableColumnWidths([...layout.columnWidths, 1 / columns], columns + 1),
+    rowHeights: layout.rowHeights,
   });
   const removeRow = () => {
-    if (rows.length > 1) updateBlock(block.id, { rows: rows.slice(0, -1), rowsHtml: tableRowsHtml(block).slice(0, -1) });
+    if (rows.length > 1) updateBlock(block.id, { rows: rows.slice(0, -1), rowsHtml: tableRowsHtml(block).slice(0, -1), rowHeights: layout.rowHeights.slice(0, -1), columnWidths: layout.columnWidths });
   };
   const removeColumn = () => {
-    if (columns > 1) updateBlock(block.id, { rows: rows.map((row) => row.slice(0, -1)), rowsHtml: tableRowsHtml(block).map((row) => row.slice(0, -1)) });
+    if (columns > 1) updateBlock(block.id, { rows: rows.map((row) => row.slice(0, -1)), rowsHtml: tableRowsHtml(block).map((row) => row.slice(0, -1)), columnWidths: normalizeTableColumnWidths(layout.columnWidths.slice(0, -1), columns - 1), rowHeights: layout.rowHeights });
   };
   return <div className="fa-table-toolbar-group" role="group" aria-label="Chỉnh hàng và cột">
     <button type="button" className="fa-table-toolbar-action" disabled={!canEdit} onClick={addRow} aria-label="Thêm hàng" title="Thêm hàng"><Plus size={9} /><Rows3 size={13} /></button>
@@ -125,6 +140,69 @@ type FirstAidBlockBodyProps = {
 };
 
 export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts, pageHeightCss, pageObjectLayoutKey, updateBlock, onBrowseImage, onPdfCrop, onDropImage, onTextActivate, onNormalizeTextInput }: FirstAidBlockBodyProps) {
+  const [tableResizePreview, setTableResizePreview] = useState<{ columnWidths: number[]; rowHeights: number[] } | null>(null);
+  const tableResizeRef = useRef<{
+    axis: "column" | "row";
+    pointerId: number;
+    index: number;
+    start: number;
+    gridSize: number;
+    initial: { columnWidths: number[]; rowHeights: number[] };
+    current: { columnWidths: number[]; rowHeights: number[] };
+  } | null>(null);
+  const tableResizeCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => tableResizeCleanupRef.current?.(), []);
+
+  const startTableResize = (event: ReactPointerEvent<HTMLButtonElement>, axis: "column" | "row", index: number, layout: { columnWidths: number[]; rowHeights: number[] }) => {
+    if (!canEdit) return;
+    const grid = event.currentTarget.closest<HTMLElement>(".fa-table-grid");
+    if (!grid) return;
+    const rect = grid.getBoundingClientRect();
+    event.preventDefault();
+    event.stopPropagation();
+    const initial = { columnWidths: [...layout.columnWidths], rowHeights: [...layout.rowHeights] };
+    tableResizeRef.current = {
+      axis,
+      pointerId: event.pointerId,
+      index,
+      start: axis === "column" ? event.clientX : event.clientY,
+      gridSize: axis === "column" ? rect.width : rect.height,
+      initial,
+      current: initial,
+    };
+    setTableResizePreview(initial);
+    const finish = (commit: boolean) => {
+      const state = tableResizeRef.current;
+      tableResizeCleanupRef.current?.();
+      tableResizeCleanupRef.current = null;
+      tableResizeRef.current = null;
+      setTableResizePreview(null);
+      if (commit && state) updateBlock(block.id, state.current);
+    };
+    const move = (moveEvent: PointerEvent) => {
+      const state = tableResizeRef.current;
+      if (!state || state.pointerId !== moveEvent.pointerId) return;
+      moveEvent.preventDefault();
+      const delta = (state.axis === "column" ? moveEvent.clientX : moveEvent.clientY) - state.start;
+      state.current = state.axis === "column"
+        ? { ...state.initial, columnWidths: resizeTableColumn(state.initial.columnWidths, state.index, delta, state.gridSize) }
+        : { ...state.initial, rowHeights: resizeTableRow(state.initial.rowHeights, state.index, delta) };
+      setTableResizePreview(state.current);
+    };
+    const up = (upEvent: PointerEvent) => { if (upEvent.pointerId === event.pointerId) finish(true); };
+    const cancel = (cancelEvent: PointerEvent) => { if (cancelEvent.pointerId === event.pointerId) finish(false); };
+    tableResizeCleanupRef.current?.();
+    tableResizeCleanupRef.current = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
+
   const renderRichField = (field: "title" | "label" | "text" | "caption", htmlField: "titleHtml" | "labelHtml" | "textHtml" | "captionHtml", className: string, ariaLabel: string, options?: { singleLine?: boolean; placeholder?: string; textStyle?: TextStyle }) =>
     <BlockRichEditor
       editorId={`first-aid:${block.id}:${field}`}
@@ -207,25 +285,50 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     const rows = tableRows(block);
     const columns = Math.max(1, rows[0]?.length ?? 2);
     const rowsHtml = tableRowsHtml(block);
-    return <div className="fa-table-block"><div className="fa-table-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) =>
-      <BlockRichEditor
-        key={`${rowIndex}-${columnIndex}`}
-        editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`}
-        className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"}
-        html={block.rowsHtml?.[rowIndex]?.[columnIndex]}
-        text={cell}
-        editable={canEdit}
-        ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`}
-        onChange={(cellHtml, value) => {
-          const nextRows = rows.map((tableRow) => [...tableRow]);
-          const nextRowsHtml = rowsHtml.map((tableRow) => [...tableRow]);
-          nextRows[rowIndex][columnIndex] = value;
-          nextRowsHtml[rowIndex][columnIndex] = cellHtml;
-          updateBlock(block.id, { rows: nextRows, rowsHtml: nextRowsHtml });
-        }}
-        onActivate={onTextActivate}
-        onNormalizeInput={onNormalizeTextInput}
-      />))}</div></div>;
+    const savedLayout = firstAidTableLayout(block, rows.length, columns);
+    const layout = tableResizePreview && tableResizePreview.columnWidths.length === columns && tableResizePreview.rowHeights.length === rows.length ? tableResizePreview : savedLayout;
+    return <div className="fa-table-block"><div className="fa-table-grid" style={{
+      gridTemplateColumns: layout.columnWidths.map((width) => `minmax(0, ${width}fr)`).join(" "),
+      gridTemplateRows: layout.rowHeights.map((height) => `minmax(${height}px, auto)`).join(" "),
+    }}>{rows.flatMap((row, rowIndex) => row.map((cell, columnIndex) =>
+      <div className="fa-table-cell-wrap" key={`${rowIndex}-${columnIndex}`}>
+        <BlockRichEditor
+          editorId={`first-aid:${block.id}:cell:${rowIndex}:${columnIndex}`}
+          className={rowIndex === 0 ? "fa-table-head" : "fa-table-cell"}
+          html={block.rowsHtml?.[rowIndex]?.[columnIndex]}
+          text={cell}
+          editable={canEdit}
+          ariaLabel={`Ô ${rowIndex + 1}, ${columnIndex + 1}`}
+          onChange={(cellHtml, value) => {
+            const nextRows = rows.map((tableRow) => [...tableRow]);
+            const nextRowsHtml = rowsHtml.map((tableRow) => [...tableRow]);
+            nextRows[rowIndex][columnIndex] = value;
+            nextRowsHtml[rowIndex][columnIndex] = cellHtml;
+            updateBlock(block.id, { rows: nextRows, rowsHtml: nextRowsHtml, ...savedLayout });
+          }}
+          onActivate={onTextActivate}
+          onNormalizeInput={onNormalizeTextInput}
+        />
+        {columnIndex < columns - 1 && <button
+          type="button"
+          className="fa-table-resizer fa-table-column-resizer"
+          onPointerDown={(event) => startTableResize(event, "column", columnIndex, layout)}
+          tabIndex={-1}
+          aria-hidden={rowIndex === 0 ? undefined : true}
+          aria-label={rowIndex === 0 ? `Đổi độ rộng cột ${columnIndex + 1}` : undefined}
+          title="Kéo để đổi độ rộng cột"
+        />}
+        <button
+          type="button"
+          className="fa-table-resizer fa-table-row-resizer"
+          onPointerDown={(event) => startTableResize(event, "row", rowIndex, layout)}
+          tabIndex={-1}
+          aria-hidden={columnIndex === 0 ? undefined : true}
+          aria-label={columnIndex === 0 ? `Đổi chiều cao hàng ${rowIndex + 1}` : undefined}
+          title="Kéo để đổi chiều cao hàng"
+        />
+      </div>))}
+    </div></div>;
   }
 
   if (block.type === "flow") {

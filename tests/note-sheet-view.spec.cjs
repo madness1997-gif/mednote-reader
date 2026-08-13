@@ -44,6 +44,7 @@ test('same-Page Sheets switch between single and continuous views without duplic
   await expect(nav.locator('.note-sidebar-page.active', { hasText: 'Page đa tờ' })).toContainText('2 tờ');
   const secondSheetId = await page.locator('.note-paper.interactive').getAttribute('data-note-page-id');
   expect(secondSheetId).not.toBe(firstSheetId);
+  await expect(page.locator('.note-paper.interactive')).toHaveClass(/template-first-aid/);
 
   await toolbar.getByRole('button', { name: 'Liên tục' }).click();
   const stage = page.locator('.note-stage-continuous');

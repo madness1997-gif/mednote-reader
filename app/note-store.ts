@@ -332,10 +332,10 @@ export class NoteStore {
     if (!section) return Promise.reject(new Error(`Notebook ${notebookId} chưa có Section`));
     const pages = ordered(structure.pages.filter((record) => record.sectionId === section.id));
     if (pages[0]) return this.openPage(pages[0].id);
-    return this.createPage(section.id, "Page mới", {});
+    return this.createPage(section.id, "Page mới");
   }
 
-  createNotebook(title: string, content: SheetContent = {}) {
+  createNotebook(title: string, content?: SheetContent) {
     return this.mutation(() => this.commands.createNotebook(title, content), true);
   }
 
@@ -346,11 +346,11 @@ export class NoteStore {
     });
   }
 
-  createPage(sectionId: string, title: string, content: SheetContent = {}) {
+  createPage(sectionId: string, title: string, content?: SheetContent) {
     return this.mutation(() => this.commands.createPage(sectionId, title, content), true);
   }
 
-  createSheet(pageId: string, content: SheetContent = {}) {
+  createSheet(pageId: string, content?: SheetContent) {
     return this.mutation(() => this.commands.createSheet(pageId, content), true);
   }
 
@@ -359,9 +359,9 @@ export class NoteStore {
   renamePage(id: string, title: string) { return this.mutation(() => this.commands.renamePage(id, title)); }
   movePage(id: string, sectionId: string, order: number) { return this.mutation(() => this.commands.movePage(id, sectionId, order)); }
   moveSheet(id: string, pageId: string, order: number) { return this.mutation(() => this.commands.moveSheet(id, pageId, order)); }
-  deleteNotebook(id: string, replacementContent: SheetContent = {}) { return this.mutation(() => this.commands.deleteNotebook(id, replacementContent), true); }
+  deleteNotebook(id: string, replacementContent?: SheetContent) { return this.mutation(() => this.commands.deleteNotebook(id, replacementContent), true); }
   deleteSection(id: string) { return this.mutation(() => this.commands.deleteSection(id), true); }
-  deletePage(id: string, replacementContent: SheetContent = {}) { return this.mutation(() => this.commands.deletePage(id, replacementContent), true); }
+  deletePage(id: string, replacementContent?: SheetContent) { return this.mutation(() => this.commands.deletePage(id, replacementContent), true); }
   deleteSheet(id: string) { return this.mutation(() => this.commands.deleteSheet(id), true); }
 
   async loadNotebookContents(notebookId: string): Promise<SheetContentMap> {

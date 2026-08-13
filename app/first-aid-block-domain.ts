@@ -21,6 +21,8 @@ export type FirstAidBlock = {
   imageSide?: "left" | "right";
   rows?: string[][];
   rowsHtml?: string[][];
+  columnWidths?: number[];
+  rowHeights?: number[];
   steps?: string[];
   stepsHtml?: string[];
 };
@@ -36,7 +38,7 @@ export function createBlock(type: BlockType): FirstAidBlock {
     case "text": return { id: uid(), type, text: "", textStyle: "paragraph" };
     case "figure": return { id: uid(), type, caption: "" };
     case "figure-text": return { id: uid(), type, text: "", caption: "", imageSide: "left" };
-    case "table": return { id: uid(), type, rows: [["", ""], ["", ""]] };
+    case "table": return { id: uid(), type, rows: [["", ""], ["", ""]], columnWidths: [.5, .5], rowHeights: [26, 26] };
     case "flow": return { id: uid(), type, label: "", steps: [""] };
     case "pearl": return { id: uid(), type, label: "", text: "" };
   }

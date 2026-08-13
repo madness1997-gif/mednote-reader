@@ -1,5 +1,6 @@
 import type { NoteRepository } from "./note-repository";
 import { noteContextForSheet } from "./note-domain";
+import { createDefaultSheetContent } from "./note-runtime-adapter";
 import type {
   ActiveNoteState,
   NoteStructure,
@@ -60,12 +61,12 @@ export class NoteCommands {
     await this.repository.flush();
   }
 
-  createNotebook(title: string, content: SheetContent = {}) {
+  createNotebook(title: string, content?: SheetContent) {
     return this.enqueue(async () => {
       const structure = await this.repository.loadNoteStructure();
       if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
       const normalizedTitle = this.assertUniqueNotebookTitle(structure, title);
-      await this.repository.createNotebook({ title: normalizedTitle, content });
+      await this.repository.createNotebook({ title: normalizedTitle, content: content ?? createDefaultSheetContent() });
       return this.committedResult();
     });
   }
@@ -77,16 +78,16 @@ export class NoteCommands {
     });
   }
 
-  createPage(sectionId: string, title: string, content: SheetContent = {}) {
+  createPage(sectionId: string, title: string, content?: SheetContent) {
     return this.enqueue(async () => {
-      await this.repository.createPage({ sectionId, title, content });
+      await this.repository.createPage({ sectionId, title, content: content ?? createDefaultSheetContent() });
       return this.committedResult();
     });
   }
 
-  createSheet(pageId: string, content: SheetContent = {}) {
+  createSheet(pageId: string, content?: SheetContent) {
     return this.enqueue(async () => {
-      await this.repository.createSheet({ pageId, content });
+      await this.repository.createSheet({ pageId, content: content ?? createDefaultSheetContent() });
       return this.committedResult();
     });
   }
@@ -132,7 +133,7 @@ export class NoteCommands {
     });
   }
 
-  deleteNotebook(id: string, replacementContent: SheetContent = {}) {
+  deleteNotebook(id: string, replacementContent?: SheetContent) {
     return this.enqueue(async () => {
       const structure = await this.repository.loadNoteStructure();
       if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
@@ -148,7 +149,7 @@ export class NoteCommands {
       }
 
       if (structure.notebooks.length === 1) {
-        await this.repository.createNotebook({ title: "Sổ ghi chú mới", content: replacementContent });
+        await this.repository.createNotebook({ title: "Sổ ghi chú mới", content: replacementContent ?? createDefaultSheetContent() });
         replacementActive = null;
       }
       await this.repository.deleteNotebook(id);
@@ -180,7 +181,7 @@ export class NoteCommands {
     });
   }
 
-  deletePage(id: string, replacementContent: SheetContent = {}) {
+  deletePage(id: string, replacementContent?: SheetContent) {
     return this.enqueue(async () => {
       const structure = await this.repository.loadNoteStructure();
       if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
@@ -199,7 +200,7 @@ export class NoteCommands {
       }
 
       if (!remainingPages.length) {
-        await this.repository.createPage({ sectionId: page.sectionId, title: "Page mới", content: replacementContent });
+        await this.repository.createPage({ sectionId: page.sectionId, title: "Page mới", content: replacementContent ?? createDefaultSheetContent() });
         replacementActive = null;
       }
       await this.repository.deletePage(id);

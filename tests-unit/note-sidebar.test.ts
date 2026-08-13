@@ -7,6 +7,7 @@ import { NoteSidebarController, type NoteSidebarPrompts } from "../app/note-side
 import { projectNoteSidebar } from "../app/note-sidebar-model";
 import type { LibraryV6 } from "../app/note-repository";
 import { NoteStore } from "../app/note-store";
+import { DEFAULT_NEW_NOTE_PAPER } from "../app/note-runtime-adapter";
 
 function library(): LibraryV6 {
   return {
@@ -84,6 +85,29 @@ test("sidebar controller owns compound Section and last-Sheet workflows", async 
     const projectedPage = projectedSection.pages[0];
     await controller.deleteSheet(projectedPage, projectedPage.sheets[0]);
     assert.equal(store.getSnapshot().structure?.pages.some((page) => page.id === projectedPage.id), false, "deleting the last Sheet removes its Page");
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
+test("new Notebook, Page and Sheet content defaults to First Aid", async () => {
+  const { dbName, repository, store } = await harness();
+  const expectFirstAid = async (sheetId: string | undefined) => {
+    assert.ok(sheetId);
+    const content = await repository.loadSheetContent(sheetId);
+    assert.deepEqual(content?.paper, DEFAULT_NEW_NOTE_PAPER);
+    assert.deepEqual(content?.firstAid, { version: 1, blocks: [] });
+  };
+  try {
+    await store.createNotebook("Sổ First Aid mới");
+    await expectFirstAid(store.getSnapshot().structure?.active.activeSheetId);
+
+    await store.createPage("sec-a", "Page First Aid mới");
+    await expectFirstAid(store.getSnapshot().structure?.active.activeSheetId);
+
+    await store.createSheet("page-a");
+    await expectFirstAid(store.getSnapshot().structure?.active.activeSheetId);
   } finally {
     await store.flush();
     await deleteNoteRepositoryDatabase(dbName);

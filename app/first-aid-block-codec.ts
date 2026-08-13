@@ -1,7 +1,7 @@
 import { createBlock, lines, type FirstAidBlock } from "./first-aid-block-domain";
 import { renderFirstAidBlocksHtml, sanitizeBlockRichTextHtml } from "./first-aid-block-renderer";
 
-export const FIRST_AID_SERIALIZATION_VERSION = 4;
+export const FIRST_AID_SERIALIZATION_VERSION = 5;
 
 const LEGACY_SECTION_LABELS = [
   "TỔNG QUAN",
@@ -159,9 +159,9 @@ function regularRichTextBlocks(html: string) {
 
 /**
  * Central migration boundary for persisted First Aid payloads.
- * v1-v4 share the same block envelope; legacy semantic repair is applied here,
+ * v1-v5 share the same block envelope; legacy semantic repair is applied here,
  * not in the editor or renderer. Keep this function as the only place that
- * understands serialized versions when a v5+ schema is introduced.
+ * understands serialized versions when a later schema is introduced.
  */
 export function migrateFirstAidPayload(payload: FirstAidPayload): FirstAidBlock[] | null {
   if (!Array.isArray(payload.blocks)) return null;
