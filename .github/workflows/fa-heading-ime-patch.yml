@@ -1,0 +1,64 @@
+name: Apply First Aid heading IME patch
+
+on:
+  push:
+    branches:
+      - fix/fa-conversion-heading-ime
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'Apply First Aid heading input patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/fa-conversion-heading-ime
+      - name: Patch heading call site
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/first-aid-block-editor-components.tsx')
+          source = path.read_text()
+
+          import_anchor = 'import { RichTextEditor } from "./rich-text-editor";\n'
+          import_line = 'import { FirstAidHeadingInput } from "./first-aid-heading-input";\n'
+          if import_line not in source:
+              assert import_anchor in source
+              source = source.replace(import_anchor, import_anchor + import_line, 1)
+
+          old = '''  if (block.type === "heading") return <input
+            className="fa-heading-input fa-heading-native-input"
+            type="text"
+            value={block.title ?? ""}
+            readOnly={!canEdit}
+            placeholder="TIÊU ĐỀ MỤC"
+            aria-label="Tiêu đề mục"
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            onChange={(event) => {
+              const title = event.target.value;
+              updateBlock(block.id, { title, titleHtml: plainTextToRichHtml(title) });
+            }}
+          />;'''
+          new = '''  if (block.type === "heading") return <FirstAidHeadingInput block={block} canEdit={canEdit} updateBlock={updateBlock} />;'''
+          assert old in source, 'heading block source changed unexpectedly'
+          source = source.replace(old, new, 1)
+          path.write_text(source)
+
+          workflow = Path('.github/workflows/fa-heading-ime-patch.yml')
+          if workflow.exists(): workflow.unlink()
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/first-aid-block-editor-components.tsx .github/workflows/fa-heading-ime-patch.yml
+          git commit -m "Apply First Aid heading input patch"
+          git push origin HEAD:fix/fa-conversion-heading-ime
