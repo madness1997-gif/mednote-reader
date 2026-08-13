@@ -68,6 +68,13 @@ async function renderSample(page) {
     .visual-paper .typed-layer { position: relative; z-index: 1; padding: 40px 44px; }
     .visual-paper .fa-block-editor { height: auto; overflow: visible; }
     .visual-paper .fa-insert-button { font-size: 0; }
+    .visual-paper, .visual-paper .fa-rich-editor { font-family: "DejaVu Serif", serif !important; }
+    .visual-paper .note-title-input,
+    .visual-paper .fa-heading-input,
+    .visual-paper .fa-label-input,
+    .visual-paper .fa-flow-label,
+    .visual-paper .fa-table-head,
+    .visual-paper .fa-pearl-label { font-family: "DejaVu Sans", sans-serif !important; }
   ` });
   await page.addStyleTag({ path: editorCss });
 }
