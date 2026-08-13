@@ -87,6 +87,7 @@ export function useFirstAidBlockEditor({
 
   useEffect(() => {
     if (!pdfCropResult || handledCropTokenRef.current === pdfCropResult.token) return;
+    if (!pageObjectIds.includes(pdfCropResult.excerptId)) return;
     handledCropTokenRef.current = pdfCropResult.token;
     commit((current) => current.some((block) => block.id === pdfCropResult.blockId)
       ? current.map((block) => block.id === pdfCropResult.blockId
@@ -94,7 +95,7 @@ export function useFirstAidBlockEditor({
         : block)
       : current);
     onPdfCropHandled(pdfCropResult.token);
-  }, [pdfCropResult, commit, onPdfCropHandled]);
+  }, [pdfCropResult, pageObjectKey, commit, onPdfCropHandled]);
 
   const updateBlock = useCallback((id: string, changes: Partial<FirstAidBlock>) => {
     commit((current) => current.map((block) => block.id === id ? { ...block, ...changes } : block));
