@@ -25,6 +25,20 @@ export {
 } from "./first-aid-block-renderer";
 
 export {
+  FIRST_AID_DOCUMENT_VERSION,
+  createFirstAidDocument,
+  firstAidDocumentFromLegacy,
+  firstAidDocumentMatchesRegularProjection,
+  firstAidDocumentPlainText,
+  firstAidDocumentProjectionHtml,
+  firstAidDocumentStandardRichText,
+  normalizeFirstAidDocument,
+  resolveFirstAidDocument,
+  type FirstAidDocument,
+  type ResolvedFirstAidDocument,
+} from "./first-aid-document";
+
+export {
   firstAidTemplateTransition,
   firstAidToStandardRichText,
   regularTemplateRichText,
