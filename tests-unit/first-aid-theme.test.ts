@@ -65,7 +65,7 @@ test("FA1 keeps First Aid presentation in one canonical stylesheet without globa
   await assert.rejects(readFile(new URL("app/first-aid-signature-polish.css", root), "utf8"));
 });
 
-test("FA2 runtime is composed from controller and block components without legacy bridges", async () => {
+test("FA2/FA3 runtime is composed from controller and block components without legacy bridges", async () => {
   const [editor, controller, components] = await Promise.all([
     readFile(new URL("app/first-aid-block-editor.tsx", root), "utf8"),
     readFile(new URL("app/use-first-aid-block-editor.ts", root), "utf8"),
@@ -73,7 +73,8 @@ test("FA2 runtime is composed from controller and block components without legac
   ]);
   assert.match(editor, /useFirstAidBlockEditor/);
   assert.match(editor, /FirstAidBlockBody/);
-  assert.match(controller, /External restore\/sync may replace the content of the same Sheet id/);
+  assert.match(controller, /Restore\/sync can replace the canonical document of the same Sheet id/);
+  assert.match(controller, /appliedSignatureRef/);
   assert.match(components, /fa-heading-native-input/);
   await assert.rejects(readFile(new URL("app/first-aid-block-editor-view.tsx", root), "utf8"));
   await assert.rejects(readFile(new URL("app/first-aid-block-editor-v2.tsx", root), "utf8"));
