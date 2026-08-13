@@ -587,6 +587,8 @@
   font-weight: 850 !important;
   line-height: 1.12 !important;
   letter-spacing: .028em;
+  direction: ltr;
+  text-align: left;
   text-transform: uppercase;
 }
 

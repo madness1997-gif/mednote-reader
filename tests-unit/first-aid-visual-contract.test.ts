@@ -9,7 +9,10 @@ function compact(value: string) {
 }
 
 test("First Aid keeps its compact signature after editor refactors", async () => {
-  const css = await readFile(new URL("app/first-aid-block-editor.css", root), "utf8");
+  const [css, globals] = await Promise.all([
+    readFile(new URL("app/first-aid-block-editor.css", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
   const normalized = compact(css);
   const canonicalDesktop = css.split("First Aid visual contract: one canonical signature, no patch layers. */")[1]?.split("@media (max-width: 760px)")[0] ?? "";
 
@@ -22,6 +25,8 @@ test("First Aid keeps its compact signature after editor refactors", async () =>
   assert.match(normalized, /\.template-first-aid \.fa-side-toggle \{ display: none;/);
   assert.match(normalized, /\.template-first-aid \.fa-block\.selected \.fa-side-toggle \{ display: inline-flex;/);
   assert.match(normalized, /\.template-first-aid \.note-title-input \{ min-height: 34px;/);
+  assert.match(normalized, /\.template-first-aid \.note-title-input \{.*?direction: ltr; text-align: left;/);
+  assert.doesNotMatch(globals, /\.note-paper\.template-first-aid \.note-title-input \{[^}]*text-align: right/);
   assert.match(normalized, /\.template-first-aid \.fa-image-zone \{ min-height: 68px;/);
   assert.match(normalized, /\.template-first-aid \.fa-flow-item \.fa-rich-editor \{ min-height: 28px; padding: 4px 6px !important;/);
   assert.match(normalized, /\.template-first-aid \.fa-flow-item > span \{ height: 14px;/);
