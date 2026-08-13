@@ -31,6 +31,14 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           npm run test:all
+      - name: Upload browser regression diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-${{ github.sha }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
       - run: npm run build:pages
         env:
           VITE_GOOGLE_CLIENT_ID: 647663227509-gcrelfm08dbli66ku94vjgpqj8fn9goi.apps.googleusercontent.com
