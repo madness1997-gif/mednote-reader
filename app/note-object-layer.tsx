@@ -372,7 +372,7 @@ export function NoteObjectLayer({ excerpts, resolveSource, selectedId, activeToo
     {excerpts.map((excerpt, index) => {
       const selected = interactive && excerpt.id === selectedId;
       const calloutTextMode = selected && excerpt.annotationKind === "callout" && activeTool === "text";
-      return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveSource(excerpt)} index={index} selected={selected} selectable={interactive && (activeTool === "pointer" || activeTool === "text")} movable={interactive && (activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && excerpt.kind === "text"))} editable={interactive && activeTool === "text" && selected && excerpt.kind === "text"} onSelect={onSelect} onMove={onMove} onEdit={onEdit} onTextActivate={onTextActivate} onNormalizeTextInput={onNormalizeTextInput} onOpenSource={onOpenSource} onDelete={onDelete} />;
+      return <DraggableExcerpt key={excerpt.id} excerpt={excerpt} source={resolveSource(excerpt)} index={index} selected={selected} selectable={interactive && (activeTool === "pointer" || activeTool === "text")} movable={interactive && (activeTool === "pointer" || calloutTextMode || (selected && activeTool === "text" && (excerpt.kind === "text" || excerpt.kind === "image")))} editable={interactive && activeTool === "text" && selected && excerpt.kind === "text"} onSelect={onSelect} onMove={onMove} onEdit={onEdit} onTextActivate={onTextActivate} onNormalizeTextInput={onNormalizeTextInput} onOpenSource={onOpenSource} onDelete={onDelete} />;
     })}
   </div>;
 }
