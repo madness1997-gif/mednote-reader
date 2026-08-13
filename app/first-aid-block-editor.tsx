@@ -106,10 +106,25 @@ export function FirstAidBlockEditor({
     };
   };
 
+  const openNativeImagePicker = () => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    const picker = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof picker.showPicker === "function") {
+        picker.showPicker();
+        return;
+      }
+    } catch {
+      // Some mobile browsers expose showPicker but reject it; the native click path remains valid.
+    }
+    input.click();
+  };
+
   const requestImage = (blockId: string, element: HTMLElement) => {
     if (!canEdit) return;
     pendingImageBlockRef.current = { blockId, placement: blockPlacement(element) };
-    fileInputRef.current?.click();
+    openNativeImagePicker();
   };
 
   const requestPdfCrop = (blockId: string, element: HTMLElement) => {
@@ -140,7 +155,15 @@ export function FirstAidBlockEditor({
   };
 
   return <div className={`fa-block-editor mode-${mode}`} onClick={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
-    <input ref={fileInputRef} className="fa-hidden-input" type="file" accept="image/*" onChange={onFileChange} />
+    <input
+      ref={fileInputRef}
+      className="fa-hidden-input"
+      type="file"
+      accept="image/*"
+      tabIndex={-1}
+      style={{ position: "fixed", left: "-10000px", top: 0, width: "1px", height: "1px", display: "block", opacity: 0, pointerEvents: "none" }}
+      onChange={onFileChange}
+    />
     <div className="fa-insert-slot first">
       <button type="button" className="fa-insert-button" disabled={!canManage} onClick={() => setInsertAt(insertAt === 0 ? null : 0)} aria-label="Thêm block đầu trang"><Plus size={14} /></button>
       {insertAt === 0 && <FirstAidInsertMenu onInsert={(type) => insertBlock(type, 0)} onClose={() => setInsertAt(null)} />}
