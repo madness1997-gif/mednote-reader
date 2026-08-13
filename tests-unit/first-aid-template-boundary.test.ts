@@ -171,8 +171,13 @@ test("FA3 owns canonical persistence and editor state from document to SheetCont
   assert.match(stage, /onChange=\{\(firstAid\) => updateActiveNote\(\{ firstAid \}\)\}/);
   assert.match(stage, /firstAid: undefined/);
   assert.match(preview, /firstAidDocumentProjectionHtml\(note\.firstAid\)/);
-  assert.match(page, /body: firstAidDocumentPlainText\(activeNote\.firstAid\)/);
-  assert.match(page, /firstAid: normalizeFirstAidDocument\(activeNote\.firstAid\) \?\? firstAidDocumentFromLegacy/);
+  assert.match(page, /firstAidTemplateTransition\(\{/);
+  assert.match(page, /firstAid: activeNote\.firstAid/);
+  assert.match(page, /\.\.\.transition/);
+  assert.doesNotMatch(page, /body: firstAidDocumentPlainText\(activeNote\.firstAid\)/);
+  assert.match(adapter, /firstAidDocumentMatchesRegularProjection/);
+  assert.match(adapter, /dormantStillRepresentsActiveBody/);
+  assert.match(adapter, /firstAidDocumentFromLegacy\(input\.bodyHtml, input\.body\)/);
 
   assert.match(repository, /const snapshot = clone\(content\)/);
   assert.match(drive, /contentHash\(library\.sheetContents\[sheet\.id\]\)/);

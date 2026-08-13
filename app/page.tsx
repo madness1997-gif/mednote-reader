@@ -60,7 +60,7 @@ import { documentLibrary, type DocumentMutationResult } from "./document-library
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
 import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
-import { firstAidDocumentFromLegacy, firstAidDocumentPlainText, firstAidDocumentStandardRichText, normalizeFirstAidDocument } from "./first-aid-block-model";
+import { firstAidDocumentFromLegacy, firstAidTemplateTransition, normalizeFirstAidDocument } from "./first-aid-block-model";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -2268,23 +2268,32 @@ export default function Home() {
   };
 
   const updatePaperTemplate = (template: PaperTemplate) => {
-    if (template !== "first-aid") {
-      const leavingFirstAid = activeNote.paper.template === "first-aid";
-      updateActiveNote({
-        paper: { ...activeNote.paper, template },
-        ...(leavingFirstAid ? { body: firstAidDocumentPlainText(activeNote.firstAid), bodyHtml: firstAidDocumentStandardRichText(activeNote.firstAid) } : {}),
-      });
-      setToast(leavingFirstAid ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
-      return;
-    }
+  const currentTemplate = activeNote.paper.template;
+  const transition = firstAidTemplateTransition({
+    currentTemplate,
+    nextTemplate: template,
+    bodyHtml: activeNote.bodyHtml ?? "",
+    body: activeNote.body,
+    firstAid: activeNote.firstAid,
+  });
+
+  if (template !== "first-aid") {
     updateActiveNote({
-      paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
-      text: { ...activeNote.text, font: "times", size: 12, align: "left" },
-      firstAid: normalizeFirstAidDocument(activeNote.firstAid) ?? firstAidDocumentFromLegacy(activeNote.bodyHtml ?? "", activeNote.body),
+      paper: { ...activeNote.paper, template },
+      ...transition,
     });
-    setActiveTool("text");
-    setToast("Đã áp dụng bố cục First Aid");
-  };
+    setToast(currentTemplate === "first-aid" ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
+    return;
+  }
+
+  updateActiveNote({
+    paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
+    text: { ...activeNote.text, font: "times", size: 12, align: "left" },
+    ...transition,
+  });
+  setActiveTool("text");
+  setToast("Đã áp dụng bố cục First Aid");
+};
 
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
     if (mode !== "reader" && !hasActiveNote) {
