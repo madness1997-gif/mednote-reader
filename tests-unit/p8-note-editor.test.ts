@@ -82,26 +82,34 @@ test("P8 Vite no longer patches sticker or First Aid editor models", async () =>
 });
 
 test("P8 First Aid keeps v4 serialization behind domain/codec/renderer boundaries", async () => {
-  const [model, domain, codec, renderer, adapter, imageService, view] = await Promise.all([
+  const [model, domain, codec, renderer, adapter, imageService, editor, controller, components] = await Promise.all([
     source("app/first-aid-block-model.ts"),
     source("app/first-aid-block-domain.ts"),
     source("app/first-aid-block-codec.ts"),
     source("app/first-aid-block-renderer.ts"),
     source("app/first-aid-template-adapter.ts"),
     source("app/first-aid-image-service.ts"),
-    source("app/first-aid-block-editor-view.tsx"),
+    source("app/first-aid-block-editor-v2.tsx"),
+    source("app/use-first-aid-block-editor.ts"),
+    source("app/first-aid-block-editor-components.tsx"),
   ]);
   assert.match(codec, /FIRST_AID_SERIALIZATION_VERSION = 4/);
   assert.match(codec, /migrateFirstAidPayload/);
   assert.match(domain, /export type FirstAidBlock/);
   assert.match(renderer, /sanitizeRichTextHtml/);
   assert.match(adapter, /firstAidTemplateTransition/);
-  assert.match(model, /compatibility facade|first-aid-block-domain|first-aid-block-codec|first-aid-block-renderer|first-aid-template-adapter/);
+  assert.match(model, /first-aid-block-domain/);
+  assert.match(model, /first-aid-block-codec/);
+  assert.match(model, /first-aid-block-renderer/);
+  assert.match(model, /first-aid-template-adapter/);
   assert.match(imageService, /localBinaryStorage\.readAsset/);
   assert.match(imageService, /readLegacyAsset/);
   assert.match(imageService, /localBinaryStorage\.saveAsset/);
-  assert.match(view, /if \(next === current\) return/);
-  assert.doesNotMatch(`${domain}\n${codec}\n${renderer}\n${adapter}\n${imageService}\n${view}`, /mednote:first-aid-image-resize/);
+  assert.match(editor, /useFirstAidBlockEditor/);
+  assert.match(controller, /if \(next === current\) return/);
+  assert.match(components, /FirstAidBlockBody/);
+  assert.doesNotMatch(`${domain}\n${codec}\n${renderer}\n${adapter}\n${imageService}\n${editor}\n${controller}\n${components}`, /mednote:first-aid-image-resize/);
+  await assert.rejects(source("app/first-aid-block-editor-view.tsx"));
 });
 
 test("P8 symbol and zoom shims no longer own global DOM state", async () => {
