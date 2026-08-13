@@ -46,11 +46,18 @@ export function useFirstAidBlockEditor({
   const appliedSignatureRef = useRef(documentSignature(document));
   const handledCropTokenRef = useRef<string | null>(null);
 
+  const onChangeRef = useRef(onChange);
+  const onRemoveImageRef = useRef(onRemoveImage);
+  const onPdfCropHandledRef = useRef(onPdfCropHandled);
+  onChangeRef.current = onChange;
+  onRemoveImageRef.current = onRemoveImage;
+  onPdfCropHandledRef.current = onPdfCropHandled;
+
   const emit = useCallback((next: FirstAidBlock[]) => {
     const nextDocument = createFirstAidDocument(next);
     appliedSignatureRef.current = documentSignature(nextDocument);
-    onChange(nextDocument);
-  }, [onChange]);
+    onChangeRef.current(nextDocument);
+  }, []);
 
   const commit = useCallback((nextOrUpdater: FirstAidBlock[] | ((current: FirstAidBlock[]) => FirstAidBlock[])) => {
     const current = blocksRef.current;
@@ -61,9 +68,6 @@ export function useFirstAidBlockEditor({
     emit(next);
   }, [emit]);
 
-  // Restore/sync can replace the canonical document of the same Sheet id.
-  // Equivalent object clones are ignored so unrelated page updates do not
-  // clear the current block selection or insert menu.
   useEffect(() => {
     const signature = documentSignature(document);
     if (signature === appliedSignatureRef.current) return;
@@ -94,8 +98,8 @@ export function useFirstAidBlockEditor({
         ? { ...block, imageObjectId: pdfCropResult.excerptId, imageAssetId: undefined, imageName: pdfCropResult.imageName, imageAspectRatio: pdfCropResult.aspectRatio }
         : block)
       : current);
-    onPdfCropHandled(pdfCropResult.token);
-  }, [pdfCropResult, pageObjectKey, commit, onPdfCropHandled]);
+    onPdfCropHandledRef.current(pdfCropResult.token);
+  }, [pdfCropResult, pageObjectKey, commit, pageObjectIds]);
 
   const updateBlock = useCallback((id: string, changes: Partial<FirstAidBlock>) => {
     commit((current) => current.map((block) => block.id === id ? { ...block, ...changes } : block));
@@ -115,9 +119,9 @@ export function useFirstAidBlockEditor({
   const removeBlock = useCallback((id: string) => {
     const imageObjectId = blocksRef.current.find((block) => block.id === id)?.imageObjectId;
     commit((current) => current.filter((block) => block.id !== id));
-    if (imageObjectId) onRemoveImage(imageObjectId);
+    if (imageObjectId) onRemoveImageRef.current(imageObjectId);
     setSelectedId(null);
-  }, [commit, onRemoveImage]);
+  }, [commit]);
 
   const duplicateBlock = useCallback((id: string) => {
     const current = blocksRef.current;
@@ -179,8 +183,8 @@ export function useFirstAidBlockEditor({
     else if (type === "label" || type === "pearl" || type === "text" || type === "figure-text") replacement.text = seed || replacement.text;
     else if (type === "flow") replacement.steps = lines(seed).length ? lines(seed) : [seed];
     commit((latest) => latest.map((block) => block.id === id ? replacement : block));
-    if (current.imageObjectId) onRemoveImage(current.imageObjectId);
-  }, [commit, onRemoveImage]);
+    if (current.imageObjectId) onRemoveImageRef.current(current.imageObjectId);
+  }, [commit]);
 
   return {
     blocks,
