@@ -6,6 +6,7 @@ type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "er
 
 export type DrivePanelScope = {
   IS_DESKTOP_APP: boolean;
+  cancelDriveConnection: () => void | Promise<unknown>;
   connectDrive: () => void | Promise<unknown>;
   desktopGoogleClientId: string;
   desktopGoogleClientSecret: string;
@@ -26,7 +27,30 @@ export type DrivePanelScope = {
 };
 
 export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
-  const { IS_DESKTOP_APP, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
+  const { IS_DESKTOP_APP, cancelDriveConnection, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
+
+  const importDesktopOAuth = async (file?: File) => {
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text()) as {
+        installed?: { client_id?: unknown; client_secret?: unknown };
+        web?: unknown;
+      };
+      if (!payload.installed) {
+        throw new Error(payload.web
+          ? "Đây là OAuth Web application. Hãy tải JSON của OAuth Client loại Desktop app."
+          : "Tệp không chứa cấu hình OAuth Desktop (installed).");
+      }
+      const clientId = typeof payload.installed.client_id === "string" ? payload.installed.client_id.trim() : "";
+      const clientSecret = typeof payload.installed.client_secret === "string" ? payload.installed.client_secret.trim() : "";
+      if (!clientId.endsWith(".apps.googleusercontent.com")) throw new Error("OAuth Client ID trong tệp không hợp lệ.");
+      setDesktopGoogleClientId(clientId);
+      setDesktopGoogleClientSecret(clientSecret);
+      setDriveError(null);
+    } catch (error) {
+      setDriveError(error instanceof Error ? error.message : "Không đọc được tệp OAuth Desktop JSON.");
+    }
+  };
 
   return (<><aside className="drive-panel" aria-label="Google Drive">
           <div className="drive-panel-header">
@@ -56,11 +80,25 @@ export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
               {driveStatus === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
               <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
               <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
-              {IS_DESKTOP_APP && driveStatus !== "connecting" && <>
-                <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
-                <label className="drive-client-id"><span>Client Secret (Desktop)</span><input type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
+              {IS_DESKTOP_APP && <>
+                <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input disabled={driveStatus === "connecting"} value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
+                <label className="drive-client-id"><span>Client Secret (Desktop)</span><input disabled={driveStatus === "connecting"} type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
+                <label className={`drive-oauth-import ${driveStatus === "connecting" ? "disabled" : ""}`}>
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    disabled={driveStatus === "connecting"}
+                    onChange={(event) => {
+                      const input = event.currentTarget;
+                      void importDesktopOAuth(input.files?.[0]).finally(() => { input.value = ""; });
+                    }}
+                  />
+                  <span>Nhập tệp OAuth Desktop JSON</span>
+                </label>
               </>}
-              {driveStatus !== "connecting" && <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
+              {driveStatus === "connecting"
+                ? <button onClick={() => { void cancelDriveConnection(); }}>Hủy kết nối</button>
+                : <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
             </div>
           )}
         </aside></>);

@@ -24,6 +24,7 @@ protocol.registerSchemesAsPrivileged([{
 
 let mainWindow = null;
 let activeAuthorization = null;
+let cancelActiveAuthorization = null;
 let pendingClose = null;
 const closeApproved = new WeakSet();
 
@@ -175,11 +176,14 @@ async function authorizeWithSystemBrowser(clientId, clientSecret = "") {
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let timeout = null;
+    let cancelAuthorization = null;
     const finish = (error, token) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      server.close();
+      if (timeout) clearTimeout(timeout);
+      if (cancelActiveAuthorization === cancelAuthorization) cancelActiveAuthorization = null;
+      if (server.listening) server.close();
       if (error) reject(error); else resolve(token);
     };
     const server = http.createServer(async (request, response) => {
@@ -222,7 +226,9 @@ async function authorizeWithSystemBrowser(clientId, clientSecret = "") {
       }
     });
 
-    const timeout = setTimeout(() => finish(new Error("Đăng nhập Google đã hết thời gian chờ")), OAUTH_TIMEOUT_MS);
+    cancelAuthorization = () => finish(new Error("Đã hủy kết nối Google Drive"));
+    cancelActiveAuthorization = cancelAuthorization;
+    timeout = setTimeout(() => finish(new Error("Đăng nhập Google đã hết thời gian chờ")), OAUTH_TIMEOUT_MS);
     server.on("error", (error) => finish(error));
     server.listen(0, "127.0.0.1", async () => {
       const address = server.address();
@@ -340,6 +346,11 @@ ipcMain.handle("drive:authorize", async (_event, credentials = {}) => {
   if (activeAuthorization) return activeAuthorization;
   activeAuthorization = authorizeDrive(credentials.clientId, credentials.clientSecret).finally(() => { activeAuthorization = null; });
   return activeAuthorization;
+});
+ipcMain.handle("drive:cancel-authorization", () => {
+  if (!cancelActiveAuthorization) return false;
+  cancelActiveAuthorization();
+  return true;
 });
 ipcMain.handle("drive:revoke", (_event, token) => revokeDrive(token));
 ipcMain.on("app:flush-result", (event, result = {}) => {

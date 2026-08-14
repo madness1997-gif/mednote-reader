@@ -103,6 +103,10 @@ body {
 .drive-client-id input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #cddbdd; border-radius: 7px; outline: 0; color: #2e424b; font-size: 10px; }
 .drive-client-id input:focus { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(14,107,112,.1); }
 .drive-client-id small { color: #819096; font-size: 8px; }
+.drive-oauth-import { position: relative; width: 100%; overflow: hidden; }
+.drive-oauth-import input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.drive-oauth-import span { display: block; width: 100%; padding: 7px 9px; border: 1px dashed #aac3c6; border-radius: 7px; color: var(--teal); font-size: 9px; font-weight: 750; text-align: center; cursor: pointer; }
+.drive-oauth-import.disabled span { opacity: .55; cursor: not-allowed; }
 .avatar-button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--navy); color: white; font-weight: 700; }
 
 

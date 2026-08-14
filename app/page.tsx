@@ -47,6 +47,7 @@ import {
   type PdfAnnotationHistory,
 } from "./pdf-annotation-session";
 import { driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
+import { cancelDriveAuthorization } from "./google-drive";
 import { resolveDocumentSource } from "./note-document-source";
 import {
   lookupEnglishVietnamese,
@@ -1726,10 +1727,23 @@ export default function Home() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Không thể kết nối Google Drive";
+      if (message === "Đã hủy kết nối Google Drive") {
+        setDriveStatus("disconnected");
+        setDriveError(null);
+        setToast(message);
+        return;
+      }
       setDriveError(message);
       setDriveStatus("error");
       setToast(`Không thể kết nối Drive: ${message}`);
     }
+  };
+
+  const cancelDriveConnection = async () => {
+    if (IS_DESKTOP_APP) await cancelDriveAuthorization();
+    setDriveStatus("disconnected");
+    setDriveError(null);
+    setToast("Đã hủy kết nối Google Drive");
   };
 
   const disconnectDrive = () => {
@@ -2383,10 +2397,10 @@ export default function Home() {
     <main className="app-shell">
       <input ref={previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, false); event.currentTarget.value = ""; }} />
       <input ref={libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, true); event.currentTarget.value = ""; }} />
-      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
+      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
 
       {drivePanelOpen && (
-        <DrivePanel scope={{ IS_DESKTOP_APP, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
+        <DrivePanel scope={{ IS_DESKTOP_APP, cancelDriveConnection, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
       )}
 
       {libraryOpen && (

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("mednoteDesktop", {
   isDesktop: true,
   authorizeDrive: (clientId, clientSecret) => ipcRenderer.invoke("drive:authorize", { clientId, clientSecret }),
+  cancelDriveAuthorization: () => ipcRenderer.invoke("drive:cancel-authorization"),
   revokeDrive: (token) => ipcRenderer.invoke("drive:revoke", token),
   onFlushRequested: (callback) => {
     const listener = (_event, requestId) => callback(requestId);

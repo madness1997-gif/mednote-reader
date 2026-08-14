@@ -9,7 +9,6 @@ export type AppTopBarScope = {
   activeWorkspaceHasLinkedNote: boolean;
   addNotebook: () => void | Promise<unknown>;
   changeWorkspaceMode: (mode: WorkspaceMode) => void;
-  connectDrive: () => void | Promise<unknown>;
   documentName: string;
   driveStatus: DriveStatus;
   driveToken: string | null;
@@ -24,7 +23,7 @@ export type AppTopBarScope = {
 };
 
 export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
-  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, connectDrive, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode } = scope;
+  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode } = scope;
   return (<><header className="topbar">
         <div className="brand-group">
           <button className="icon-button menu-button" aria-label="Mở thư viện" onClick={() => setLibraryOpen(true)}><Menu size={19} /></button>
@@ -40,7 +39,7 @@ export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
           <span className="autosave-status"><i />{toast}</span>
           <button
             className={`drive-button ${driveToken ? "connected" : ""} ${driveStatus === "syncing" || driveStatus === "connecting" ? "busy" : ""}`}
-            onClick={() => driveToken ? setDrivePanelOpen((open) => !open) : void connectDrive()}
+            onClick={() => setDrivePanelOpen((open) => !open)}
             aria-label={driveToken ? "Mở đồng bộ Google Drive" : "Kết nối Google Drive"}
             title="Lưu và đồng bộ bằng Google Drive"
           >

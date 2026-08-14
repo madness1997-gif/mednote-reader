@@ -31,8 +31,22 @@ const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
     const clientSecret = drivePanel.locator('input[type="password"]');
     await expect(clientId).toBeVisible();
     await expect(clientSecret).toBeVisible();
-    await clientId.fill('smoke-desktop.apps.googleusercontent.com');
-    await clientSecret.fill('GOCSPX-smoke-secret');
+    const oauthJson = drivePanel.locator('input[type="file"]');
+    await expect(oauthJson).toHaveCount(1);
+    await oauthJson.setInputFiles({
+      name: 'web-oauth.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ web: { client_id: 'wrong-client.apps.googleusercontent.com' } })),
+    });
+    await expect(drivePanel).toContainText('Đây là OAuth Web application');
+    await oauthJson.setInputFiles({
+      name: 'desktop-oauth.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ installed: {
+        client_id: 'smoke-desktop.apps.googleusercontent.com',
+        client_secret: 'GOCSPX-smoke-secret',
+      } })),
+    });
     await expect(clientId).toHaveValue('smoke-desktop.apps.googleusercontent.com');
     await expect(clientSecret).toHaveValue('GOCSPX-smoke-secret');
     await page.waitForTimeout(500);

@@ -30,6 +30,7 @@ declare global {
     mednoteDesktop?: {
       isDesktop: true;
       authorizeDrive: (clientId: string, clientSecret?: string) => Promise<string>;
+      cancelDriveAuthorization: () => Promise<boolean>;
       revokeDrive: (token: string) => Promise<void>;
       onFlushRequested: (listener: (requestId: string) => void) => () => void;
       completeFlush: (requestId: string, success: boolean, error?: string) => void;
@@ -106,6 +107,10 @@ export async function requestDriveToken(clientId: string, clientSecret = "") {
     });
     client.requestAccessToken({ prompt: "consent" });
   });
+}
+
+export async function cancelDriveAuthorization() {
+  return window.mednoteDesktop?.cancelDriveAuthorization() ?? false;
 }
 
 export function revokeDriveToken(token: string) {
