@@ -31,13 +31,16 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
-      - name: Verify desktop source and runtime
-        run: |
-          npm run typecheck
-          npm run test:unit
-          npm run build:desktop
-          node tests/electron-smoke.cjs
-      - run: npx electron-builder --win nsis --publish never
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Build desktop renderer
+        run: npm run build:desktop
+      - name: Smoke test Electron runtime
+        run: node tests/electron-smoke.cjs
+      - name: Package Windows installer
+        run: npx electron-builder --win nsis --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: MedNote-Reader-Windows

@@ -19,7 +19,7 @@ test("First Aid keeps its compact signature after editor refactors", async () =>
   assert.match(css, /First Aid visual contract: one canonical signature, no patch layers/);
   assert.doesNotMatch(css, /FA4 visual contract|FA5:/);
   assert.equal(canonicalDesktop.match(/\.template-first-aid \.note-title-input \{/g)?.length, 1);
-  assert.equal(canonicalDesktop.match(/\.template-first-aid \.fa-label-layout,\n\.template-first-aid \.fa-flow-layout,\n\.template-first-aid \.fa-pearl-layout \{/g)?.length, 1);
+  assert.equal(canonicalDesktop.match(/\.template-first-aid \.fa-label-layout,\r?\n\.template-first-aid \.fa-flow-layout,\r?\n\.template-first-aid \.fa-pearl-layout \{/g)?.length, 1);
   assert.match(normalized, /\.template-first-aid \.fa-image-actions, \.template-first-aid \.fa-image-zone > small \{ display: none;/);
   assert.match(normalized, /\.template-first-aid \.fa-block\.selected \.fa-image-actions \{ display: flex;/);
   assert.match(normalized, /\.template-first-aid \.fa-side-toggle \{ display: none;/);
