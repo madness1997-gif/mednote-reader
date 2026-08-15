@@ -11,6 +11,8 @@ on:
       - app/**
       - electron/**
       - src/**
+      - tests/**
+      - tests-unit/**
       - package.json
       - package-lock.json
       - vite.desktop.config.ts
