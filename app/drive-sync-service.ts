@@ -6,6 +6,7 @@ import {
   listDriveAppFiles,
   listDriveSharedFiles,
   requestDriveToken,
+  resumeDriveToken,
   revokeDriveToken,
   upsertDriveFile,
   type DriveAppFile,
@@ -66,6 +67,7 @@ type BinaryStorage = Pick<typeof localBinaryStorage, "savePdf" | "readPdf" | "de
 
 export type DriveRemoteGateway = {
   requestToken: (clientId: string, clientSecret?: string) => Promise<string>;
+  resumeToken: (clientId: string) => Promise<string | null>;
   revokeToken: (token: string) => void | Promise<void>;
   getUser: (token: string) => Promise<DriveUser>;
   listSharedFiles: (token: string) => Promise<DriveSharedFiles>;
@@ -90,6 +92,7 @@ type IndexedRemote = {
 
 const defaultRemote: DriveRemoteGateway = {
   requestToken: requestDriveToken,
+  resumeToken: resumeDriveToken,
   revokeToken: revokeDriveToken,
   getUser: getDriveUser,
   listSharedFiles: listDriveSharedFiles,
@@ -198,6 +201,15 @@ export class DriveSyncService {
     const clientId = input.clientId.trim();
     if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) throw new Error("OAuth Client ID không hợp lệ");
     const token = await this.remote.requestToken(clientId, input.clientSecret?.trim() || "");
+    const [user, indexed] = await Promise.all([this.remote.getUser(token), this.inspectIndexed(token)]);
+    return { token, user, remote: indexed.inspection };
+  }
+
+  async resume(input: { clientId: string }): Promise<DriveConnectionResult | null> {
+    const clientId = input.clientId.trim();
+    if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) return null;
+    const token = await this.remote.resumeToken(clientId);
+    if (!token) return null;
     const [user, indexed] = await Promise.all([this.remote.getUser(token), this.inspectIndexed(token)]);
     return { token, user, remote: indexed.inspection };
   }

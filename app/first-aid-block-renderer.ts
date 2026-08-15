@@ -1,6 +1,7 @@
 import { escapeHtml, plainTextToRichHtml, sanitizeRichTextHtml } from "./rich-text-html";
 import { lines, type FirstAidBlock, type TextStyle } from "./first-aid-block-domain";
 import { firstAidTableLayout } from "./first-aid-table-layout";
+import { normalizeFirstAidImageWidthRatio } from "./first-aid-figure-layout";
 
 export { plainTextToRichHtml } from "./rich-text-html";
 
@@ -29,7 +30,9 @@ function blockStaticHtml(block: FirstAidBlock) {
     const figure = `<div${objectAttribute} data-mednote-asset-id="${escapeHtml(block.imageAssetId ?? "")}" style="min-height:92px;display:grid;align-items:center;background-color:var(--fa-muted-bg,#eef3f4);color:var(--fa-muted-ink,#72828a);font-family:'Segoe UI',Arial,sans-serif;font-size:10px;font-weight:700;line-height:1.3;text-align:center">${block.imageObjectId || block.imageAssetId ? "Hình là một đối tượng trên trang" : "Chưa có hình"}</div><div style="padding:3px 6px;background-color:var(--fa-caption-bg,#edf1f2);color:var(--fa-caption-ink,#43545d);font-family:'Segoe UI',Arial,sans-serif;font-size:9px;font-weight:600;line-height:1.3">${rich(block.captionHtml, block.caption)}</div>`;
     if (block.type === "figure") return `<div style="padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${figure}</div>`;
     const text = `<div style="padding:5px 6px;${content}">${rich(block.textHtml, block.text)}</div>`;
-    return `<div style="display:grid;grid-template-columns:44% 1fr;column-gap:8px;padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
+    const imageWidth = roundPercent(normalizeFirstAidImageWidthRatio(block.imageWidthRatio));
+    const columns = block.imageSide === "right" ? `1fr ${imageWidth}%` : `${imageWidth}% 1fr`;
+    return `<div style="display:grid;grid-template-columns:${columns};column-gap:8px;padding:6px;background-color:var(--fa-block-bg,#fff);${border}">${block.imageSide === "right" ? `${text}<div>${figure}</div>` : `<div>${figure}</div>${text}`}</div>`;
   }
   if (block.type === "table") {
     const rows = block.rows ?? [];

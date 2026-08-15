@@ -153,7 +153,9 @@ async function tokenRequest(parameters) {
     throw new Error(`Google trả về phản hồi không hợp lệ (HTTP ${response.status})`);
   }
   if (!response.ok || !payload.access_token) {
-    throw new Error(payload.error_description || payload.error || "Google không cấp quyền truy cập Drive");
+    const error = new Error(payload.error_description || payload.error || "Google không cấp quyền truy cập Drive");
+    error.code = payload.error || `http_${response.status}`;
+    throw error;
   }
   return payload;
 }
@@ -167,6 +169,26 @@ async function refreshAccessToken(clientId, refreshToken, clientSecret = "") {
   if (clientSecret) parameters.client_secret = clientSecret;
   const payload = await tokenRequest(parameters);
   return payload.access_token;
+}
+
+function isPermanentCredentialError(error) {
+  return ["invalid_grant", "invalid_client", "deleted_client", "unauthorized_client"].includes(String(error?.code || ""));
+}
+
+async function resumeDrive(clientId) {
+  const normalizedClientId = String(clientId || "").trim();
+  if (!CLIENT_ID_PATTERN.test(normalizedClientId)) return null;
+  const credential = await readCredential();
+  if (credential?.clientId !== normalizedClientId || !credential.refreshToken || credential.driveScope !== DRIVE_SCOPE) return null;
+  try {
+    return await refreshAccessToken(normalizedClientId, credential.refreshToken, String(credential.clientSecret || "").trim());
+  } catch (error) {
+    if (isPermanentCredentialError(error)) {
+      await clearCredential();
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function authorizeWithSystemBrowser(clientId, clientSecret = "") {
@@ -268,7 +290,8 @@ async function authorizeDrive(clientId, clientSecret = "") {
         await saveCredential({ ...credential, clientSecret: effectiveClientSecret });
       }
       return accessToken;
-    } catch {
+    } catch (error) {
+      if (!isPermanentCredentialError(error)) throw error;
       await clearCredential();
     }
   } else if (credential) {
@@ -347,6 +370,7 @@ ipcMain.handle("drive:authorize", async (_event, credentials = {}) => {
   activeAuthorization = authorizeDrive(credentials.clientId, credentials.clientSecret).finally(() => { activeAuthorization = null; });
   return activeAuthorization;
 });
+ipcMain.handle("drive:resume", (_event, clientId) => resumeDrive(clientId));
 ipcMain.handle("drive:cancel-authorization", () => {
   if (!cancelActiveAuthorization) return false;
   cancelActiveAuthorization();

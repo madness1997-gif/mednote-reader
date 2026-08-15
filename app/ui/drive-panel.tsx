@@ -7,6 +7,7 @@ type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "er
 export type DrivePanelScope = {
   IS_DESKTOP_APP: boolean;
   cancelDriveConnection: () => void | Promise<unknown>;
+  changeDriveClient: () => void | Promise<unknown>;
   connectDrive: () => void | Promise<unknown>;
   desktopGoogleClientId: string;
   desktopGoogleClientSecret: string;
@@ -27,7 +28,7 @@ export type DrivePanelScope = {
 };
 
 export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
-  const { IS_DESKTOP_APP, cancelDriveConnection, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
+  const { IS_DESKTOP_APP, cancelDriveConnection, changeDriveClient, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
 
   const importDesktopOAuth = async (file?: File) => {
     if (!file) return;
@@ -72,7 +73,7 @@ export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
               <label className="drive-auto-sync"><input type="checkbox" checked={driveAutoSync} disabled={!driveReady} onChange={(event) => setDriveAutoSync(event.target.checked)} /><span><strong>Tự động đồng bộ</strong><small>Vẫn luôn lưu một bản cục bộ trên thiết bị</small></span></label>
               <div className="drive-panel-footer">
                 <span>{driveError || (driveLastSyncedAt ? `Lần cuối: ${new Date(driveLastSyncedAt).toLocaleString("vi-VN")}` : "Đã kết nối, chưa đồng bộ")}</span>
-                <div>{driveStatus === "error" && <button onClick={() => { void connectDrive(); }}>Kết nối lại</button>}<button onClick={disconnectDrive}>Ngắt kết nối</button></div>
+                <div>{driveStatus === "error" && <button onClick={() => { void connectDrive(); }}>Kết nối lại</button>}{IS_DESKTOP_APP && <button onClick={changeDriveClient}>Đổi OAuth client</button>}<button onClick={disconnectDrive}>Ngắt kết nối</button></div>
               </div>
             </>
           ) : (

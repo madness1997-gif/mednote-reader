@@ -28,3 +28,19 @@ test("an in-progress desktop authorization can be cancelled", async () => {
   assert.match(preload, /cancelDriveAuthorization/);
   assert.match(drive, /cancelDriveAuthorization/);
 });
+
+test("desktop Drive restores and refreshes its encrypted session without reopening consent", async () => {
+  const [page, panel, main, preload, drive] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ui/drive-panel.tsx"),
+    source("electron/main.cjs"),
+    source("electron/preload.cjs"),
+    source("app/google-drive.ts"),
+  ]);
+  assert.match(main, /drive:resume/);
+  assert.match(main, /resumeDrive/);
+  assert.match(preload, /resumeDrive/);
+  assert.match(drive, /resumeDriveToken/);
+  assert.match(page, /driveSyncService\.resume/);
+  assert.match(panel, /Đổi OAuth client/);
+});

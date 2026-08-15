@@ -541,6 +541,7 @@ export default function Home() {
   const [driveAutoSync, setDriveAutoSync] = useState(true);
   const [driveLastSyncedAt, setDriveLastSyncedAt] = useState<number | null>(null);
   const [driveError, setDriveError] = useState<string | null>(null);
+  const desktopDriveResumeClientRef = useRef<string | null>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
@@ -1701,6 +1702,32 @@ export default function Home() {
     }
   };
 
+  const resumeDesktopDrive = async (announce = false) => {
+    const clientId = desktopGoogleClientId.trim();
+    if (!IS_DESKTOP_APP || !clientId.endsWith(".apps.googleusercontent.com") || driveSyncService.isBusy()) return false;
+    setDriveStatus("connecting");
+    setDriveError(null);
+    try {
+      const connection = await driveSyncService.resume({ clientId });
+      if (!connection) {
+        setDriveStatus("disconnected");
+        return false;
+      }
+      setDriveToken(connection.token);
+      setDriveUser(connection.user);
+      setDriveReady(true);
+      setDriveStatus("connected");
+      if (announce) setToast("Đã khôi phục kết nối Google Drive");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể duy trì kết nối Google Drive";
+      setDriveError(message);
+      setDriveStatus("error");
+      if (announce) setToast(`Lỗi Drive: ${message}`);
+      return false;
+    }
+  };
+
   const connectDrive = async () => {
     setDrivePanelOpen(true);
     const clientId = IS_DESKTOP_APP ? desktopGoogleClientId.trim() : GOOGLE_CLIENT_ID;
@@ -1712,6 +1739,7 @@ export default function Home() {
     }
     if (IS_DESKTOP_APP) {
       try { localStorage.setItem(DESKTOP_GOOGLE_CLIENT_ID_KEY, clientId); } catch { /* keep the public client ID in memory */ }
+      desktopDriveResumeClientRef.current = clientId;
     }
     setDriveStatus("connecting");
     setDriveError(null);
@@ -1764,6 +1792,38 @@ export default function Home() {
     setToast("Đã ngắt Google Drive; dữ liệu cục bộ vẫn được giữ");
     void driveSyncService.disconnect(token).catch(() => undefined);
   };
+
+  const changeDriveClient = () => {
+    const token = driveToken;
+    desktopDriveResumeClientRef.current = desktopGoogleClientId.trim();
+    setDriveToken(null);
+    setDriveUser(null);
+    setDriveReady(false);
+    setDriveStatus("disconnected");
+    setDriveError(null);
+    setDrivePanelOpen(true);
+    setToast("Có thể nhập OAuth client khác rồi kết nối lại");
+    void driveSyncService.disconnect(token).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    const clientId = desktopGoogleClientId.trim();
+    if (!ready || !IS_DESKTOP_APP || driveToken || !clientId.endsWith(".apps.googleusercontent.com")) return;
+    if (desktopDriveResumeClientRef.current === clientId) return;
+    desktopDriveResumeClientRef.current = clientId;
+    void resumeDesktopDrive();
+  }, [desktopGoogleClientId, driveToken, ready]);
+
+  useEffect(() => {
+    if (!IS_DESKTOP_APP || !driveToken || !desktopGoogleClientId.trim()) return;
+    const refresh = () => { void resumeDesktopDrive(); };
+    const timer = window.setInterval(refresh, 45 * 60 * 1000);
+    window.addEventListener("online", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("online", refresh);
+    };
+  }, [desktopGoogleClientId, driveToken]);
 
   useEffect(() => {
     if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
@@ -2557,7 +2617,7 @@ export default function Home() {
       <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
 
       {drivePanelOpen && (
-        <DrivePanel scope={{ IS_DESKTOP_APP, cancelDriveConnection, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
+        <DrivePanel scope={{ IS_DESKTOP_APP, cancelDriveConnection, changeDriveClient, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
       )}
 
       {libraryOpen && (

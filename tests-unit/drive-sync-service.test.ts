@@ -36,6 +36,7 @@ class MemoryDrive implements DriveRemoteGateway {
   private sequence = 0;
 
   requestToken = async (clientId: string) => `token:${clientId}`;
+  resumeToken = async (clientId: string) => `resumed:${clientId}`;
   revokeToken = async (token: string) => { this.revoked.push(token); };
   getUser = async () => ({ displayName: "Bác sĩ", emailAddress: "doctor@example.com" });
   listSharedFiles = async (): Promise<DriveSharedFiles> => ({
@@ -232,6 +233,15 @@ test("legacy appData inspection failure does not block canonical Drive login", a
     assert.equal(connection.token, "token:desktop.apps.googleusercontent.com");
     assert.equal(connection.user.emailAddress, "doctor@example.com");
     assert.deepEqual(connection.remote, { hasBackup: false, sourceVersion: null, storage: null });
+  } finally { await context.close(); }
+});
+
+test("desktop Drive resumes a saved session without opening authorization again", async () => {
+  const context = await harness();
+  try {
+    const connection = await context.service.resume({ clientId: "desktop.apps.googleusercontent.com" });
+    assert.equal(connection?.token, "resumed:desktop.apps.googleusercontent.com");
+    assert.equal(connection?.user.emailAddress, "doctor@example.com");
   } finally { await context.close(); }
 });
 

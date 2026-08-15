@@ -375,16 +375,47 @@
 
 .fa-figure-text {
   display: grid;
-  grid-template-columns: minmax(0, 44%) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 40% 5px minmax(0, 1fr);
+  gap: 0;
   padding: 5px 6px;
   border-bottom: 1px solid var(--fa-border, #b8c3c7);
   background: var(--fa-block-bg, #fff);
 }
-.fa-figure-text.image-right .fa-figure-block { order: 2; }
+.fa-figure-text .fa-figure-block { order: 1; }
+.fa-figure-text .fa-figure-resizer { order: 2; }
+.fa-figure-text .fa-figure-copy { order: 3; }
+.fa-figure-text.image-right .fa-figure-block { order: 3; }
 .fa-figure-text.image-right .fa-figure-copy { order: 1; }
 .fa-figure-copy { min-width: 0; }
 .fa-side-toggle { margin-bottom: 3px; }
+.fa-figure-resizer {
+  align-self: stretch;
+  position: relative;
+  width: 5px;
+  min-width: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.fa-figure-resizer > span {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 1px;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--fa-primary, #13808b);
+}
+.fa-block.selected .fa-figure-resizer {
+  opacity: .72;
+  pointer-events: auto;
+}
+.fa-block.selected .fa-figure-resizer:hover,
+.fa-block.selected .fa-figure-resizer:focus-visible { opacity: 1; }
 
 .fa-table-toolbar-group {
   height: 22px;
@@ -553,9 +584,6 @@
   .fa-label-layout,
   .fa-pearl-layout,
   .fa-flow-layout { grid-template-columns: 28% 1fr; }
-  .fa-figure-text { grid-template-columns: 1fr; }
-  .fa-figure-text.image-right .fa-figure-block,
-  .fa-figure-text.image-right .fa-figure-copy { order: initial; }
   .fa-block-toolbar { max-width: 100%; overflow-x: auto; }
   .fa-block-toolbar select { max-width: 104px; }
 }
@@ -746,8 +774,7 @@
 }
 
 .template-first-aid .fa-figure-text {
-  grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
-  gap: 5px;
+  gap: 0;
   padding: 3px 4px;
 }
 
@@ -963,8 +990,7 @@
   }
 
   .template-first-aid .fa-figure-text {
-    grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
-    gap: 4px;
+    gap: 0;
     padding: 3px;
   }
 

@@ -28,6 +28,10 @@ import {
   sanitizeBlockRichTextHtml,
 } from "./first-aid-block-renderer";
 import {
+  normalizeFirstAidImageWidthRatio,
+  resizeFirstAidImageWidthRatio,
+} from "./first-aid-figure-layout";
+import {
   DEFAULT_FIRST_AID_ROW_HEIGHT,
   appendEmptyTableColumn,
   appendEmptyTableRow,
@@ -141,6 +145,7 @@ type FirstAidBlockBodyProps = {
 
 export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts, pageHeightCss, pageObjectLayoutKey, updateBlock, onBrowseImage, onPdfCrop, onDropImage, onTextActivate, onNormalizeTextInput }: FirstAidBlockBodyProps) {
   const [tableResizePreview, setTableResizePreview] = useState<{ columnWidths: number[]; rowHeights: number[] } | null>(null);
+  const [figureWidthPreview, setFigureWidthPreview] = useState<number | null>(null);
   const tableResizeRef = useRef<{
     axis: "column" | "row";
     pointerId: number;
@@ -151,8 +156,58 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     current: { columnWidths: number[]; rowHeights: number[] };
   } | null>(null);
   const tableResizeCleanupRef = useRef<(() => void) | null>(null);
+  const figureResizeRef = useRef<{ pointerId: number; startX: number; containerWidth: number; initial: number; current: number } | null>(null);
+  const figureResizeCleanupRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => () => tableResizeCleanupRef.current?.(), []);
+  useEffect(() => () => {
+    tableResizeCleanupRef.current?.();
+    figureResizeCleanupRef.current?.();
+  }, []);
+
+  const commitFigureWidth = (ratio: number) => updateBlock(block.id, { imageWidthRatio: normalizeFirstAidImageWidthRatio(ratio) });
+
+  const startFigureResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!canEdit) return;
+    const layout = event.currentTarget.closest<HTMLElement>(".fa-figure-text");
+    if (!layout) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const initial = normalizeFirstAidImageWidthRatio(block.imageWidthRatio);
+    figureResizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      containerWidth: layout.getBoundingClientRect().width,
+      initial,
+      current: initial,
+    };
+    setFigureWidthPreview(initial);
+    const finish = (commit: boolean) => {
+      const state = figureResizeRef.current;
+      figureResizeCleanupRef.current?.();
+      figureResizeCleanupRef.current = null;
+      figureResizeRef.current = null;
+      setFigureWidthPreview(null);
+      if (commit && state) commitFigureWidth(state.current);
+    };
+    const move = (moveEvent: PointerEvent) => {
+      const state = figureResizeRef.current;
+      if (!state || state.pointerId !== moveEvent.pointerId) return;
+      moveEvent.preventDefault();
+      state.current = resizeFirstAidImageWidthRatio(state.initial, moveEvent.clientX - state.startX, state.containerWidth, block.imageSide);
+      setFigureWidthPreview(state.current);
+    };
+    const up = (upEvent: PointerEvent) => { if (upEvent.pointerId === event.pointerId) finish(true); };
+    const cancel = (cancelEvent: PointerEvent) => { if (cancelEvent.pointerId === event.pointerId) finish(false); };
+    figureResizeCleanupRef.current?.();
+    figureResizeCleanupRef.current = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
 
   const startTableResize = (event: ReactPointerEvent<HTMLButtonElement>, axis: "column" | "row", index: number, layout: { columnWidths: number[]; rowHeights: number[] }) => {
     if (!canEdit) return;
@@ -276,10 +331,27 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
 
   if (block.type === "figure") return <div className="fa-figure-block">{renderImageZone()}{renderRichField("caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Nhập chú thích hình…" })}</div>;
 
-  if (block.type === "figure-text") return <div className={`fa-figure-text ${block.imageSide === "right" ? "image-right" : ""}`}>
+  if (block.type === "figure-text") {
+    const imageWidth = figureWidthPreview ?? normalizeFirstAidImageWidthRatio(block.imageWidthRatio);
+    return <div className={`fa-figure-text ${block.imageSide === "right" ? "image-right" : ""}`} style={{ gridTemplateColumns: block.imageSide === "right" ? `minmax(0, 1fr) 5px ${imageWidth * 100}%` : `${imageWidth * 100}% 5px minmax(0, 1fr)` }}>
     <div className="fa-figure-block">{renderImageZone()}{renderRichField("caption", "captionHtml", "fa-caption-input", "Chú thích hình", { placeholder: "Chú thích hình…" })}</div>
+    <button
+      type="button"
+      className="fa-figure-resizer"
+      disabled={!canEdit}
+      onPointerDown={startFigureResize}
+      onKeyDown={(event) => {
+        if (!canEdit || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+        event.preventDefault();
+        const visualDirection = event.key === "ArrowRight" ? 1 : -1;
+        commitFigureWidth(imageWidth + visualDirection * (block.imageSide === "right" ? -.02 : .02));
+      }}
+      aria-label={`Đổi độ rộng vùng hình, hiện ${Math.round(imageWidth * 100)}%`}
+      title="Kéo để đổi độ rộng vùng hình"
+    ><span /></button>
     <div className="fa-figure-copy"><button type="button" className="fa-side-toggle" disabled={!canEdit} onClick={() => updateBlock(block.id, { imageSide: block.imageSide === "right" ? "left" : "right" })}>{block.imageSide === "right" ? "Đưa hình sang trái" : "Đưa hình sang phải"}</button>{renderRichField("text", "textHtml", "fa-content-input", "Nội dung cạnh hình", { placeholder: "Nhập nội dung liên quan…" })}</div>
   </div>;
+  }
 
   if (block.type === "table") {
     const rows = tableRows(block);

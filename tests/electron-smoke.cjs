@@ -45,6 +45,24 @@ function captureRuntimeErrors(page, runtimeErrors) {
     await expect(page.locator('.fa-block-editor')).toBeVisible();
     await expect(page.locator('.fa-block')).toHaveCount(0);
 
+    await page.getByRole('button', { name: 'Thêm block đầu trang' }).click();
+    await page.getByRole('button', { name: /Hình \+ nội dung/ }).click();
+    const figureTextBlock = page.locator('.fa-block-figure-text');
+    const figureColumn = figureTextBlock.locator('.fa-figure-block');
+    await expect(figureTextBlock).toBeVisible();
+    await figureTextBlock.getByRole('textbox', { name: 'Nội dung cạnh hình' }).click();
+    const initialFigureWidth = (await figureColumn.boundingBox()).width;
+    const figureResizer = figureTextBlock.getByRole('button', { name: /Đổi độ rộng vùng hình/ });
+    const figureResizerBox = await figureResizer.boundingBox();
+    await page.mouse.move(figureResizerBox.x + figureResizerBox.width / 2, figureResizerBox.y + figureResizerBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(figureResizerBox.x + figureResizerBox.width / 2 + 80, figureResizerBox.y + figureResizerBox.height / 2, { steps: 6 });
+    await page.mouse.up();
+    expect((await figureColumn.boundingBox()).width).toBeGreaterThan(initialFigureWidth + 50);
+    await expect(figureResizer).toHaveAttribute('aria-label', /hiện 5[0-9]%/);
+    await figureTextBlock.getByRole('button', { name: 'Xóa block' }).click();
+    await expect(page.locator('.fa-block')).toHaveCount(0);
+
     const workspace = page.locator('.workspace');
     const readerPane = page.locator('.reader-pane');
     const notePane = page.locator('.notes-pane');
