@@ -443,6 +443,7 @@ export default function Home() {
   const noteStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const readerScrollPositionRef = useRef<{ top: number; left: number } | null>(null);
+  const pendingReaderScrollRestoreRef = useRef(false);
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
@@ -2325,6 +2326,9 @@ export default function Home() {
     if (stage && workspaceModeRef.current !== "note") {
       readerScrollPositionRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
     }
+    if (mode === "note" && workspaceModeRef.current !== "note") {
+      pendingReaderScrollRestoreRef.current = true;
+    }
     setWorkspaceMode(mode);
     if (mode === "note") {
       setPdfSelection(null);
@@ -2339,10 +2343,11 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (workspaceMode !== "reader" || viewMode !== "continuous") return;
+    if (workspaceMode !== "reader" || !pendingReaderScrollRestoreRef.current) return;
     const stage = documentStageRef.current;
     const saved = readerScrollPositionRef.current;
     if (!stage || !saved) return;
+    pendingReaderScrollRestoreRef.current = false;
 
     // Lazy PDF pages may settle their measured heights shortly after Reader is
     // shown again. Restore once immediately and after those layout passes so a
@@ -2361,7 +2366,7 @@ export default function Home() {
       window.cancelAnimationFrame(frame);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [viewMode, workspaceMode]);
+  }, [workspaceMode]);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
