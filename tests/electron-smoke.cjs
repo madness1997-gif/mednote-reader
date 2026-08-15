@@ -5,26 +5,61 @@ const { _electron: electron, expect } = require('@playwright/test');
 
 const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
 
+async function launch() {
+  const application = await electron.launch({
+    args: ['.', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`],
+    env: { ...process.env, ELECTRON_DISABLE_SANDBOX: '1' },
+  });
+  application.process().stderr?.on('data', (chunk) => process.stderr.write(chunk));
+  return application;
+}
+
+async function submitName(page, trigger, value) {
+  await trigger.click();
+  const dialog = page.locator('.mednote-native-dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('input[type="text"]').fill(value);
+  await dialog.locator('button[type="submit"]').click();
+  await expect(dialog).toBeHidden();
+}
+
+function captureRuntimeErrors(page, runtimeErrors) {
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.stack || error.message}`));
+}
+
 (async () => {
   let application;
   const runtimeErrors = [];
   try {
-    application = await electron.launch({
-      args: ['.', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`],
-      env: { ...process.env, ELECTRON_DISABLE_SANDBOX: '1' },
-    });
-    application.process().stderr?.on('data', (chunk) => process.stderr.write(chunk));
+    application = await launch();
 
-    const page = await application.firstWindow();
-    page.on('console', (message) => {
-      if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`);
-    });
-    page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.stack || error.message}`));
+    let page = await application.firstWindow();
+    captureRuntimeErrors(page, runtimeErrors);
 
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('.note-sidebar')).toBeVisible({ timeout: 15_000 });
+    let sidebar = page.locator('.note-sidebar');
+    await expect(sidebar).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.fa-block-editor')).toBeVisible();
     await expect(page.locator('.fa-block')).toHaveCount(0);
+
+    await submitName(page, sidebar.getByRole('button', { name: 'Tạo Notebook' }), 'Electron Nội tiết');
+    await submitName(page, sidebar.getByRole('button', { name: 'Thêm Section' }), 'Chuyển hóa');
+    await submitName(page, sidebar.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');
+
+    // Closing immediately must still flush the renderer queue and IndexedDB transaction.
+    await application.close();
+    application = await launch();
+    page = await application.firstWindow();
+    captureRuntimeErrors(page, runtimeErrors);
+    await page.waitForLoadState('domcontentloaded');
+    sidebar = page.locator('.note-sidebar');
+    await expect(sidebar.locator('select[aria-label="Notebook"] option:checked')).toHaveText('Electron Nội tiết');
+    await expect(sidebar.locator('.note-sidebar-section.active', { hasText: 'Chuyển hóa' })).toBeVisible();
+    await expect(sidebar.locator('.note-sidebar-page', { hasText: 'Đái tháo đường' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Kết nối Google Drive' }).click();
     const drivePanel = page.locator('.drive-panel');
     const clientId = drivePanel.locator('.drive-client-id input').first();
@@ -51,7 +86,7 @@ const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
     await expect(clientSecret).toHaveValue('GOCSPX-smoke-secret');
     await page.waitForTimeout(500);
     expect(runtimeErrors).toEqual([]);
-    process.stdout.write('Electron startup smoke test passed\n');
+    process.stdout.write('Electron startup, persistence, and Drive OAuth smoke test passed\n');
   } finally {
     try { await application?.close(); } catch { /* already closed after a failed assertion */ }
     await fs.rm(profile, { recursive: true, force: true });

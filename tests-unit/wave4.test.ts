@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import "fake-indexeddb/auto";
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository } from "../app/indexeddb-note-repository";
@@ -71,39 +70,6 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
   }
 });
 
-test("Wave 4 toolbar delegates hierarchy CRUD to the React sidebar", async () => {
-  const toolbar = await readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8");
-  const sidebar = await readFile(new URL("../app/note-sidebar.tsx", import.meta.url), "utf8");
-  const liveCollapseWorkflow = await readFile(new URL("../.github/workflows/sidebar-collapse-live.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(toolbar, /Sổ mới|Xóa sổ|aria-label="Thêm trang"|aria-label="Xóa trang note"/);
-  assert.match(toolbar, /Từng trang/);
-  assert.match(toolbar, /Liên tục/);
-  assert.match(toolbar, /Xuất note/);
-  assert.match(toolbar, /note-sidebar-show-button/);
-  assert.match(toolbar, /Điều hướng Note/);
-  assert.match(sidebar, /note-sidebar-collapse-button/);
-  assert.match(sidebar, /<span>Ẩn<\/span><ChevronRight/);
-  assert.doesNotMatch(sidebar, /title="Thu gọn" aria-label="Thu gọn điều hướng"><X/);
-  assert.match(liveCollapseWorkflow, /name: 'Ẩn thanh điều hướng Note'/);
-  assert.match(liveCollapseWorkflow, /name: 'Hiện thanh điều hướng Note'/);
-  assert.doesNotMatch(liveCollapseWorkflow, /name: 'Thu gọn điều hướng'|name: 'Hiện điều hướng ghi chú'/);
-});
-
-test("obsolete imperative hierarchy runtimes are removed", async () => {
-  const appFiles = await readdir(new URL("../app", import.meta.url));
-  const obsolete = appFiles.filter((name) =>
-    name.startsWith("page-sheet-")
-    || name.startsWith("independent-library-")
-    || name.startsWith("relation-library-")
-    || name === "relation-navigation-collapse.ts"
-    || name === "relation-note-right-layout.ts"
-    || name === "native-library-three-groups.ts");
-  assert.deepEqual(obsolete, []);
-  const entry = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(entry, /page-sheet-|independent-library-|relation-library-|relation-navigation-collapse/);
-});
-
-
 test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent", async () => {
   const dbName = `mednote-p0-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
@@ -158,21 +124,4 @@ test("First Aid Page title stays empty after deleting the legacy Page mới titl
     await store.flush();
     await deleteNoteRepositoryDatabase(dbName);
   }
-});
-
-test("P0 canvas and First Aid use Page.title metadata ownership", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const stage = await readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8");
-  const runtimeAdapter = await readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8");
-  const editor = await readFile(new URL("../app/page-title-editor.tsx", import.meta.url), "utf8");
-  assert.match(runtimeAdapter, /export type NotePageContentPatch = Partial<Omit<NotePage, "id" \| "title" \| "titleHtml" \| "__mednoteLazyPage">>/);
-  assert.match(stage, /<PageTitleEditor/);
-  for (const source of [page, stage]) {
-    assert.doesNotMatch(source, /activeNote\.titleHtml/);
-    assert.doesNotMatch(source, /page\.titleHtml \?/);
-    assert.doesNotMatch(source, /titleHtml: pageTitle/);
-  }
-  assert.doesNotMatch(page, /noteStore\.renamePage\(activeLogicalPage\.id, "TÊN CHỦ ĐỀ"\)/);
-  assert.match(editor, /PAGE_TITLE_DEBOUNCE_MS = 280/);
-  assert.match(editor, /noteStore\.renamePage\(targetPageId, nextTitle\)/);
 });

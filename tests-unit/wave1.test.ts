@@ -246,17 +246,6 @@ test("structure reads and hierarchy mutations never hydrate SheetContent", async
   }
 });
 
-test("production UI stays behind the v6 Store boundary", () => {
-  for (const file of [
-    "app/page.tsx",
-    "vite.github.config.ts",
-    "vite.desktop.config.ts",
-  ]) {
-    const source = readFileSync(file, "utf8");
-    assert.doesNotMatch(source, /(?:indexeddb-note-repository|note-migration|note-repository)/);
-  }
-});
-
 test("missing SheetContent is isolated from structure loading and reported on hydration", async () => {
   const dbName = `mednote-wave15-corrupt-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });

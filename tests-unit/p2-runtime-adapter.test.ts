@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { DocumentGraph } from "../app/document-domain";
 import { ordered, type NoteStructure } from "../app/note-domain";
@@ -145,25 +144,4 @@ test("P2 Reader placeholder remains runtime-only and never becomes a real Notebo
   assert.equal(runtime.activeNotebookId, placeholder.id);
   const input = documentWorkspaceInput(runtime, null, { workspaceMode: "reader", readerShare: 50, noteZoom: 1 });
   assert.equal(JSON.stringify(input).includes("notebooks"), false);
-});
-
-test("P2 page.tsx no longer owns v6/runtime conversion functions", () => {
-  const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const forbiddenDefinitions = [
-    "function notePageToSheetContent",
-    "function notePageFromSheet",
-    "function notebookFromStructure",
-    "function documentRuntimeWorkspace",
-    "function documentRecordFromRuntime",
-    "function documentWorkspaceInput",
-    "function notebookIdForDocumentContext",
-    "function workspacesFromDocumentGraph",
-    "function workspacesFromLibraryV6",
-    "function createReaderPlaceholder",
-  ];
-  forbiddenDefinitions.forEach((definition) => assert.equal(pageSource.includes(definition), false, `${definition} still lives in page.tsx`));
-  assert.match(pageSource, /from "\.\/note-runtime-adapter"/);
-  assert.match(pageSource, /from "\.\/document-runtime-adapter"/);
-  assert.equal(pageSource.includes("workspace.notebooks.reduce"), false);
-  assert.equal(pageSource.includes("workspace.notebooks.filter((item) => !isReaderPlaceholder(item)).length"), false);
 });

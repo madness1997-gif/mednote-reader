@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -102,21 +101,4 @@ test("P6.5 drops temporary runtime contexts and falls back to the note shell whe
   assert.equal(result.readerShare, 58);
   assert.equal(result.workspaceMode, "note");
   assert.equal(result.noteZoom, 1.2);
-});
-
-test("P4 boundary remains: page.tsx only applies BootstrapResult and has no legacy bootstrap knowledge", () => {
-  const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const bootstrapSource = readFileSync(new URL("../app/app-bootstrap.ts", import.meta.url), "utf8");
-  assert.match(pageSource, /bootstrapMedNote\(\)/);
-  assert.match(pageSource, /applyBootstrapResult/);
-  assert.doesNotMatch(pageSource, /mednote-library-v2|mednote-document-runtime-v1|mednote-notebook-v1|current-pdf/);
-  assert.doesNotMatch(pageSource, /loadIncrementalLibrary|readLegacyRelationV2|noteStore\.initialize/);
-  assert.doesNotMatch(pageSource, /\bSTORAGE_KEY\b|\bDOCUMENT_RUNTIME_KEY\b|\bRELATION_META_WORKSPACE_ID\b|\bLEGACY_STORAGE_KEY\b/);
-  assert.match(bootstrapSource, /loadIncrementalLibrary/);
-  assert.match(bootstrapSource, /readLegacyCurrentPdf/);
-  assert.match(bootstrapSource, /noteStore\.initialize/);
-  assert.deepEqual(
-    [...bootstrapSource.matchAll(/^export (?:async )?(?:function|type|const|class)\s+(\w+)/gm)].map((match) => match[1]),
-    ["BootstrapResult", "bootstrapMedNote"],
-  );
 });

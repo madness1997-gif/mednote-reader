@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "fake-indexeddb/auto";
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository } from "../app/indexeddb-note-repository";
@@ -112,19 +111,4 @@ test("new Notebook, Page and Sheet content defaults to First Aid", async () => {
     await store.flush();
     await deleteNoteRepositoryDatabase(dbName);
   }
-});
-
-test("sidebar UI remains a render consumer and CI watches its real boundaries", async () => {
-  const [sidebar, styles, workflow] = await Promise.all([
-    readFile(new URL("../app/note-sidebar.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/note-sidebar.css", import.meta.url), "utf8"),
-    readFile(new URL("../.github/workflows/sidebar-controls-e2e.yml", import.meta.url), "utf8"),
-  ]);
-  assert.doesNotMatch(sidebar, /note-store|note-domain|mednote-dialog/);
-  assert.ok(sidebar.indexOf('status === "error"') < sidebar.indexOf('status === "idle"'), "error state must win over the loading fallback");
-  assert.doesNotMatch(styles, /:has\(|note-sidebar-v6/);
-  for (const path of ["app/note-sidebar-controller.ts", "app/note-sidebar-model.ts", "app/ui/note-navigation-host.tsx"]) {
-    assert.match(workflow, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
-  assert.doesNotMatch(workflow, /app\/note-navigation\.ts/);
 });

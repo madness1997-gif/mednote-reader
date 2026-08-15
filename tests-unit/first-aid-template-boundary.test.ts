@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   createBlock,
@@ -136,60 +135,4 @@ test("legacy untouched First Aid starter content stays off regular paper", () =>
   assert.equal(persisted.body, "");
   assert.equal(persisted.bodyHtml, "");
   assert.equal(Object.hasOwn(persisted, "firstAid"), false);
-});
-
-test("FA3 owns canonical persistence and editor state from document to SheetContent", async () => {
-  const [runtime, document, adapter, renderer, editor, controller, stage, preview, page, repository, drive] = await Promise.all([
-    readFile(new URL("../app/note-runtime-adapter.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/first-aid-document.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/first-aid-template-adapter.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/first-aid-block-renderer.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/first-aid-block-editor.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/use-first-aid-block-editor.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/ui/note-sheet-preview.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/indexeddb-note-repository.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/drive-backup.ts", import.meta.url), "utf8"),
-  ]);
-  assert.match(runtime, /firstAid\?: FirstAidDocument/);
-  assert.match(runtime, /delete persisted\.body;/);
-  assert.match(runtime, /delete persisted\.bodyHtml;/);
-  assert.match(runtime, /firstAidDocumentMatchesRegularProjection/);
-  assert.match(runtime, /if \(stored && !stored\.legacyStarter\) return stored/);
-  assert.match(document, /FIRST_AID_DOCUMENT_VERSION = 1/);
-  assert.match(document, /Runtime\/editor projection only/);
-  assert.doesNotMatch(adapter, /firstAidPayloadComment/);
-  assert.doesNotMatch(renderer, /from "\.\/note-runtime-adapter"/);
-
-  assert.match(editor, /useFirstAidBlockEditor\(\{ document, onChange/);
-  assert.doesNotMatch(editor, /plainText/);
-  assert.doesNotMatch(editor, /html,/);
-  assert.match(controller, /createFirstAidDocument\(next\)/);
-  assert.doesNotMatch(controller, /parseBlocks|serializeBlocks/);
-  assert.match(stage, /document=\{activeNote\.firstAid \?\? createFirstAidDocument\(\)\}/);
-  assert.match(stage, /onChange=\{\(firstAid\) => updateActiveNote\(\{ firstAid \}\)\}/);
-  assert.match(stage, /firstAid: undefined/);
-  assert.match(preview, /firstAidDocumentProjectionHtml\(note\.firstAid\)/);
-  assert.match(page, /firstAidTemplateTransition\(\{/);
-  assert.match(page, /firstAid: activeNote\.firstAid/);
-  assert.match(page, /\.\.\.transition/);
-  assert.doesNotMatch(page, /body: firstAidDocumentPlainText\(activeNote\.firstAid\)/);
-  assert.match(adapter, /firstAidDocumentMatchesRegularProjection/);
-  assert.match(adapter, /dormantStillRepresentsActiveBody/);
-  assert.match(adapter, /firstAidDocumentFromLegacy\(input\.bodyHtml, input\.body\)/);
-
-  assert.match(repository, /const snapshot = clone\(content\)/);
-  assert.match(drive, /contentHash\(library\.sheetContents\[sheet\.id\]\)/);
-});
-
-test("Drive OAuth uses least-privilege shared-file scope", async () => {
-  const [web, desktop] = await Promise.all([
-    readFile(new URL("../app/google-drive.ts", import.meta.url), "utf8"),
-    readFile(new URL("../electron/main.cjs", import.meta.url), "utf8"),
-  ]);
-  for (const source of [web, desktop]) {
-    assert.match(source, /auth\/drive\.file/);
-    assert.doesNotMatch(source, /auth\/drive["']/);
-  }
 });

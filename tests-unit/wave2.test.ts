@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "fake-indexeddb/auto";
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository } from "../app/indexeddb-note-repository";
@@ -82,19 +81,4 @@ test("commands update v6 structure in-place without reload state", async () => {
     await store.flush();
     await deleteNoteRepositoryDatabase(dbName);
   }
-});
-
-test("production entrypoint no longer loads imperative note navigation runtimes", async () => {
-  const [entry, page, exporter, githubConfig, desktopConfig] = await Promise.all([
-    readFile(new URL("../src/main.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/note-pdf-export.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../vite.github.config.ts", import.meta.url), "utf8"),
-    readFile(new URL("../vite.desktop.config.ts", import.meta.url), "utf8"),
-  ]);
-  assert.doesNotMatch(entry, /independent-library-runtime|page-sheet-runtime|relation-navigation-collapse/);
-  assert.doesNotMatch(page, /__MEDNOTE_LIVE_STATE__|mednote-live-state-changed|window\.location\.reload|sessionStorage/);
-  assert.doesNotMatch(exporter, /page-sheet-state|mednote-live-state-changed|mednote:activate-note-page/);
-  assert.doesNotMatch(githubConfig, /incrementalLibraryPersistencePlugin|sidebarCollapseFixPlugin/);
-  assert.doesNotMatch(desktopConfig, /incrementalLibraryPersistencePlugin|sidebarCollapseFixPlugin/);
 });

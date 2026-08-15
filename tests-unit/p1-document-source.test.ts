@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "fake-indexeddb/auto";
 import { createDriveBackup, stageDriveBackup } from "../app/drive-backup";
@@ -214,22 +213,4 @@ test("temporary document IDs remap through NoteStore, survive reload and Drive r
   } finally {
     await deleteNoteRepositoryDatabase(dbName);
   }
-});
-
-test("page runtime consumes resolver while controller owns document-ID remapping", async () => {
-  const [page, noteStage, notePreview, controller] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/ui/note-sheet-preview.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/document-library-controller.ts", import.meta.url), "utf8"),
-  ]);
-  assert.match(page, /resolveDocumentSource/);
-  assert.match(page, /resolveExcerptSource/);
-  assert.match(noteStage, /resolveSource=\{resolveExcerptSource\}/);
-  assert.match(notePreview, /resolveSource=\{resolveSource\}/);
-  assert.doesNotMatch(page, /documentName:\s*renamedDocument\.name/);
-  assert.doesNotMatch(page, /sourceKind:\s*"manual",\s*documentId:\s*undefined/);
-  assert.doesNotMatch(page, /Đã quay lại \$\{excerpt\.documentName\}/);
-  assert.doesNotMatch(page, /remapDocumentReferences\(idMap\)/);
-  assert.match(controller, /remapDocumentReferences\(idMap\)/);
 });

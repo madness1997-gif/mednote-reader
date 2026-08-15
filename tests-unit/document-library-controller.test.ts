@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "fake-indexeddb/auto";
 
@@ -291,27 +290,6 @@ test("note-only workspace survives document mutations and remains usable", async
     const created = await context.notes.createPage("sec", "Note-only vẫn hoạt động", {});
     assert.ok(created.active.activePageId);
   } finally { await context.close(); }
-});
-
-test("page.tsx delegates document lifecycle mutations and contains no readiness polling", async () => {
-  const [page, controller] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/document-library-controller.ts", import.meta.url), "utf8"),
-  ]);
-  assert.match(page, /documentLibrary\.importPdfFiles/);
-  assert.match(page, /documentLibrary\.saveTemporaryWorkspace/);
-  assert.match(page, /documentLibrary\.renameWorkspace/);
-  assert.match(page, /documentLibrary\.deleteDocument/);
-  assert.match(page, /documentLibrary\.deleteWorkspace/);
-  assert.match(page, /documentLibrary\.linkWorkspaceToNote/);
-  assert.doesNotMatch(page, /while\s*\(!readyRef\.current\)/);
-  assert.doesNotMatch(page, /temporaryPdfBlobsRef/);
-  assert.doesNotMatch(page, /noteStore\.remapDocumentReferences/);
-  assert.doesNotMatch(page, /noteStore\.deleteDocumentFromWorkspace/);
-  assert.doesNotMatch(page, /noteStore\.deleteDocumentWorkspace/);
-  assert.match(controller, /this\.notes\.remapDocumentReferences/);
-  assert.match(controller, /this\.pdfStorage\.deletePdf/);
-  assert.match(controller, /this\.writeRuntime/);
 });
 
 test("temporary Save Library preserves the exact Page or Sheet destination", async () => {

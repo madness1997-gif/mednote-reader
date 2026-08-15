@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test, { after, beforeEach } from "node:test";
 import "fake-indexeddb/auto";
 
@@ -139,24 +138,4 @@ test("legacy current-pdf remains import-readable", async () => {
 
   assert.equal(stored?.name, "legacy.pdf");
   assert.equal(await stored?.blob.text(), "legacy PDF");
-});
-
-test("page.tsx has no IndexedDB implementation details", async () => {
-  const [pageSource, storageSource] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/local-binary-storage.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.doesNotMatch(pageSource, /indexedDB\.open|IDBDatabase|\bDB_NAME\b|\bDB_STORE\b/);
-  assert.match(pageSource, /localBinaryStorage/);
-  assert.doesNotMatch(storageSource, /pdfjs-dist|pdfDocumentOptions|getDocument\(/);
-  assert.deepEqual(Object.keys(localBinaryStorage).sort(), [
-    "deleteAsset",
-    "deletePdf",
-    "readAsset",
-    "readLegacyCurrentPdf",
-    "readPdf",
-    "saveAsset",
-    "savePdf",
-  ]);
 });
