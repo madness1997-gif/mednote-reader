@@ -64,6 +64,14 @@ function captureRuntimeErrors(page, runtimeErrors) {
     await page.keyboard.press('Escape');
     await expect(workspace).toHaveClass(/workspace-mode-split/);
 
+    // Keep the F6 focus/mode smoke scenario isolated from the persistence and
+    // Drive scenario below. Reloading preserves the same Electron profile while
+    // clearing transient focus/layout state created by the shortcut checks.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    sidebar = page.locator('.note-sidebar');
+    await expect(sidebar).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.fa-block-editor')).toBeVisible();
+
     await submitName(page, sidebar.getByRole('button', { name: 'Tạo Notebook' }), 'Electron Nội tiết');
     await submitName(page, sidebar.getByRole('button', { name: 'Thêm Section' }), 'Chuyển hóa');
     await submitName(page, sidebar.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');
