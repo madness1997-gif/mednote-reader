@@ -70,13 +70,13 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
   await expect(stage).toBeVisible();
   await page.waitForTimeout(3_200);
-  const after = await stage.evaluate((element) => {
-    const anchor = element.querySelector(`[data-pdf-page="${before.page}"]`);
+  const after = await stage.evaluate((element, anchorPage) => {
+    const anchor = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
     return {
       left: element.scrollLeft,
       offset: anchor ? anchor.getBoundingClientRect().top - element.getBoundingClientRect().top : Number.NaN,
     };
-  });
+  }, before.page);
   expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(2);
   expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(2);
 });
