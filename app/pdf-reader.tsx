@@ -472,6 +472,11 @@ export function PdfPageView({
     if (!host) return;
     const update = () => {
       const stage = host.closest(".document-stage") as HTMLElement | null;
+      // A mode switch hides the Reader with CSS but intentionally keeps it
+      // mounted so its scroll/session state survives. Ignore the transient
+      // zero-sized layout while hidden; otherwise every page is re-rendered at
+      // the minimum size and the browser can clamp the saved scroll position.
+      if (stage && (!stage.clientWidth || !stage.clientHeight)) return;
       const stageStyle = stage ? window.getComputedStyle(stage) : null;
       const horizontalPadding = stageStyle
         ? Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight)

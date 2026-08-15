@@ -26,8 +26,9 @@ test("P9 page is the composition root and no longer owns major JSX clusters", as
   for (const component of ["AppTopBar", "DrivePanel", "LibraryPanel", "WorkspaceShell", "PdfNavigationRail", "ReaderPane", "NotePane", "NoteNavigationHost", "SplitDivider"]) {
     assert.match(page, new RegExp(component));
   }
-  assert.match(page, /const showReader = workspaceMode !== "note"/);
-  assert.match(page, /const showNote = workspaceMode !== "reader"/);
+  assert.doesNotMatch(page, /showReader && <ReaderPane|showNote && <NotePane/);
+  assert.match(page, /<ReaderPane scope=/);
+  assert.match(page, /<NotePane toolbar=/);
   assert.doesNotMatch(page, /<header className="topbar">/);
   assert.doesNotMatch(page, /<aside className="drive-panel">/);
   assert.doesNotMatch(page, /<div className="library-backdrop">/);
