@@ -590,7 +590,7 @@
 
 /* First Aid visual contract: one canonical signature, no patch layers. */
 .template-first-aid {
-  --fa-default-text-size: 11.5px;
+  --fa-default-text-size: 12px;
   color: var(--fa-ink);
 }
 
