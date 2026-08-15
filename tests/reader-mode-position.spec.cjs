@@ -5,12 +5,26 @@ const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
+async function waitForAppReady(page) {
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('mednote-document-runtime-v1');
+    if (!raw) return false;
+    try {
+      const snapshot = JSON.parse(raw);
+      return Array.isArray(snapshot?.workspaces) && snapshot.workspaces.length > 0;
+    } catch {
+      return false;
+    }
+  }), { timeout: 10000 }).toBe(true);
+}
+
 test('Reader keeps its continuous-scroll position after visiting Note mode', async ({ page }) => {
   const pdf = await PDFDocument.create();
   for (let index = 0; index < 9; index += 1) pdf.addPage([420, 595]);
   const bytes = Buffer.from(await pdf.save());
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await waitForAppReady(page);
   await expect(page.locator('input[data-pdf-input="preview"]')).toBeEnabled();
   await page.locator('input[data-pdf-input="preview"]').setInputFiles({
     name: 'reader-position.pdf', mimeType: 'application/pdf', buffer: bytes,
