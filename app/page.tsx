@@ -442,8 +442,9 @@ export default function Home() {
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
-  const readerScrollPositionRef = useRef<{ top: number; left: number } | null>(null);
+  const readerScrollPositionRef = useRef<{ top: number; left: number; anchorPage: number; anchorOffset: number } | null>(null);
   const pendingReaderScrollRestoreRef = useRef(false);
+  const restoringReaderScrollRef = useRef(false);
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
@@ -1947,14 +1948,29 @@ export default function Home() {
     }));
   };
 
+  const rememberReaderScrollPosition = (stage: HTMLElement) => {
+    const stageTop = stage.getBoundingClientRect().top;
+    const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
+    const anchor = pages.reduce<{ element: HTMLElement; distance: number } | null>((best, element) => {
+      const distance = Math.abs(element.getBoundingClientRect().top - stageTop);
+      return !best || distance < best.distance ? { element, distance } : best;
+    }, null)?.element;
+    readerScrollPositionRef.current = {
+      top: stage.scrollTop,
+      left: stage.scrollLeft,
+      anchorPage: Number(anchor?.dataset.pdfPage) || sourcePage,
+      anchorOffset: anchor ? anchor.getBoundingClientRect().top - stageTop : 0,
+    };
+  };
+
   const handleReaderScroll = () => {
     const stage = documentStageRef.current;
     if (!stage) return;
     // display:none can clamp a scroll container while Reader is hidden. Do not
     // let that transient value overwrite the last position the user actually
     // saw; it is restored when Reader becomes visible again.
-    if (workspaceModeRef.current !== "note") {
-      readerScrollPositionRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
+    if (workspaceModeRef.current !== "note" && !restoringReaderScrollRef.current) {
+      rememberReaderScrollPosition(stage);
     }
     if (viewMode !== "continuous") return;
     if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
@@ -2324,7 +2340,7 @@ export default function Home() {
     }
     const stage = documentStageRef.current;
     if (stage && workspaceModeRef.current !== "note") {
-      readerScrollPositionRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
+      rememberReaderScrollPosition(stage);
     }
     if (mode === "note" && workspaceModeRef.current !== "note") {
       pendingReaderScrollRestoreRef.current = true;
@@ -2348,23 +2364,54 @@ export default function Home() {
     const saved = readerScrollPositionRef.current;
     if (!stage || !saved) return;
     pendingReaderScrollRestoreRef.current = false;
+    restoringReaderScrollRef.current = true;
 
     // Lazy PDF pages may settle their measured heights shortly after Reader is
     // shown again. Restore once immediately and after those layout passes so a
     // mode round-trip returns to the same coordinates instead of a nearby page.
     let cancelled = false;
+    let restoreFrame: number | null = null;
     const restore = () => {
       if (cancelled) return;
       stage.scrollLeft = saved.left;
-      stage.scrollTop = saved.top;
+      const anchor = stage.querySelector<HTMLElement>(`[data-pdf-page="${saved.anchorPage}"]`);
+      if (anchor) {
+        const currentOffset = anchor.getBoundingClientRect().top - stage.getBoundingClientRect().top;
+        stage.scrollTop += currentOffset - saved.anchorOffset;
+      } else {
+        stage.scrollTop = saved.top;
+      }
     };
-    restore();
-    const frame = window.requestAnimationFrame(restore);
-    const timers = [80, 180, 360].map((delay) => window.setTimeout(restore, delay));
-    return () => {
+    const queueRestore = () => {
+      if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
+      restoreFrame = window.requestAnimationFrame(() => {
+        restoreFrame = null;
+        restore();
+      });
+    };
+    const finish = () => {
+      if (cancelled) return;
       cancelled = true;
-      window.cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
+      observer.disconnect();
+      if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
+      window.clearTimeout(timeout);
+      stage.removeEventListener("wheel", finish);
+      stage.removeEventListener("pointerdown", finish);
+      stage.removeEventListener("touchstart", finish);
+      window.removeEventListener("keydown", finish);
+      restoringReaderScrollRef.current = false;
+    };
+    const observer = new ResizeObserver(queueRestore);
+    observer.observe(stage.querySelector<HTMLElement>(".continuous-pages") ?? stage);
+    restore();
+    queueRestore();
+    const timeout = window.setTimeout(finish, 3000);
+    stage.addEventListener("wheel", finish, { passive: true });
+    stage.addEventListener("pointerdown", finish);
+    stage.addEventListener("touchstart", finish, { passive: true });
+    window.addEventListener("keydown", finish);
+    return () => {
+      finish();
     };
   }, [workspaceMode]);
 
