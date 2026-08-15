@@ -442,6 +442,7 @@ export default function Home() {
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const readerScrollPositionRef = useRef<{ top: number; left: number } | null>(null);
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
@@ -1946,10 +1947,17 @@ export default function Home() {
   };
 
   const handleReaderScroll = () => {
-    if (viewMode !== "continuous" || !documentStageRef.current) return;
+    const stage = documentStageRef.current;
+    if (!stage) return;
+    // display:none can clamp a scroll container while Reader is hidden. Do not
+    // let that transient value overwrite the last position the user actually
+    // saw; it is restored when Reader becomes visible again.
+    if (workspaceModeRef.current !== "note") {
+      readerScrollPositionRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
+    }
+    if (viewMode !== "continuous") return;
     if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
     scrollFrameRef.current = window.requestAnimationFrame(() => {
-      const stage = documentStageRef.current!;
       const stageTop = stage.getBoundingClientRect().top + 24;
       const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
       const nearest = pages.reduce<{ element: HTMLElement; distance: number } | null>((best, element) => {
@@ -2313,6 +2321,10 @@ export default function Home() {
         : "PDF này chưa có note. Chọn “Tạo note” khi bạn muốn ghi chú.");
       return;
     }
+    const stage = documentStageRef.current;
+    if (stage && workspaceModeRef.current !== "note") {
+      readerScrollPositionRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
+    }
     setWorkspaceMode(mode);
     if (mode === "note") {
       setPdfSelection(null);
@@ -2325,6 +2337,31 @@ export default function Home() {
     }
     setToast(mode === "split" ? "Đang dùng Reader và Note" : mode === "reader" ? "Đang chỉ xem Reader" : "Đang chỉ làm Note");
   };
+
+  useEffect(() => {
+    if (workspaceMode !== "reader" || viewMode !== "continuous") return;
+    const stage = documentStageRef.current;
+    const saved = readerScrollPositionRef.current;
+    if (!stage || !saved) return;
+
+    // Lazy PDF pages may settle their measured heights shortly after Reader is
+    // shown again. Restore once immediately and after those layout passes so a
+    // mode round-trip returns to the same coordinates instead of a nearby page.
+    let cancelled = false;
+    const restore = () => {
+      if (cancelled) return;
+      stage.scrollLeft = saved.left;
+      stage.scrollTop = saved.top;
+    };
+    restore();
+    const frame = window.requestAnimationFrame(restore);
+    const timers = [80, 180, 360].map((delay) => window.setTimeout(restore, delay));
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [viewMode, workspaceMode]);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
