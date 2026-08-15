@@ -45,6 +45,25 @@ function captureRuntimeErrors(page, runtimeErrors) {
     await expect(page.locator('.fa-block-editor')).toBeVisible();
     await expect(page.locator('.fa-block')).toHaveCount(0);
 
+    const workspace = page.locator('.workspace');
+    const readerPane = page.locator('.reader-pane');
+    const notePane = page.locator('.notes-pane');
+    await page.locator('.workspace-mode-switcher').getByRole('button', { name: 'Cả hai' }).click();
+    await expect(workspace).toHaveClass(/workspace-mode-split/);
+    await page.locator('.document-stage').click({ position: { x: 20, y: 20 } });
+    await page.keyboard.press('F6');
+    await expect.poll(() => notePane.evaluate((pane) => pane.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press('F6');
+    await expect.poll(() => readerPane.evaluate((pane) => pane.contains(document.activeElement))).toBe(true);
+
+    await page.locator('.workspace-mode-switcher').getByRole('button', { name: 'Reader' }).click();
+    await page.keyboard.press('F6');
+    await expect(workspace).toHaveClass(/workspace-mode-note/);
+    await page.keyboard.press('F6');
+    await expect(workspace).toHaveClass(/workspace-mode-reader/);
+    await page.keyboard.press('Escape');
+    await expect(workspace).toHaveClass(/workspace-mode-split/);
+
     await submitName(page, sidebar.getByRole('button', { name: 'Tạo Notebook' }), 'Electron Nội tiết');
     await submitName(page, sidebar.getByRole('button', { name: 'Thêm Section' }), 'Chuyển hóa');
     await submitName(page, sidebar.getByRole('button', { name: 'Thêm Page' }), 'Đái tháo đường');

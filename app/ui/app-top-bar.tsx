@@ -33,8 +33,8 @@ export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
         <div className="top-actions">
           <nav className="workspace-mode-switcher" aria-label="Chế độ không gian làm việc">
             <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} disabled={!hasActiveNote} title={!hasActiveNote ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
-            <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
-            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={!hasActiveNote} title={!hasActiveNote ? "Chưa có note" : "Chỉ hiện Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
+            <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader · F6 chuyển Reader/Note" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
+            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={!hasActiveNote} title={!hasActiveNote ? "Chưa có note" : "Chỉ hiện Note · F6 chuyển Reader/Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
           </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button

@@ -62,11 +62,11 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
     };
   });
 
-  await modeSwitcher.getByRole('button', { name: 'Note' }).click();
+  await page.keyboard.press('F6');
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
   await expect(stage).toBeHidden();
 
-  await modeSwitcher.getByRole('button', { name: 'Reader' }).click();
+  await page.keyboard.press('F6');
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
   await expect(stage).toBeVisible();
   await page.waitForTimeout(3_200);
@@ -79,4 +79,25 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
   }, before.page);
   expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(2);
   expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(2);
+});
+
+test('F6 moves focus between Reader and Note while both panes stay visible', async ({ page }) => {
+  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await waitForAppReady(page);
+
+  const workspace = page.locator('.workspace');
+  const readerStage = page.locator('.document-stage');
+  const readerPane = page.locator('.reader-pane');
+  const notePane = page.locator('.notes-pane');
+  await page.locator('.workspace-mode-switcher').getByRole('button', { name: 'Cả hai' }).click();
+  await expect(workspace).toHaveClass(/workspace-mode-split/);
+
+  await readerStage.click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press('F6');
+  await expect.poll(() => notePane.evaluate((pane) => pane.contains(document.activeElement))).toBe(true);
+  await expect(workspace).toHaveClass(/workspace-mode-split/);
+
+  await page.keyboard.press('F6');
+  await expect.poll(() => readerPane.evaluate((pane) => pane.contains(document.activeElement))).toBe(true);
+  await expect(workspace).toHaveClass(/workspace-mode-split/);
 });

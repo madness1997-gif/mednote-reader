@@ -473,6 +473,10 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
   const workspaceModeRef = useRef<WorkspaceMode>(workspaceMode);
+  const lastWorkspacePaneRef = useRef<"reader" | "note">("reader");
+  const lastReaderFocusRef = useRef<HTMLElement | null>(null);
+  const lastNoteFocusRef = useRef<HTMLElement | null>(null);
+  const pendingWorkspaceFocusRef = useRef<"reader" | "note" | null>(null);
   const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace(initialPages)]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
@@ -1999,10 +2003,67 @@ export default function Home() {
     setPdfPanel(null);
   }, [activeDocument?.id]);
 
+  const workspacePaneForElement = (element: HTMLElement | null): "reader" | "note" | null => {
+    if (element?.closest(".reader-pane, .pdf-thumbnails")) return "reader";
+    if (element?.closest(".notes-pane, .note-navigation-host")) return "note";
+    return null;
+  };
+
+  const focusWorkspacePane = (pane: "reader" | "note") => {
+    const paneElement = workspaceRef.current?.querySelector<HTMLElement>(pane === "reader" ? ".reader-pane" : ".notes-pane");
+    if (!paneElement || paneElement.getClientRects().length === 0) return;
+    const remembered = pane === "reader" ? lastReaderFocusRef.current : lastNoteFocusRef.current;
+    const target = remembered?.isConnected && paneElement.contains(remembered) && remembered.getClientRects().length > 0
+      ? remembered
+      : paneElement;
+    target.focus({ preventScroll: true });
+    lastWorkspacePaneRef.current = pane;
+  };
+
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const rememberPane = (event: Event) => {
+      const element = event.target instanceof HTMLElement ? event.target : null;
+      const pane = workspacePaneForElement(element);
+      if (!pane) return;
+      lastWorkspacePaneRef.current = pane;
+      if (event.type === "focusin" && element) {
+        if (pane === "reader") lastReaderFocusRef.current = element;
+        else lastNoteFocusRef.current = element;
+      }
+    };
+    workspace.addEventListener("focusin", rememberPane);
+    workspace.addEventListener("pointerdown", rememberPane, true);
+    return () => {
+      workspace.removeEventListener("focusin", rememberPane);
+      workspace.removeEventListener("pointerdown", rememberPane, true);
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = target?.matches("input, textarea, select, [contenteditable='true']");
+      if (event.key === "F6" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        const mode = workspaceModeRef.current;
+        if (mode === "split") {
+          const currentPane = workspacePaneForElement(target) ?? lastWorkspacePaneRef.current;
+          const nextPane = currentPane === "reader" ? "note" : "reader";
+          focusWorkspacePane(nextPane);
+          setToast(nextPane === "reader" ? "Đã chuyển sang Reader (F6)" : "Đã chuyển sang Note (F6)");
+          return;
+        }
+        const nextPane = mode === "reader" ? "note" : "reader";
+        if (nextPane === "note" && !hasActiveNote) {
+          changeWorkspaceMode("note");
+          return;
+        }
+        pendingWorkspaceFocusRef.current = nextPane;
+        changeWorkspaceMode(nextPane);
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
         event.preventDefault();
         setWorkspaceMode("reader");
@@ -2357,6 +2418,15 @@ export default function Home() {
     }
     setToast(mode === "split" ? "Đang dùng Reader và Note" : mode === "reader" ? "Đang chỉ xem Reader" : "Đang chỉ làm Note");
   };
+
+  useEffect(() => {
+    const pendingPane = pendingWorkspaceFocusRef.current;
+    if (!pendingPane) return;
+    if ((pendingPane === "reader" && workspaceMode !== "reader") || (pendingPane === "note" && workspaceMode !== "note")) return;
+    pendingWorkspaceFocusRef.current = null;
+    const frame = window.requestAnimationFrame(() => focusWorkspacePane(pendingPane));
+    return () => window.cancelAnimationFrame(frame);
+  }, [workspaceMode]);
 
   useEffect(() => {
     if (workspaceMode !== "reader" || !pendingReaderScrollRestoreRef.current) return;
