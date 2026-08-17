@@ -23,6 +23,33 @@ test("PDF.js becomes ready when PDFium fails", async () => {
   assert.equal(controller.getState().status, "ready");
 });
 
+test("visible PDF.js page is ready before outline and PDFium secondary work", async () => {
+  const pdf = proxy("progressive");
+  let outlineCalls = 0;
+  let pdfiumCalls = 0;
+  let loadSource: Blob | Uint8Array | null = null;
+  pdf.getOutline = async () => { outlineCalls += 1; return []; };
+  const controller = new PdfReaderController({
+    loadPdf: async (source) => { loadSource = source; return pdf; },
+    loadPdfium: async () => {
+      pdfiumCalls += 1;
+      return { getPage: async () => ({ render: async () => ({}) }), destroy: async () => undefined } as any;
+    },
+    waitForSecondaryWork: async () => undefined,
+  });
+  const blob = new Blob(["progressive"]);
+  const session = await controller.open({ documentId: "progressive", lastModified: 1, blob });
+  assert.equal(session?.pdf, pdf);
+  assert.equal(loadSource, blob);
+  assert.equal(outlineCalls, 0);
+  assert.equal(pdfiumCalls, 0);
+
+  controller.notifyVisiblePageRendered("progressive");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(outlineCalls, 1);
+  assert.equal(pdfiumCalls, 1);
+});
+
 test("fast switch drops stale result and destroys stale proxy", async () => {
   let release!: (value: any) => void;
   let markStarted!: () => void;

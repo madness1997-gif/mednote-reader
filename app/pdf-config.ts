@@ -7,10 +7,10 @@ function pdfAssetRoot() {
   return new URL(PDF_ASSET_ROOT, window.document.baseURI).href;
 }
 
-export function pdfDocumentOptions(data: Uint8Array) {
+export function pdfDocumentOptions(source: Uint8Array | { url: string }) {
   const assetRoot = pdfAssetRoot();
   return {
-    data,
+    ...(source instanceof Uint8Array ? { data: source } : source),
     cMapUrl: `${assetRoot}cmaps/`,
     cMapPacked: true,
     standardFontDataUrl: `${assetRoot}standard_fonts/`,

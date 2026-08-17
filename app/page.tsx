@@ -596,6 +596,9 @@ export default function Home() {
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
   const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
+  const onPdfPageRendered = useCallback(() => {
+    if (activeDocument) pdfReader.notifyVisiblePageRendered(activeDocument.id);
+  }, [activeDocument?.id, pdfReader]);
   const libraryProjection = useMemo(() => noteState.structure
     ? projectLibrary(noteState.structure, noteState.documents)
     : { notes: [], documents: [] }, [noteState.documents, noteState.structure]);
@@ -2685,7 +2688,7 @@ export default function Home() {
       <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail scope={{ activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader }} />
 
-        <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setShowPdfRail, setSourceZoom, showPdfRail, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setShowPdfRail, setSourceZoom, showPdfRail, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
 
         <SplitDivider onPointerDown={startResize} />
 

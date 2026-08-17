@@ -1,8 +1,9 @@
 import type { PDFDocumentProxy, RenderTask as PDFRenderTask } from "pdfjs-dist";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { pdfWorkScheduler, scheduleIdleWork, type ScheduledPdfWork } from "./pdf-work-scheduler";
 
 const DEFAULT_PDF_ITEM_SIZE = 142;
-const OVERSCAN_ITEMS = 5;
+const OVERSCAN_ITEMS = 2;
 
 type VirtualRange = { start: number; end: number };
 
@@ -108,36 +109,45 @@ function PdfThumbnail({ document, page, active, onClick }: { document: PDFDocume
   useEffect(() => {
     let disposed = false;
     let task: PDFRenderTask | null = null;
+    let scheduled: ScheduledPdfWork<void> | null = null;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    void document.getPage(page).then(async (pdfPage) => {
-      if (disposed || !canvasRef.current) return;
-      const base = pdfPage.getViewport({ scale: 1 });
-      const viewport = pdfPage.getViewport({ scale: 72 / base.width });
-      const target = canvasRef.current;
-      if (!target) return;
-      const ratio = 1.5;
-      target.width = Math.floor(viewport.width * ratio);
-      target.height = Math.floor(viewport.height * ratio);
-      target.style.width = `${viewport.width}px`;
-      target.style.height = `${viewport.height}px`;
-      const context = target.getContext("2d");
-      if (!context) return;
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      task = pdfPage.render({ canvas: target, canvasContext: context, viewport });
-      try {
-        await task.promise;
-      } catch (error) {
-        if (!disposed && (error as Error).name !== "RenderingCancelledException") throw error;
-      }
-    }).catch(() => undefined);
+    const cancelIdle = scheduleIdleWork(() => {
+      scheduled = pdfWorkScheduler.schedule("thumbnail", async (signal) => {
+        const pdfPage = await document.getPage(page);
+        if (disposed || signal.aborted || !canvasRef.current) return;
+        const base = pdfPage.getViewport({ scale: 1 });
+        const viewport = pdfPage.getViewport({ scale: 72 / base.width });
+        const target = canvasRef.current;
+        if (!target) return;
+        const ratio = 1.25;
+        target.width = Math.floor(viewport.width * ratio);
+        target.height = Math.floor(viewport.height * ratio);
+        target.style.width = `${viewport.width}px`;
+        target.style.height = `${viewport.height}px`;
+        const context = target.getContext("2d");
+        if (!context) return;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        task = pdfPage.render({ canvas: target, canvasContext: context, viewport });
+        const cancel = () => task?.cancel();
+        signal.addEventListener("abort", cancel, { once: true });
+        try {
+          await task.promise;
+        } finally {
+          signal.removeEventListener("abort", cancel);
+        }
+      });
+      void scheduled.promise.catch(() => undefined);
+    }, 1_200);
 
     return () => {
       disposed = true;
+      cancelIdle();
+      scheduled?.cancel();
       task?.cancel();
-      canvas.width = 0;
-      canvas.height = 0;
+      canvas.width = 1;
+      canvas.height = 1;
     };
   }, [document, page]);
 

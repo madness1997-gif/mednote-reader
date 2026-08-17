@@ -1,4 +1,6 @@
-export const WINDOWS_PDF_CANVAS_BUDGET_BYTES = 192 * 1024 * 1024;
+export const DESKTOP_PDF_CANVAS_BUDGET_BYTES = 192 * 1024 * 1024;
+export const WEB_PDF_CANVAS_BUDGET_BYTES = 96 * 1024 * 1024;
+export const LOW_MEMORY_PDF_CANVAS_BUDGET_BYTES = 56 * 1024 * 1024;
 
 type PdfCanvasBudgetEntry = {
   bytes: number;
@@ -17,7 +19,7 @@ export class PdfCanvasBudgetManager {
   private readonly entries = new Map<string, PdfCanvasBudgetEntry>();
   private clock = 0;
 
-  constructor(readonly budgetBytes = WINDOWS_PDF_CANVAS_BUDGET_BYTES) {}
+  constructor(readonly budgetBytes = WEB_PDF_CANVAS_BUDGET_BYTES) {}
 
   report(key: string, bytes: number, evict: () => void, pinned: () => boolean = () => false) {
     const normalizedBytes = Math.max(0, Math.floor(bytes));
@@ -68,24 +70,20 @@ export class PdfCanvasBudgetManager {
 
     for (const [key, entry] of candidates) {
       if (totalBytes <= this.budgetBytes) break;
-      // Remove first so React cleanup or a synchronous report cannot evict the
-      // same page twice while the callback is unmounting its canvases.
       this.entries.delete(key);
       totalBytes -= entry.bytes;
       try {
         entry.evict();
       } catch {
-        // A failed eviction callback must never break PDF rendering. The entry
-        // is already forgotten and will be reported again if it remains alive.
+        // Rendering remains available even if a detached React tree rejects an
+        // eviction callback. It will report itself again if it is still alive.
       }
     }
   }
 
   private totalBytes() {
     let total = 0;
-    this.entries.forEach((entry) => {
-      total += entry.bytes;
-    });
+    this.entries.forEach((entry) => { total += entry.bytes; });
     return total;
   }
 }
@@ -98,4 +96,11 @@ function safePinned(entry: PdfCanvasBudgetEntry) {
   }
 }
 
-export const desktopPdfCanvasBudget = new PdfCanvasBudgetManager();
+export function pdfCanvasBudgetBytes() {
+  if (typeof window === "undefined") return WEB_PDF_CANVAS_BUDGET_BYTES;
+  if (window.mednoteDesktop?.isDesktop) return DESKTOP_PDF_CANVAS_BUDGET_BYTES;
+  const deviceMemory = (window.navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return deviceMemory && deviceMemory <= 4 ? LOW_MEMORY_PDF_CANVAS_BUDGET_BYTES : WEB_PDF_CANVAS_BUDGET_BYTES;
+}
+
+export const pdfCanvasBudget = new PdfCanvasBudgetManager(pdfCanvasBudgetBytes());

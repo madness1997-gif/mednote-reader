@@ -254,7 +254,7 @@ body {
 /* The page host already centres a page while it fits. Centring the host again
    here creates unreachable negative overflow on the left once the PDF is
    zoomed wider than the reader, which makes it look hidden behind the rail. */
-.lazy-pdf-page { width: 100%; display: flex; align-items: flex-start; justify-content: flex-start; }
+.lazy-pdf-page { width: 100%; display: flex; align-items: flex-start; justify-content: flex-start; content-visibility: auto; contain-intrinsic-size: auto 780px; }
 .pdf-page-placeholder { width: min(100%, 720px); height: 100%; min-height: 620px; display: grid; place-items: center; border: 1px solid #dce3e5; background: #eef2f3; color: #9aa7ad; font-size: 11px; }
 .pdf-markup-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .pdf-markup { --markup-color: #f6d96b; position: absolute; border-radius: 2px; }

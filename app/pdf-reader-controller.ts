@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { PDFiumDocument } from "./pdfium-renderer";
+import { waitForIdleWork } from "./pdf-work-scheduler";
 
 export type PdfReaderStatus = "idle" | "loading" | "ready" | "error";
 export type PdfOutlineEntry = { title: string; page: number | null; depth: number };
@@ -29,12 +30,14 @@ export type PdfSearchResult = {
 
 type LoadPdf = (source: Uint8Array | Blob) => Promise<PDFDocumentProxy>;
 type LoadPdfium = (data: Uint8Array) => Promise<PDFiumDocument>;
+type WaitForSecondaryWork = () => Promise<void>;
 type PdfReaderListener = (state: ReturnType<PdfReaderController["getState"]>) => void;
 
 export type PdfReaderControllerDependencies = {
   loadPdf?: LoadPdf;
   loadPdfium?: LoadPdfium;
   readBlob?: (id: string) => Promise<Blob | null>;
+  waitForSecondaryWork?: WaitForSecondaryWork;
 };
 
 const defaultLoadPdf: LoadPdf = async (source) => (await import("./pdf-document-loader")).loadPdfDocument(source);
@@ -114,8 +117,16 @@ export class PdfReaderController {
   private readonly loadPdf: LoadPdf;
   private readonly loadPdfium: LoadPdfium;
   private readonly readBlob?: (id: string) => Promise<Blob | null>;
+  private readonly waitForSecondaryWork: WaitForSecondaryWork;
   private generation = 0;
   private session: PdfReaderSession | null = null;
+  private pendingSecondary: {
+    generation: number;
+    session: PdfReaderSession;
+    blob: Blob;
+    started: boolean;
+    fallbackTimer?: number;
+  } | null = null;
   private status: PdfReaderStatus = "idle";
   private error: Error | null = null;
   private readonly textCache = new Map<string, Map<number, string>>();
@@ -125,6 +136,7 @@ export class PdfReaderController {
     this.loadPdf = dependencies.loadPdf || defaultLoadPdf;
     this.loadPdfium = dependencies.loadPdfium || defaultLoadPdfium;
     this.readBlob = dependencies.readBlob;
+    this.waitForSecondaryWork = dependencies.waitForSecondaryWork || (() => waitForIdleWork(1_200));
   }
 
   getState() {
@@ -150,6 +162,7 @@ export class PdfReaderController {
 
   async close() {
     this.generation += 1;
+    this.clearPendingSecondary();
     const old = this.session;
     this.session = null;
     this.status = "idle";
@@ -160,18 +173,20 @@ export class PdfReaderController {
 
   async open(input: { documentId: string; lastModified: number; blob: Blob }): Promise<PdfReaderSession | null> {
     const generation = ++this.generation;
+    this.clearPendingSecondary();
     const previous = this.session;
     this.session = null;
     this.status = "loading";
     this.error = null;
     this.emit();
-    if (previous) await Promise.allSettled([previous.pdf.destroy(), previous.pdfium?.destroy?.()]);
-    const bytes = new Uint8Array(await input.blob.arrayBuffer());
-    if (generation !== this.generation) return null;
+    if (previous) void Promise.allSettled([previous.pdf.destroy(), previous.pdfium?.destroy?.()]);
 
     let pdf: PDFDocumentProxy;
     try {
-      pdf = await this.loadPdf(bytes.slice());
+      // Blob-backed PDF.js loading can stream into its worker. Converting the
+      // entire file to bytes here made opening a large textbook an all-or-
+      // nothing operation and duplicated its memory before page 1 was visible.
+      pdf = await this.loadPdf(input.blob);
     } catch (error) {
       if (generation === this.generation) {
         this.status = "error";
@@ -197,25 +212,67 @@ export class PdfReaderController {
     this.status = "ready";
     this.emit();
 
-
-    void resolveOutline(pdf).then((outline) => {
-      if (generation === this.generation && this.session === session) { session.outline = outline; this.emit(); }
-    }).catch(() => undefined);
-
-    void this.loadPdfium(bytes.slice()).then((pdfium) => {
-      if (generation !== this.generation || this.session !== session) {
-        void pdfium.destroy();
-        return;
-      }
-      session.pdfium = pdfium;
-      this.emit();
-    }).catch(() => undefined);
+    this.pendingSecondary = { generation, session, blob: input.blob, started: false };
+    // A hidden Reader may never paint. In that case secondary facilities still
+    // become available, but only after the initial open path has had ample time.
+    if (typeof window !== "undefined") {
+      this.pendingSecondary.fallbackTimer = window.setTimeout(() => {
+        this.startSecondaryWork(session.documentId);
+      }, 4_000);
+    }
 
     return session;
   }
 
+  notifyVisiblePageRendered(documentId: string) {
+    this.startSecondaryWork(documentId);
+  }
+
   resolveOutline(pdf = this.session?.pdf) {
     return pdf ? resolveOutline(pdf) : Promise.resolve([]);
+  }
+
+  private clearPendingSecondary() {
+    if (this.pendingSecondary?.fallbackTimer) clearTimeout(this.pendingSecondary.fallbackTimer);
+    this.pendingSecondary = null;
+  }
+
+  private startSecondaryWork(documentId: string) {
+    const pending = this.pendingSecondary;
+    if (!pending || pending.started || pending.session.documentId !== documentId) return;
+    pending.started = true;
+    if (pending.fallbackTimer) clearTimeout(pending.fallbackTimer);
+    void this.runSecondaryWork(pending);
+  }
+
+  private async runSecondaryWork(pending: NonNullable<PdfReaderController["pendingSecondary"]>) {
+    const current = () => pending.generation === this.generation && this.session === pending.session;
+    try {
+      await this.waitForSecondaryWork();
+      if (!current()) return;
+      const outline = await resolveOutline(pending.session.pdf).catch(() => []);
+      if (!current()) return;
+      pending.session.outline = outline;
+      this.emit();
+
+      // PDFium improves fidelity for difficult files, but loading its WASM and
+      // copying a whole Blob must never compete with the first visible bitmap.
+      await this.waitForSecondaryWork();
+      if (!current()) return;
+      const bytes = new Uint8Array(await pending.blob.arrayBuffer());
+      if (!current()) return;
+      const pdfium = await this.loadPdfium(bytes);
+      if (!current()) {
+        await pdfium.destroy();
+        return;
+      }
+      pending.session.pdfium = pdfium;
+      this.emit();
+    } catch {
+      // The PDF.js session is already usable; outline/PDFium are optional.
+    } finally {
+      if (this.pendingSecondary === pending) this.pendingSecondary = null;
+    }
   }
 
   clampPage(page: number, numPages = this.session?.pdf.numPages || 1) {
