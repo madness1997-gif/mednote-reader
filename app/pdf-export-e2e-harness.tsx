@@ -27,7 +27,14 @@ export default function PdfExportE2EHarness() {
           }}
         >
           <div style={{ padding: 28 }}>
-            <div style={{ minHeight: 28, padding: "7px 10px", background: "#0e6b70", color: "#fff", fontWeight: 700 }}>
+            <div style={{
+              minHeight: 28,
+              padding: "7px 10px",
+              background: "color(srgb 0.055 0.42 0.44)",
+              color: "#fff",
+              fontWeight: 700,
+              boxShadow: "0 2px 4px color-mix(in srgb, #0e6b70 40%, transparent)",
+            }}>
               MEDNOTE PDF E2E
             </div>
             <h2 style={{ margin: "24px 0 10px", fontSize: 22 }}>Sheet test</h2>

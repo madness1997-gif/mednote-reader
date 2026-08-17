@@ -26,8 +26,8 @@ test("heavy PDF export libraries stay outside the initial application chunk", as
   const core = await source("app/pdf-export-core.ts");
   assert.match(page, /await import\("\.\/pdf-document-export"\)/);
   assert.doesNotMatch(page, /from "\.\/pdf-document-export"/);
-  assert.match(core, /await import\("html2canvas"\)/);
+  assert.match(core, /await import\("html2canvas-pro"\)/);
   assert.match(core, /await import\("pdf-lib"\)/);
-  assert.doesNotMatch(core, /import html2canvas from/);
+  assert.doesNotMatch(core, /import html2canvas(?:Pro)? from/);
   assert.doesNotMatch(core, /import \{ PDFDocument \} from "pdf-lib"/);
 });

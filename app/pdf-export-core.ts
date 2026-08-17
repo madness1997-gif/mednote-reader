@@ -99,7 +99,10 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
   await settleLayout();
 
   try {
-    const { default: html2canvas } = await import("html2canvas");
+    // Chromium/Electron may expose computed First Aid theme colors as CSS
+    // Color 4 values (color(), color-mix(), lab(), ...). html2canvas-pro keeps
+    // the html2canvas API while parsing those modern color functions.
+    const { default: html2canvas } = await import("html2canvas-pro");
     const canvas = await withTimeout(html2canvas(source, {
       backgroundColor: "#ffffff",
       scale,
@@ -190,7 +193,7 @@ export async function runPdfCoreSelfTest() {
   fixture.style.fontFamily = "Arial, sans-serif";
   fixture.innerHTML = `
     <div style="padding:28px">
-      <div style="height:26px;background:#0e6b70;color:#fff;font-weight:700;padding:7px 10px">MEDNOTE PDF SELF TEST</div>
+      <div style="height:26px;background:color(srgb 0.055 0.42 0.44);color:#fff;font-weight:700;padding:7px 10px;box-shadow:0 2px 4px color-mix(in srgb, #0e6b70 40%, transparent)">MEDNOTE PDF SELF TEST</div>
       <h2 style="margin:24px 0 10px;font-size:22px">Sheet test</h2>
       <p style="font-size:15px;line-height:1.5">Nếu nội dung này được rasterize và nhúng vào PDF, bộ xuất PDF hoạt động.</p>
       <div style="margin-top:24px;width:120px;height:120px;border-radius:60%;background:#c7d8eb"></div>

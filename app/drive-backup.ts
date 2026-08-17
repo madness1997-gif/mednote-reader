@@ -51,6 +51,7 @@ function assertLibrary(library: LibraryV6) {
 
 function recordSignature(library: LibraryV6) {
   const sort = <T extends { id: string }>(records: T[]) => [...records].sort((left, right) => left.id.localeCompare(right.id));
+  const hashes = Object.entries(hashesFor(library)).sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
   return JSON.stringify({
     workspace: library.notes.workspace,
     notebooks: sort(library.notes.notebooks),
@@ -63,7 +64,10 @@ function recordSignature(library: LibraryV6) {
     groups: sort(library.documents.groups),
     links: sort(library.documents.links),
     linkRelations: sort(library.documents.linkRelations),
-    hashes: hashesFor(library),
+    // IndexedDB reloads records in canonical hierarchy order. Object key order
+    // is not part of the backup contract, so compare Sheet hashes by ID rather
+    // than by their insertion order in the manifest.
+    hashes,
   });
 }
 

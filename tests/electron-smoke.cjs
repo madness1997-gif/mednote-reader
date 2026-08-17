@@ -60,6 +60,22 @@ function captureRuntimeErrors(page, runtimeErrors) {
     await page.mouse.up();
     expect((await figureColumn.boundingBox()).width).toBeGreaterThan(initialFigureWidth + 50);
     await expect(figureResizer).toHaveAttribute('aria-label', /hiện 5[0-9]%/);
+
+    // Exercise the real First Aid renderer in Electron. Its computed styles
+    // contain CSS Color 4 color()/color-mix() values that the legacy capture
+    // library could not parse on Windows.
+    await page.getByRole('button', { name: 'Xuất note thành PDF' }).click();
+    await page.locator('[data-export-scope="sheet"]').click();
+    await expect(page.getByText('PDF đã tạo xong')).toBeVisible({ timeout: 30_000 });
+    const exportedPdf = await page.locator('[data-pdf-download="1"]').evaluate(async (link) => {
+      const response = await fetch(link.href);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return { header: new TextDecoder().decode(bytes.slice(0, 5)), size: bytes.length };
+    });
+    expect(exportedPdf.header).toBe('%PDF-');
+    expect(exportedPdf.size).toBeGreaterThan(1000);
+    await page.getByRole('button', { name: 'Đóng' }).click();
+
     await figureTextBlock.getByRole('button', { name: 'Xóa block' }).click();
     await expect(page.locator('.fa-block')).toHaveCount(0);
 

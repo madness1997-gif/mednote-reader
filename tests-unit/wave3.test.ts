@@ -93,6 +93,25 @@ test("Drive v2 stages and verifies IDs, hierarchy, links and content hashes", as
   assert.throws(() => parseDriveBackup({ workspaces: [] }), /manifest v2/);
 });
 
+test("Drive staging accepts a valid manifest whose Sheet records are not already in repository order", async () => {
+  const source = library();
+  source.notes.sheets.reverse();
+  source.sheetContents = {
+    "sheet-2": source.sheetContents["sheet-2"],
+    "sheet-1": source.sheetContents["sheet-1"],
+  };
+
+  const staged = await stageDriveBackup(
+    createDriveBackup(source),
+    `mednote-wave3-unsorted-stage-${crypto.randomUUID()}`,
+  );
+
+  assert.deepEqual(staged.notes.sheets.map((sheet) => sheet.id), ["sheet-1", "sheet-2"]);
+  assert.equal(staged.sheetContents["sheet-1"].body, "Metformin");
+  assert.equal(staged.sheetContents["sheet-2"].body, "HbA1c");
+  verifyLibraryRoundTrip(source, staged);
+});
+
 test("desktop lifecycle flushes the renderer store before acknowledging close", async () => {
   let listener: ((requestId: string) => void) | null = null;
   const completions: unknown[][] = [];

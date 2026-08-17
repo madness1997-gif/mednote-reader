@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@hyzyla/pdfium": "2.1.13",
-    "html2canvas": "1.4.1",
+    "html2canvas-pro": "2.3.8",
     "lucide-react": "0.468.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "5.4.296",
