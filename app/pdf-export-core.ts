@@ -132,6 +132,12 @@ function createCaptureClone(source: HTMLElement, width: number, height: number) 
   const clone = source.cloneNode(true) as HTMLElement;
   clone.classList.add("note-pdf-exporting");
   clone.classList.remove("interactive", "typing", "object-mode");
+  // The live paper normally gets its height from aspect-ratio. Export CSS
+  // disables that ratio so every capture uses exact natural pixels; persist
+  // those resolved dimensions on the detached clone before moving it out of
+  // the note stage's inherited sizing context.
+  clone.style.setProperty("--note-natural-width", `${width}px`);
+  clone.style.setProperty("--note-natural-height", `${height}px`);
   clone.querySelectorAll<HTMLElement>(CONTROL_SELECTOR).forEach((element) => element.remove());
   clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => element.setAttribute("contenteditable", "false"));
   clone.querySelectorAll<HTMLElement>(".selected,.editable,.movable").forEach((element) => {
