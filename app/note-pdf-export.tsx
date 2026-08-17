@@ -133,26 +133,32 @@ function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
   return plans;
 }
 
+function activeNotePaper() {
+  return document.querySelector<HTMLElement>(".note-stage .note-paper.interactive[data-note-page-id]")
+    || document.querySelector<HTMLElement>(".note-stage .note-paper:not(.note-paper-preview)[data-note-page-id]")
+    || document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
+}
+
 async function activateNotePage(index: number) {
   const pageIds = notePageIds();
   const pageId = pageIds[index];
   if (!pageId) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
 
-  let paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  let paper = activeNotePaper();
   if (paper?.dataset.notePageId !== pageId) {
     await noteStore.openSheet(pageId);
   }
 
   for (let attempt = 0; attempt < 45; attempt += 1) {
-    paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+    paper = activeNotePaper();
     if (paper?.dataset.notePageId === pageId) break;
     await nextFrame();
     if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
   }
 
   await settleLayout();
-  paper = document.querySelector<HTMLElement>(".note-stage .note-paper");
-  if (!paper) throw new Error("Không tìm thấy Sheet để xuất");
+  paper = activeNotePaper();
+  if (!paper || paper.dataset.notePageId !== pageId) throw new Error(`Không tải được Sheet ${index + 1} để xuất`);
   return paper;
 }
 
@@ -161,7 +167,7 @@ async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: Exp
   if (!pageIds.length) throw new Error("Notebook chưa có Sheet nào");
   if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
-  const currentPaper = document.querySelector<HTMLElement>(".note-stage .note-paper");
+  const currentPaper = activeNotePaper();
   const originalIndex = Math.max(0, pageIds.indexOf(currentPaper?.dataset.notePageId || pageIds[0]));
   const pdf = await createPdfDocument();
   document.body.classList.add("note-pdf-export-active");

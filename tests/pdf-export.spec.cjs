@@ -25,6 +25,7 @@ test('PDF export core produces a high-resolution real PDF in mobile Chromium', a
   expect(result.a4Scale).toBeGreaterThanOrEqual(2);
   expect(result.pixelWidth).toBeGreaterThanOrEqual(840);
   expect(result.pixelHeight).toBeGreaterThanOrEqual(1188);
+  expect(result.contentCoverage).toBeGreaterThan(0.005);
 });
 
 test('clicking Export PDF really creates a downloadable PDF blob', async ({ page }) => {

@@ -18,6 +18,7 @@ const MOBILE_CAPTURE_SCALE = 2;
 const DESKTOP_CAPTURE_SCALE = 2.5;
 const MOBILE_MAX_CAPTURE_PIXELS = 6_000_000;
 const DESKTOP_MAX_CAPTURE_PIXELS = 12_000_000;
+const CAPTURE_HOST_CLASS = "note-pdf-capture-host";
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -92,10 +93,78 @@ async function canvasToJpegBytes(canvas: HTMLCanvasElement) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+function copyCanvasPixels(source: HTMLElement, clone: HTMLElement) {
+  const sourceCanvases = Array.from(source.querySelectorAll<HTMLCanvasElement>("canvas"));
+  const clonedCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
+  sourceCanvases.forEach((canvas, index) => {
+    const target = clonedCanvases[index];
+    if (!target) return;
+    target.width = canvas.width;
+    target.height = canvas.height;
+    try {
+      target.getContext("2d")?.drawImage(canvas, 0, 0);
+    } catch {
+      // A cross-origin canvas is optional note content. html2canvas will still
+      // render the remaining DOM instead of failing the whole Sheet.
+    }
+  });
+}
+
+function createCaptureClone(source: HTMLElement, width: number, height: number) {
+  const host = document.createElement("div");
+  host.className = CAPTURE_HOST_CLASS;
+  host.setAttribute("aria-hidden", "true");
+  host.style.position = "fixed";
+  host.style.inset = "0 auto auto 0";
+  host.style.width = `${width}px`;
+  host.style.height = `${height}px`;
+  host.style.overflow = "hidden";
+  host.style.pointerEvents = "none";
+  host.style.zIndex = "-1";
+  host.style.background = "#fff";
+
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.classList.add("note-pdf-exporting");
+  clone.classList.remove("interactive", "typing", "object-mode");
+  clone.querySelectorAll<HTMLElement>(CONTROL_SELECTOR).forEach((element) => element.remove());
+  clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => element.setAttribute("contenteditable", "false"));
+  clone.querySelectorAll<HTMLElement>(".selected,.editable,.movable").forEach((element) => {
+    element.classList.remove("selected", "editable", "movable");
+  });
+  host.append(clone);
+  document.body.append(host);
+  copyCanvasPixels(source, clone);
+  return { clone, remove: () => host.remove() };
+}
+
+function hasMeaningfulSourceContent(source: HTMLElement) {
+  const probe = source.cloneNode(true) as HTMLElement;
+  probe.querySelectorAll(`${CONTROL_SELECTOR},.note-sheet-preview-loading`).forEach((element) => element.remove());
+  if ((probe.textContent || "").replace(/\s+/g, "").length > 0) return true;
+  return Boolean(probe.querySelector("img[src],svg path,svg line,svg polyline,svg polygon"));
+}
+
+function canvasContentCoverage(canvas: HTMLCanvasElement) {
+  const sample = document.createElement("canvas");
+  const maxSide = 220;
+  const scale = Math.min(1, maxSide / Math.max(canvas.width, canvas.height, 1));
+  sample.width = Math.max(1, Math.round(canvas.width * scale));
+  sample.height = Math.max(1, Math.round(canvas.height * scale));
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return 0;
+  context.drawImage(canvas, 0, 0, sample.width, sample.height);
+  const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+  let visible = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (pixels[index] < 248 || pixels[index + 1] < 248 || pixels[index + 2] < 248) visible += 1;
+  }
+  return visible / Math.max(1, pixels.length / 4);
+}
+
 async function capturePaper(source: HTMLElement, sheetNumber: number) {
   const { width, height } = paperNaturalSize(source);
   const scale = captureScaleForSize(width, height);
-  source.classList.add("note-pdf-exporting");
+  const capture = createCaptureClone(source, width, height);
   await settleLayout();
 
   try {
@@ -103,7 +172,7 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
     // Color 4 values (color(), color-mix(), lab(), ...). html2canvas-pro keeps
     // the html2canvas API while parsing those modern color functions.
     const { default: html2canvas } = await import("html2canvas-pro");
-    const canvas = await withTimeout(html2canvas(source, {
+    const canvas = await withTimeout(html2canvas(capture.clone, {
       backgroundColor: "#ffffff",
       scale,
       logging: false,
@@ -127,9 +196,13 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
         });
       },
     }), CAPTURE_TIMEOUT_MS, `Sheet ${sheetNumber} dựng quá ${CAPTURE_TIMEOUT_MS / 1000} giây`);
-    return { jpeg: await canvasToJpegBytes(canvas), width, height, scale };
+    const contentCoverage = canvasContentCoverage(canvas);
+    if (hasMeaningfulSourceContent(source) && contentCoverage < 0.0002) {
+      throw new Error(`Sheet ${sheetNumber} dựng ra trang trắng; đã dừng để không tạo PDF lỗi`);
+    }
+    return { jpeg: await canvasToJpegBytes(canvas), width, height, scale, contentCoverage };
   } finally {
-    source.classList.remove("note-pdf-exporting");
+    capture.remove();
   }
 }
 
@@ -168,7 +241,7 @@ export async function appendPaperToPdf(pdf: PDFDocument, source: HTMLElement, sh
   const size = pdfPageSize(rendered.width, rendered.height);
   const page = pdf.addPage([size.width, size.height]);
   page.drawImage(embedded, { x: 0, y: 0, width: size.width, height: size.height });
-  return { scale: rendered.scale, pixelWidth: Math.round(rendered.width * rendered.scale), pixelHeight: Math.round(rendered.height * rendered.scale) };
+  return { scale: rendered.scale, pixelWidth: Math.round(rendered.width * rendered.scale), pixelHeight: Math.round(rendered.height * rendered.scale), contentCoverage: rendered.contentCoverage };
 }
 
 export async function saveVerifiedPdf(pdf: PDFDocument) {
@@ -212,6 +285,7 @@ export async function runPdfCoreSelfTest() {
       scale: rendered.scale,
       pixelWidth: rendered.pixelWidth,
       pixelHeight: rendered.pixelHeight,
+      contentCoverage: rendered.contentCoverage,
     };
   } finally {
     fixture.remove();
