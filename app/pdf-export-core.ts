@@ -19,6 +19,7 @@ const DESKTOP_CAPTURE_SCALE = 2.5;
 const MOBILE_MAX_CAPTURE_PIXELS = 6_000_000;
 const DESKTOP_MAX_CAPTURE_PIXELS = 12_000_000;
 const CAPTURE_HOST_CLASS = "note-pdf-capture-host";
+const CAPTURE_HOST_Z_INDEX = 2_147_482_999;
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -120,7 +121,12 @@ function createCaptureClone(source: HTMLElement, width: number, height: number) 
   host.style.height = `${height}px`;
   host.style.overflow = "hidden";
   host.style.pointerEvents = "none";
-  host.style.zIndex = "-1";
+  // Keep the capture surface inside the viewport and above the document
+  // background. A negative stacking level makes Chromium/Electron paint the
+  // body background over this fixed element, so html2canvas receives a blank
+  // page. The export overlay sits one level above this host and hides it from
+  // the user while the capture is in progress.
+  host.style.zIndex = String(CAPTURE_HOST_Z_INDEX);
   host.style.background = "#fff";
 
   const clone = source.cloneNode(true) as HTMLElement;
