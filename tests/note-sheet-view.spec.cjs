@@ -45,22 +45,27 @@ test('same-Page Sheets switch between single and continuous views without duplic
   const secondSheetId = await page.locator('.note-paper.interactive').getAttribute('data-note-page-id');
   expect(secondSheetId).not.toBe(firstSheetId);
   await expect(page.locator('.note-paper.interactive')).toHaveClass(/template-first-aid/);
+  await nav.getByRole('button', { name: 'Thêm tờ vào Page đa tờ' }).click();
+  await expect(nav.locator('.note-sidebar-page.active', { hasText: 'Page đa tờ' })).toContainText('3 tờ');
 
   await toolbar.getByRole('button', { name: 'Liên tục' }).click();
   const stage = page.locator('.note-stage-continuous');
   await expect(stage).toBeVisible();
-  await expect(stage.locator('.note-paper')).toHaveCount(2);
-  await expect(stage.getByRole('button', { name: 'Chỉnh sửa tờ 1' })).toBeVisible();
+  await expect(stage.locator('.note-paper')).toHaveCount(3);
+  await expect(stage.locator('.note-paper-preview.template-first-aid .fa-block-editor.mode-view')).toHaveCount(1);
+  await expect(stage.locator('.note-paper-preview.template-first-aid .fa-view-hint')).toBeHidden();
+  await expect(stage.locator('.note-paper.interactive.template-first-aid .fa-block-editor.mode-edit')).toHaveCount(1);
+  await expect(stage.getByRole('button', { name: 'Chỉnh sửa tờ 2' })).toBeVisible();
 
   const beforeScroll = await stage.evaluate((element) => { element.scrollTop = 180; return element.scrollTop; });
-  await stage.getByRole('button', { name: 'Chỉnh sửa tờ 1' }).evaluate((button) => button.click());
-  await expect(page.locator(`.note-paper.interactive[data-note-page-id="${firstSheetId}"]`)).toBeVisible();
-  await expect(stage.locator('.note-paper')).toHaveCount(2);
+  await stage.getByRole('button', { name: 'Chỉnh sửa tờ 2' }).evaluate((button) => button.click());
+  await expect(page.locator(`.note-paper.interactive[data-note-page-id="${secondSheetId}"]`)).toBeVisible();
+  await expect(stage.locator('.note-paper')).toHaveCount(3);
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(Math.max(0, beforeScroll - 2));
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.note-stage-continuous')).toBeVisible({ timeout: 12_000 });
-  await expect(page.locator('.note-stage-continuous .note-paper')).toHaveCount(2);
+  await expect(page.locator('.note-stage-continuous .note-paper')).toHaveCount(3);
 
   await page.getByRole('button', { name: 'Xuất note thành PDF' }).click();
   await page.locator('[data-export-scope="page"]').click();
