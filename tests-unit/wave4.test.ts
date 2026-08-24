@@ -70,6 +70,30 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
   }
 });
 
+test("PDF content reads do not navigate or populate the live continuous cache", async () => {
+  const dbName = `mednote-export-boundary-${crypto.randomUUID()}`;
+  const repository = new IndexedDbNoteRepository({ dbName });
+  await repository.replaceLibrary(library());
+  const store = new NoteStore(repository);
+  try {
+    await store.initialize({ skipMigration: true });
+    store.patchActiveSheetContent({ body: "Draft chưa rời editor" });
+    const before = store.getSnapshot();
+    const contents = await store.loadSheetContents(["sheet-a1", "sheet-a2", "sheet-b1"]);
+    const after = store.getSnapshot();
+
+    assert.equal(after.structure?.active.activeSheetId, before.structure?.active.activeSheetId);
+    assert.equal(after.activeSheetContent?.body, "Draft chưa rời editor");
+    assert.deepEqual(Object.keys(after.pageSheetContents), Object.keys(before.pageSheetContents));
+    assert.equal(contents["sheet-a1"].body, "Draft chưa rời editor");
+    assert.equal(contents["sheet-a2"].body, "SGLT2i");
+    assert.equal(contents["sheet-b1"].body, "HbA1c");
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
 test("P0 Page rename preserves Sheet drafts and keeps title out of SheetContent", async () => {
   const dbName = `mednote-p0-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });

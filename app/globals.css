@@ -589,6 +589,9 @@ body {
 .note-paper-preview .note-editor { overflow: hidden; }
 .note-paper-preview .fa-view-hint { display: none; }
 .note-sheet-preview-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(247,250,250,.9); color: #71838b; font-size: 11px; font-weight: 700; }
+.note-sheet-virtual-slot { width: max-content; min-width: 100%; display: flow-root; contain: layout style; }
+.note-sheet-virtual-placeholder { width: var(--paper-max-width, 720px); max-width: calc(100% - 16px); height: calc(100% - 22px); min-height: 120px; margin: 0 auto 22px; display: grid; place-items: start center; border: 1px dashed #d8e1e3; border-radius: 4px; background: linear-gradient(#fafcfc, #f5f8f8); color: #8a999f; font-size: 10px; }
+.note-sheet-virtual-placeholder span { margin-top: 12px; font-weight: 750; }
 .note-stage-continuous > .note-paper + .paper-size { margin-bottom: 22px; }
 .note-paper { --paper-bg: #fff; --paper-line: #e1eaed; --paper-dot: #b7c6ca; --paper-ink: #26343a; --paper-accent: var(--teal); position: relative; width: var(--paper-max-width, 720px); max-width: none; aspect-ratio: var(--paper-ratio, 210 / 297); min-height: 0; margin: 0 auto; overflow: hidden; zoom: var(--note-view-zoom, 1); background: var(--paper-bg); border: 1px solid #d6dcdf; box-shadow: 0 8px 20px rgba(24,50,74,.13); }
 .note-paper.paper-ivory { --paper-bg: #fffaf0; --paper-line: #e9dfcd; }

@@ -42,6 +42,22 @@
   display: none !important;
 }
 
+/* A dedicated React surface owns export rendering. It remains laid out so
+   canvas and image content can settle, but never participates in live editor
+   navigation, focus, or the visible continuous-Sheet tree. */
+.note-pdf-export-surface {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  z-index: 0;
+  width: max-content;
+  pointer-events: none;
+}
+
+.note-pdf-export-surface .note-sheet-frame {
+  margin: 0;
+}
+
 .note-pdf-export-wrap {
   position: relative;
   display: inline-flex;

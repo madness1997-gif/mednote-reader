@@ -375,6 +375,29 @@ export class NoteStore {
     return Object.fromEntries(entries);
   }
 
+  /**
+   * Reads an explicit Sheet set without publishing it into the live editor.
+   * Export uses this boundary so preparing a PDF cannot navigate, replace the
+   * active draft owner, or expand the continuous-view cache.
+   */
+  async loadSheetContents(sheetIds: readonly string[]): Promise<SheetContentMap> {
+    await this.flushDraft();
+    const structure = this.snapshot.structure;
+    if (!structure) return {};
+    const knownIds = new Set(structure.sheets.map((sheet) => sheet.id));
+    const uniqueIds = [...new Set(sheetIds.filter((sheetId) => knownIds.has(sheetId)))];
+    const entries = await Promise.all(uniqueIds.map(async (sheetId) => [
+      sheetId,
+      await this.repository.loadSheetContent(sheetId) || {},
+    ] as const));
+    const contents = Object.fromEntries(entries);
+    const activeSheetId = this.snapshot.structure?.active.activeSheetId;
+    if (activeSheetId && uniqueIds.includes(activeSheetId) && this.snapshot.activeSheetContent) {
+      contents[activeSheetId] = clone(this.snapshot.activeSheetContent);
+    }
+    return contents;
+  }
+
   async loadAllContents(): Promise<SheetContentMap> {
     await this.flushDraft();
     const structure = this.snapshot.structure;

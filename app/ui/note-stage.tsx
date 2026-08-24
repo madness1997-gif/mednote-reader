@@ -23,7 +23,8 @@ import {
 import type { NoteStoreSnapshot } from "../note-store";
 import PageTitleEditor from "../page-title-editor";
 import { RichTextEditor, type RichTextEditorProps } from "../rich-text-editor";
-import { NoteSheetPreview, type NoteSheetPreviewProps } from "./note-sheet-preview";
+import type { NoteSheetPreviewProps } from "./note-sheet-preview";
+import { VirtualizedNoteSheetPreview } from "./virtualized-note-sheet-preview";
 import type { BulletStyle, EquationTemplate, FirstAidCropResult, NotePanel, NoteSheetViewMode, NumberingStyle, StickerPresetId, TableBorderSettings, TextCommand, TextInsertPopover, TextToolbarState, Tool } from "./ui-contracts";
 
 type LinePreset = { id: string; label: string; style: TableBorderStyle; width: number };
@@ -240,9 +241,9 @@ export function NoteStage({ scope }: { scope: NoteStageScope }) {
                 </div>
               </section>
             </div>
-          )}<div className={`note-stage workspace-frame note-stage-${noteSheetViewMode} ${activeNoteHydrating ? "note-stage-hydrating" : ""}`} ref={noteStageRef} aria-busy={activeNoteHydrating || noteState.hydratingPageId === noteState.structure?.active.activePageId}>
+          )}<div className={`note-stage workspace-frame note-stage-${noteSheetViewMode} ${activeNoteHydrating ? "note-stage-hydrating" : ""}`} ref={noteStageRef} aria-busy={activeNoteHydrating || noteState.hydratingPageId === noteState.structure?.active.activePageId} data-note-virtual-total={noteSheetViewMode === "continuous" ? continuousNotes.length : undefined}>
             {activeNoteHydrating && <div className="note-hydration-status" role="status" aria-live="polite">Đang mở nội dung tờ…</div>}
-            {noteSheetViewMode === "continuous" && continuousNotes.slice(0, activeSheetIndex).map((note, index) => <NoteSheetPreview
+            {noteSheetViewMode === "continuous" && continuousNotes.slice(0, activeSheetIndex).map((note, index) => <VirtualizedNoteSheetPreview
               key={note.id}
               note={note}
               sheetNumber={index + 1}
@@ -250,6 +251,8 @@ export function NoteStage({ scope }: { scope: NoteStageScope }) {
               loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
               onActivate={() => { void activateContinuousSheet(note.id); }}
               resolveSource={resolveExcerptSource}
+              rootRef={noteStageRef}
+              initiallyMounted={Math.abs(index - activeSheetIndex) <= 1}
             />)}
             {noteSheetViewMode === "continuous" && <div className="note-sheet-active-label" data-note-sheet-frame={activeNote.id} style={{ "--paper-max-width": `${basePaperMaxWidth}px`, "--note-view-zoom": noteZoom } as React.CSSProperties}><span>Tờ {activeSheetIndex + 1}</span><b>Đang chỉnh sửa</b></div>}
             <article data-note-page-id={activeNote.id} className={`note-paper interactive ${activeTool === "text" || (activeNote.paper.template === "first-aid" && activeTool === "pointer") ? "typing" : ""} ${activeTool === "pointer" || activeTool === "text" || activeTool === "textbox" || activeTool === "callout" ? "object-mode" : ""} paper-${activeNote.paper.color} template-${activeNote.paper.template}`} style={{ ...paperStyle, pointerEvents: activeNoteHydrating ? "none" : undefined, opacity: activeNoteHydrating ? .72 : 1 }} onPointerDown={(event) => {
@@ -291,7 +294,7 @@ export function NoteStage({ scope }: { scope: NoteStageScope }) {
               {activeTool === "pointer" && activeNote.excerpts.length > 0 && <div className="mode-hint">Kéo đối tượng · kéo góc đổi cỡ · callout: kéo đầu mũi tên</div>}
             </article>
             <div className="paper-size">{selectedPaperSize.label} ({selectedPaperSize.dimensions}) · {activeNote.paper.orientation === "portrait" ? "Dọc" : "Ngang"} · {activeTool === "pointer" ? "Chọn đối tượng để di chuyển, đổi cỡ hoặc sắp xếp lớp" : activeTool === "text" ? "Nhập nội dung trang hoặc sửa trực tiếp đoạn chữ từ PDF" : activeTool === "textbox" ? "Bấm trên trang để tạo hộp chữ" : activeTool === "callout" ? "Bấm vị trí cần chú thích để tạo hộp callout có mũi tên" : activeTool === "lasso" ? "Khoanh quanh nét cần chọn" : activeTool === "eraser" ? "Lướt để tẩy đúng phần nét chạm vào" : "Dùng chuột hoặc bút cảm ứng để viết"}</div>
-            {noteSheetViewMode === "continuous" && continuousNotes.slice(activeSheetIndex + 1).map((note, offset) => <NoteSheetPreview
+            {noteSheetViewMode === "continuous" && continuousNotes.slice(activeSheetIndex + 1).map((note, offset) => <VirtualizedNoteSheetPreview
               key={note.id}
               note={note}
               sheetNumber={activeSheetIndex + offset + 2}
@@ -299,6 +302,8 @@ export function NoteStage({ scope }: { scope: NoteStageScope }) {
               loaded={Object.hasOwn(noteState.pageSheetContents, note.id) && !note.__mednoteLazyPage}
               onActivate={() => { void activateContinuousSheet(note.id); }}
               resolveSource={resolveExcerptSource}
+              rootRef={noteStageRef}
+              initiallyMounted={offset === 0}
             />)}
           </div></>);
 }

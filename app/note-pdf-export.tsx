@@ -1,9 +1,12 @@
 import { ChevronDown, FileDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { resolveDocumentSource } from "./note-document-source";
 import { appendPaperToPdf, createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
 import { ordered, type NoteStructure } from "./note-domain";
+import { notePageFromSheet, type NotePage } from "./note-runtime-adapter";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
+import { NoteSheetPreview } from "./ui/note-sheet-preview";
 
 type ExportScope = "notebook" | "section" | "page" | "sheet";
 type ExportPlan = {
@@ -11,7 +14,7 @@ type ExportPlan = {
   title: string;
   detail: string;
   fileName: string;
-  pageIndices: number[];
+  sheetIds: string[];
 };
 type ExportProgress = {
   page: number;
@@ -20,6 +23,7 @@ type ExportProgress = {
   phase: "prepare" | "capture" | "save";
 };
 type ReadyPdf = { url: string; fileName: string; bytes: number };
+type ExportSurfaceSheet = { note: NotePage; sheetNumber: number };
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -44,8 +48,8 @@ function safeFileName(value: string) {
     .slice(0, 120) || "MedNote";
 }
 
-function uniqueIndices(indices: number[]) {
-  return [...new Set(indices.filter((index) => Number.isInteger(index) && index >= 0))];
+function uniqueIds(ids: string[]) {
+  return [...new Set(ids.filter(Boolean))];
 }
 
 function notePageIds(structure = noteStore.getSnapshot().structure) {
@@ -67,7 +71,7 @@ function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
       title: "Notebook",
       detail: `${availablePageIds.length} Sheet`,
       fileName: "MedNote.pdf",
-      pageIndices: availablePageIds.map((_, index) => index),
+      sheetIds: availablePageIds,
     }] : [];
   }
 
@@ -76,10 +80,8 @@ function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
   const activeSection = structure.sections.find((record) => record.id === active.activeSectionId);
   const activePage = structure.pages.find((record) => record.id === active.activePageId);
   if (!notebook || !activeSection || !activePage) return [];
-  const indexById = new Map(availablePageIds.map((id, index) => [id, index]));
-  const indicesForIds = (ids: string[]) => uniqueIndices(
-    ids.map((id) => indexById.get(id)).filter((index): index is number => typeof index === "number"),
-  );
+  const availableIdSet = new Set(availablePageIds);
+  const availableIds = (ids: string[]) => uniqueIds(ids.filter((id) => availableIdSet.has(id)));
   const sheetIdsForSection = (sectionId: string) => {
     const pages = ordered(structure.pages.filter((page) => page.sectionId === sectionId));
     return pages.flatMap((page) => ordered(structure.sheets.filter((sheet) => sheet.pageId === page.id)).map((sheet) => sheet.id));
@@ -100,14 +102,14 @@ function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
       title: "Notebook",
       detail: `${notebookTitle} · ${orderedNotebookIds.length} Sheet`,
       fileName: `${safeFileName(notebookTitle)}.pdf`,
-      pageIndices: indicesForIds(orderedNotebookIds),
+      sheetIds: availableIds(orderedNotebookIds),
     },
     {
       scope: "section",
       title: "Section",
       detail: `${sectionTitle} · ${sheetIdsForSection(activeSection.id).length} Sheet`,
       fileName: `${safeFileName(`${notebookTitle} - ${sectionTitle}`)}.pdf`,
-      pageIndices: indicesForIds(sheetIdsForSection(activeSection.id)),
+      sheetIds: availableIds(sheetIdsForSection(activeSection.id)),
     },
   ];
 
@@ -117,77 +119,74 @@ function buildExportPlans(structure: NoteStructure | null): ExportPlan[] {
     title: "Page",
     detail: `${pageTitle} · ${ids.length} Sheet`,
     fileName: `${safeFileName(`${notebookTitle} - ${pageTitle}`)}.pdf`,
-    pageIndices: indicesForIds(ids),
+    sheetIds: availableIds(ids),
   });
 
-  if (activeSheetId && indexById.has(activeSheetId)) {
+  if (activeSheetId && availableIdSet.has(activeSheetId)) {
     plans.push({
       scope: "sheet",
       title: "Sheet",
       detail: `${pageTitle} · ${sheetLabel}`,
       fileName: `${safeFileName(`${notebookTitle} - ${pageTitle} - ${sheetLabel}`)}.pdf`,
-      pageIndices: indicesForIds([activeSheetId]),
+      sheetIds: [activeSheetId],
     });
   }
 
   return plans;
 }
 
-function activeNotePaper() {
-  return document.querySelector<HTMLElement>(".note-stage .note-paper.interactive[data-note-page-id]")
-    || document.querySelector<HTMLElement>(".note-stage .note-paper:not(.note-paper-preview)[data-note-page-id]")
-    || document.querySelector<HTMLElement>(".note-stage .note-paper[data-note-page-id]");
+function fallbackPaper(sheetId: string) {
+  return [...document.querySelectorAll<HTMLElement>(".note-stage .note-paper[data-note-page-id]")]
+    .find((paper) => paper.dataset.notePageId === sheetId) || null;
 }
 
-async function activateNotePage(index: number) {
-  const pageIds = notePageIds();
-  const pageId = pageIds[index];
-  if (!pageId) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
-
-  let paper = activeNotePaper();
-  if (paper?.dataset.notePageId !== pageId) {
-    await noteStore.openSheet(pageId);
-  }
-
-  for (let attempt = 0; attempt < 45; attempt += 1) {
-    paper = activeNotePaper();
-    if (paper?.dataset.notePageId === pageId) break;
-    await nextFrame();
-    if (attempt === 44) throw new Error(`Không thể chuyển tới Sheet ${index + 1}`);
-  }
-
-  await settleLayout();
-  paper = activeNotePaper();
-  if (!paper || paper.dataset.notePageId !== pageId) throw new Error(`Không tải được Sheet ${index + 1} để xuất`);
-  return paper;
+async function prepareExportSheets(plan: ExportPlan, structure: NoteStructure) {
+  const contents = await noteStore.loadSheetContents(plan.sheetIds);
+  const pagesById = new Map(structure.pages.map((page) => [page.id, page]));
+  const sheetsById = new Map(structure.sheets.map((sheet) => [sheet.id, sheet]));
+  return plan.sheetIds.map((sheetId, index): ExportSurfaceSheet => {
+    const sheet = sheetsById.get(sheetId);
+    if (!sheet) throw new Error(`Không tìm thấy Sheet ${index + 1}`);
+    const pageTitle = pagesById.get(sheet.pageId)?.title || "Page mới";
+    return {
+      note: notePageFromSheet(sheetId, pageTitle, contents[sheetId]),
+      sheetNumber: index + 1,
+    };
+  });
 }
 
-async function exportPlanToPdfBytes(plan: ExportPlan, onProgress: (progress: ExportProgress) => void) {
+async function exportPlanToPdfBytes(
+  plan: ExportPlan,
+  structure: NoteStructure | null,
+  renderSheet: (sheet: ExportSurfaceSheet) => Promise<HTMLElement>,
+  onProgress: (progress: ExportProgress) => void,
+) {
   const pageIds = notePageIds();
   if (!pageIds.length) throw new Error("Notebook chưa có Sheet nào");
-  if (!plan.pageIndices.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
+  if (!plan.sheetIds.length) throw new Error(`${plan.title} này chưa có Sheet để xuất`);
 
-  const currentPaper = activeNotePaper();
-  const originalIndex = Math.max(0, pageIds.indexOf(currentPaper?.dataset.notePageId || pageIds[0]));
+  const preparedSheets = structure ? await prepareExportSheets(plan, structure) : null;
   const pdf = await createPdfDocument();
   document.body.classList.add("note-pdf-export-active");
 
   try {
-    for (let position = 0; position < plan.pageIndices.length; position += 1) {
+    for (let position = 0; position < plan.sheetIds.length; position += 1) {
       const displayPage = position + 1;
-      onProgress({ page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" });
-      const paper = await activateNotePage(plan.pageIndices[position]);
-      onProgress({ page: displayPage, total: plan.pageIndices.length, scope: plan.scope, phase: "capture" });
+      onProgress({ page: displayPage, total: plan.sheetIds.length, scope: plan.scope, phase: "prepare" });
+      const paper = preparedSheets
+        ? await renderSheet(preparedSheets[position])
+        : fallbackPaper(plan.sheetIds[position]);
+      if (!paper) throw new Error(`Không tải được Sheet ${displayPage} để xuất`);
+      onProgress({ page: displayPage, total: plan.sheetIds.length, scope: plan.scope, phase: "capture" });
       await appendPaperToPdf(pdf, paper, displayPage);
       await nextFrame();
     }
   } finally {
     document.querySelectorAll<HTMLElement>(".note-pdf-exporting").forEach((paper) => paper.classList.remove("note-pdf-exporting"));
-    await activateNotePage(originalIndex).catch(() => undefined);
     document.body.classList.remove("note-pdf-export-active");
   }
 
-  onProgress({ page: plan.pageIndices.length, total: plan.pageIndices.length, scope: plan.scope, phase: "save" });
+  onProgress({ page: plan.sheetIds.length, total: plan.sheetIds.length, scope: plan.scope, phase: "save" });
   return saveVerifiedPdf(pdf);
 }
 
@@ -204,6 +203,8 @@ export default function NotePdfExporter() {
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [ready, setReady] = useState<ReadyPdf | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportSheet, setExportSheet] = useState<ExportSurfaceSheet | null>(null);
+  const exportSurfaceRef = useRef<HTMLDivElement>(null);
   const readyUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -252,9 +253,21 @@ export default function NotePdfExporter() {
     setMenuOpen(false);
     setError(null);
     clearReady();
-    setProgress({ page: 0, total: plan.pageIndices.length, scope: plan.scope, phase: "prepare" });
+    setProgress({ page: 0, total: plan.sheetIds.length, scope: plan.scope, phase: "prepare" });
 
-    void exportPlanToPdfBytes(plan, setProgress)
+    const renderSheet = async (sheet: ExportSurfaceSheet) => {
+      setExportSheet(sheet);
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        await nextFrame();
+        const paper = exportSurfaceRef.current?.querySelector<HTMLElement>(".note-paper[data-note-page-id]");
+        if (paper?.dataset.notePageId !== sheet.note.id) continue;
+        await settleLayout();
+        return paper;
+      }
+      throw new Error(`Không dựng được Sheet ${sheet.sheetNumber} trên vùng xuất riêng`);
+    };
+
+    void exportPlanToPdfBytes(plan, noteState.structure, renderSheet, setProgress)
       .then((bytes) => {
         const url = makePdfUrl(bytes);
         readyUrlRef.current = url;
@@ -263,7 +276,10 @@ export default function NotePdfExporter() {
       .catch((reason) => {
         setError(reason instanceof Error ? reason.message : "Không thể xuất PDF");
       })
-      .finally(() => setProgress(null));
+      .finally(() => {
+        setExportSheet(null);
+        setProgress(null);
+      });
   };
 
   const toolbar = createPortal(
@@ -306,7 +322,7 @@ export default function NotePdfExporter() {
                   key={plan.scope}
                   type="button"
                   onClick={() => startExport(plan)}
-                  disabled={!plan.pageIndices.length}
+                  disabled={!plan.sheetIds.length}
                   data-export-scope={plan.scope}
                 >
                   <strong>{plan.title}</strong>
@@ -356,5 +372,19 @@ export default function NotePdfExporter() {
     document.body,
   ) : null;
 
-  return <>{toolbar}{overlay}</>;
+  const exportSurface = exportSheet ? createPortal(
+    <div className="note-pdf-export-surface" ref={exportSurfaceRef} aria-hidden="true" data-export-sheet-id={exportSheet.note.id}>
+      <NoteSheetPreview
+        note={exportSheet.note}
+        sheetNumber={exportSheet.sheetNumber}
+        zoom={1}
+        loaded
+        onActivate={() => undefined}
+        resolveSource={(excerpt) => resolveDocumentSource(excerpt, noteState.documents)}
+      />
+    </div>,
+    document.body,
+  ) : null;
+
+  return <>{toolbar}{overlay}{exportSurface}</>;
 }

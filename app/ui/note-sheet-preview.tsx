@@ -45,6 +45,14 @@ function notePagePresentation(page: NotePage, zoom: number) {
   };
 }
 
+export function estimateNoteSheetFrameHeight(note: NotePage, zoom: number) {
+  const presentation = notePagePresentation(note, zoom);
+  // Paper + zoomed header + footer + inter-Sheet margin. The value is only
+  // used while a virtual Sheet is unmounted; ResizeObserver replaces it with
+  // the exact rendered height as soon as the Sheet enters the render window.
+  return Math.ceil((presentation.pageHeightCss + 38) * zoom + 42);
+}
+
 export type NoteSheetPreviewProps = {
   note: NotePage;
   sheetNumber: number;

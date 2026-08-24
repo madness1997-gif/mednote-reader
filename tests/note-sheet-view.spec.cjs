@@ -67,9 +67,12 @@ test('same-Page Sheets switch between single and continuous views without duplic
   await expect(page.locator('.note-stage-continuous')).toBeVisible({ timeout: 12_000 });
   await expect(page.locator('.note-stage-continuous .note-paper')).toHaveCount(3);
 
+  const activeBeforeExport = await page.locator('.note-paper.interactive').getAttribute('data-note-page-id');
   await page.getByRole('button', { name: 'Xuất note thành PDF' }).click();
   await page.locator('[data-export-scope="page"]').click();
   await expect(page.getByText('PDF đã tạo xong')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.note-paper.interactive')).toHaveAttribute('data-note-page-id', activeBeforeExport);
+  await expect(page.locator('.note-pdf-export-surface')).toHaveCount(0);
   const exported = await page.locator('[data-pdf-download="1"]').evaluate(async (link) => {
     const bytes = new Uint8Array(await (await fetch(link.href)).arrayBuffer());
     return { header: new TextDecoder().decode(bytes.slice(0, 5)), size: bytes.length };
