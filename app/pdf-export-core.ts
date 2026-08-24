@@ -20,6 +20,8 @@ const MOBILE_MAX_CAPTURE_PIXELS = 6_000_000;
 const DESKTOP_MAX_CAPTURE_PIXELS = 12_000_000;
 const CAPTURE_HOST_CLASS = "note-pdf-capture-host";
 const CAPTURE_HOST_Z_INDEX = 2_147_482_999;
+const RICH_TEXT_SELECTOR = ".fa-rich-editor,.excerpt-rich-editor,.rich-text-editor";
+const PDF_INLINE_BACKGROUND_LAYER = "data-pdf-inline-background-layer";
 
 function nextFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -53,6 +55,99 @@ async function settleLayout() {
   await nextFrame();
   await nextFrame();
   await delay(isMobile() ? 20 : 35);
+}
+
+async function settleCaptureAssets(source: HTMLElement) {
+  const fonts = document.fonts?.ready;
+  if (fonts) await Promise.race([fonts, delay(2500)]).catch(() => undefined);
+  const images = Array.from(source.querySelectorAll<HTMLImageElement>("img"));
+  await Promise.allSettled(images.map(async (image) => {
+    if (image.complete) {
+      await image.decode?.().catch(() => undefined);
+      return;
+    }
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      }),
+      delay(2500),
+    ]);
+  }));
+  await settleLayout();
+}
+
+function colorIsTransparent(value: string) {
+  const normalized = value.replace(/\s+/g, "").toLowerCase();
+  if (normalized === "transparent") return true;
+  const rgba = normalized.match(/^rgba\([^,]+,[^,]+,[^,]+,([\d.]+)\)$/);
+  if (rgba) return Number(rgba[1]) === 0;
+  const modernAlpha = normalized.match(/\/([\d.]+)(%)?\)$/);
+  return Boolean(modernAlpha && Number(modernAlpha[1]) === 0);
+}
+
+/**
+ * html2canvas paints an inline element's background from its union bounding
+ * box. When a highlighted span wraps, that rectangle can cover text siblings
+ * on the next line even though Chromium paints one background fragment per
+ * line. Materialize those browser line fragments as ordinary positioned boxes
+ * before html2canvas performs its own document clone.
+ */
+export function materializePdfInlineBackgrounds(source: HTMLElement) {
+  let fragmentCount = 0;
+  source.querySelectorAll<HTMLElement>(RICH_TEXT_SELECTOR).forEach((editor) => {
+    if (editor.hasAttribute(PDF_INLINE_BACKGROUND_LAYER)) return;
+    const editorRect = editor.getBoundingClientRect();
+    if (!editorRect.width || !editorRect.height) return;
+
+    const fragments: Array<{ left: number; top: number; width: number; height: number; color: string }> = [];
+    editor.querySelectorAll<HTMLElement>("*").forEach((element) => {
+      if (element.closest(`[${PDF_INLINE_BACKGROUND_LAYER}]`)) return;
+      const style = window.getComputedStyle(element);
+      if (style.display !== "inline" || colorIsTransparent(style.backgroundColor)) return;
+      Array.from(element.getClientRects()).forEach((rect) => {
+        if (rect.width <= 0 || rect.height <= 0) return;
+        fragments.push({
+          left: rect.left - editorRect.left,
+          top: rect.top - editorRect.top,
+          width: rect.width,
+          height: rect.height,
+          color: style.backgroundColor,
+        });
+      });
+      element.style.setProperty("background-color", "transparent", "important");
+      element.style.setProperty("background-image", "none", "important");
+    });
+    if (!fragments.length) return;
+
+    const layer = document.createElement("span");
+    layer.setAttribute(PDF_INLINE_BACKGROUND_LAYER, "1");
+    layer.setAttribute("aria-hidden", "true");
+    layer.style.position = "absolute";
+    layer.style.inset = "0";
+    layer.style.zIndex = "-1";
+    layer.style.display = "block";
+    layer.style.overflow = "visible";
+    layer.style.pointerEvents = "none";
+    editor.style.position = "relative";
+    editor.style.zIndex = "0";
+    editor.style.isolation = "isolate";
+    fragments.forEach((fragment) => {
+      const box = document.createElement("i");
+      box.style.position = "absolute";
+      box.style.left = `${fragment.left}px`;
+      box.style.top = `${fragment.top}px`;
+      box.style.width = `${fragment.width}px`;
+      box.style.height = `${fragment.height}px`;
+      box.style.backgroundColor = fragment.color;
+      box.style.pointerEvents = "none";
+      layer.append(box);
+    });
+    editor.prepend(layer);
+    editor.setAttribute(PDF_INLINE_BACKGROUND_LAYER, "ready");
+    fragmentCount += fragments.length;
+  });
+  return fragmentCount;
 }
 
 function paperNaturalSize(source: HTMLElement) {
@@ -177,7 +272,9 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
   const { width, height } = paperNaturalSize(source);
   const scale = captureScaleForSize(width, height);
   const capture = createCaptureClone(source, width, height);
-  await settleLayout();
+  await settleCaptureAssets(capture.clone);
+  const inlineBackgroundFragments = materializePdfInlineBackgrounds(capture.clone);
+  await nextFrame();
 
   try {
     // Chromium/Electron may expose computed First Aid theme colors as CSS
@@ -212,7 +309,7 @@ async function capturePaper(source: HTMLElement, sheetNumber: number) {
     if (hasMeaningfulSourceContent(source) && contentCoverage < 0.0002) {
       throw new Error(`Sheet ${sheetNumber} dựng ra trang trắng; đã dừng để không tạo PDF lỗi`);
     }
-    return { jpeg: await canvasToJpegBytes(canvas), width, height, scale, contentCoverage };
+    return { jpeg: await canvasToJpegBytes(canvas), width, height, scale, contentCoverage, inlineBackgroundFragments };
   } finally {
     capture.remove();
   }
@@ -253,7 +350,13 @@ export async function appendPaperToPdf(pdf: PDFDocument, source: HTMLElement, sh
   const size = pdfPageSize(rendered.width, rendered.height);
   const page = pdf.addPage([size.width, size.height]);
   page.drawImage(embedded, { x: 0, y: 0, width: size.width, height: size.height });
-  return { scale: rendered.scale, pixelWidth: Math.round(rendered.width * rendered.scale), pixelHeight: Math.round(rendered.height * rendered.scale), contentCoverage: rendered.contentCoverage };
+  return {
+    scale: rendered.scale,
+    pixelWidth: Math.round(rendered.width * rendered.scale),
+    pixelHeight: Math.round(rendered.height * rendered.scale),
+    contentCoverage: rendered.contentCoverage,
+    inlineBackgroundFragments: rendered.inlineBackgroundFragments,
+  };
 }
 
 export async function saveVerifiedPdf(pdf: PDFDocument) {
@@ -281,6 +384,9 @@ export async function runPdfCoreSelfTest() {
       <div style="height:26px;background:color(srgb 0.055 0.42 0.44);color:#fff;font-weight:700;padding:7px 10px;box-shadow:0 2px 4px color-mix(in srgb, #0e6b70 40%, transparent)">MEDNOTE PDF SELF TEST</div>
       <h2 style="margin:24px 0 10px;font-size:22px">Sheet test</h2>
       <p style="font-size:15px;line-height:1.5">Nếu nội dung này được rasterize và nhúng vào PDF, bộ xuất PDF hoạt động.</p>
+      <div class="fa-rich-editor" style="width:220px;margin-top:14px;font-size:15px;line-height:1.4">
+        4. HDL dạng đĩa đi <span style="background-color:#ffe88a;font-weight:700">gom cholesterol tự do từ mô ngoại biên hoặc từ LP khác trong máu</span>
+      </div>
       <div style="margin-top:24px;width:120px;height:120px;border-radius:60%;background:#c7d8eb"></div>
     </div>`;
   document.body.append(fixture);
@@ -298,6 +404,7 @@ export async function runPdfCoreSelfTest() {
       pixelWidth: rendered.pixelWidth,
       pixelHeight: rendered.pixelHeight,
       contentCoverage: rendered.contentCoverage,
+      inlineBackgroundFragments: rendered.inlineBackgroundFragments,
     };
   } finally {
     fixture.remove();
