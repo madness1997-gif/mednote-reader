@@ -119,6 +119,7 @@ test('React note sidebar controls are live in desktop-site mode', async ({ page 
 test('PDF sidebar defaults to the embedded outline instead of thumbnails', async ({ page }) => {
   await page.getByRole('button', { name: 'Cả hai' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
+  await expect(page.locator('.note-sidebar')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mục lục PDF' })).toHaveClass(/active/);
   await expect(page.getByRole('button', { name: 'Hình thu nhỏ các trang' })).not.toHaveClass(/active/);
 });

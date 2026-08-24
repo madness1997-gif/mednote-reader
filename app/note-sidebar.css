@@ -48,6 +48,7 @@
 .note-sidebar-status { justify-content: center; align-items: center; gap: 7px; padding: 16px; color: #63777e; text-align: center; }.note-sidebar-status.error { color: #a3251d; }.note-sidebar-status span { font-size: 10px; }
 @media (max-width: 1150px) {
   .workspace.workspace-mode-note .note-navigation-host { display: block; }
+  .workspace.workspace-mode-split .note-navigation-host { position: fixed; z-index: 35; top: 56px; right: 0; bottom: 0; width: min(88vw, 360px); display: block; border-left: 1px solid #d7dfe2; box-shadow: -12px 0 30px rgba(24,50,74,.2); }
 }
 
 @media (max-width: 820px) {
