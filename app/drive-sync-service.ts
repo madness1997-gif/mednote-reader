@@ -42,17 +42,20 @@ export type DriveRestoreResult = {
   snapshot: DriveSyncSnapshot;
   missingFiles: number;
   sourceVersion: "v2" | "v1";
+  remoteRevision: string;
 };
 
 export type DriveSyncResult = {
   snapshot: DriveSyncSnapshot;
   uploadedFiles: number;
+  remoteRevision: string;
 };
 
 export type DriveRemoteInspection = {
   hasBackup: boolean;
   sourceVersion: "v2" | "v1" | null;
   storage: "shared" | "legacy-appdata" | null;
+  remoteRevision: string | null;
 };
 
 export type DriveConnectionResult = {
@@ -90,6 +93,16 @@ type IndexedRemote = {
   filesByMednoteId: Map<string, DriveAppFile>;
 };
 
+type PendingSync = {
+  token: string;
+  snapshot: DriveSyncSnapshot;
+  expectedRemoteRevision: string | null | undefined;
+  waiters: {
+    resolve: (result: DriveSyncResult) => void;
+    reject: (error: unknown) => void;
+  }[];
+};
+
 const defaultRemote: DriveRemoteGateway = {
   requestToken: requestDriveToken,
   resumeToken: resumeDriveToken,
@@ -105,6 +118,18 @@ const defaultRemote: DriveRemoteGateway = {
 function modifiedAt(file: DriveAppFile) {
   const parsed = Date.parse(file.modifiedTime || "");
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function remoteRevision(file: DriveAppFile | null | undefined) {
+  if (!file) return null;
+  return `${file.id}:${file.version || file.modifiedTime || "unknown"}`;
+}
+
+export class DriveSyncConflictError extends Error {
+  constructor() {
+    super("Bản lưu Google Drive đã thay đổi trên thiết bị khác. Hãy khôi phục bản Drive hoặc xác nhận ghi đè thủ công.");
+    this.name = "DriveSyncConflictError";
+  }
 }
 
 function indexFiles(files: DriveAppFile[]) {
@@ -163,6 +188,9 @@ export class DriveSyncService {
   private readonly remote: DriveRemoteGateway;
   private readonly now: () => number;
   private activeMutation: "sync" | "restore" | null = null;
+  private readonly observedRemoteRevisions = new Map<string, string | null>();
+  private pendingSync: PendingSync | null = null;
+  private syncDrain: Promise<void> | null = null;
 
   constructor(dependencies: DriveSyncServiceDependencies = {}) {
     this.notes = dependencies.notes || noteStore;
@@ -187,14 +215,28 @@ export class DriveSyncService {
     ];
     const selected = candidates.find((candidate) => Boolean(candidate.file));
     return selected ? {
-      inspection: { hasBackup: true, sourceVersion: selected.version, storage: selected.storage },
+      inspection: { hasBackup: true, sourceVersion: selected.version, storage: selected.storage, remoteRevision: remoteRevision(selected.file) },
       manifest: selected.file || null,
       filesByMednoteId: selected.index,
     } : {
-      inspection: { hasBackup: false, sourceVersion: null, storage: null },
+      inspection: { hasBackup: false, sourceVersion: null, storage: null, remoteRevision: null },
       manifest: null,
       filesByMednoteId: sharedIndex,
     };
+  }
+
+  private rememberRemoteRevision(token: string, revision: string | null) {
+    this.observedRemoteRevisions.set(token, revision);
+  }
+
+  private assertRemoteRevision(token: string, current: string | null, expected?: string | null) {
+    const baseline = expected !== undefined
+      ? expected
+      : this.observedRemoteRevisions.has(token)
+        ? this.observedRemoteRevisions.get(token)
+        : current;
+    if (baseline !== current) throw new DriveSyncConflictError();
+    this.rememberRemoteRevision(token, current);
   }
 
   async connect(input: { clientId: string; clientSecret?: string }): Promise<DriveConnectionResult> {
@@ -202,6 +244,7 @@ export class DriveSyncService {
     if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) throw new Error("OAuth Client ID không hợp lệ");
     const token = await this.remote.requestToken(clientId, input.clientSecret?.trim() || "");
     const [user, indexed] = await Promise.all([this.remote.getUser(token), this.inspectIndexed(token)]);
+    this.rememberRemoteRevision(token, indexed.inspection.remoteRevision);
     return { token, user, remote: indexed.inspection };
   }
 
@@ -211,6 +254,7 @@ export class DriveSyncService {
     const token = await this.remote.resumeToken(clientId);
     if (!token) return null;
     const [user, indexed] = await Promise.all([this.remote.getUser(token), this.inspectIndexed(token)]);
+    this.rememberRemoteRevision(token, indexed.inspection.remoteRevision);
     return { token, user, remote: indexed.inspection };
   }
 
@@ -219,11 +263,13 @@ export class DriveSyncService {
   }
 
   async inspectRemote(token: string): Promise<DriveRemoteInspection> {
-    return (await this.inspectIndexed(token)).inspection;
+    const inspection = (await this.inspectIndexed(token)).inspection;
+    this.rememberRemoteRevision(token, inspection.remoteRevision);
+    return inspection;
   }
 
   isBusy() {
-    return this.activeMutation !== null;
+    return this.activeMutation !== null || this.syncDrain !== null || this.pendingSync !== null;
   }
 
   private async mutate<T>(kind: "sync" | "restore", operation: () => Promise<T>) {
@@ -262,7 +308,59 @@ export class DriveSyncService {
     }
   }
 
-  sync(token: string, snapshot: DriveSyncSnapshot): Promise<DriveSyncResult> {
+  sync(
+    token: string,
+    snapshot: DriveSyncSnapshot,
+    options: { expectedRemoteRevision?: string | null } = {},
+  ): Promise<DriveSyncResult> {
+    return new Promise((resolve, reject) => {
+      if (this.pendingSync) {
+        this.pendingSync.token = token;
+        this.pendingSync.snapshot = snapshot;
+        this.pendingSync.expectedRemoteRevision = options.expectedRemoteRevision;
+        this.pendingSync.waiters.push({ resolve, reject });
+      } else {
+        this.pendingSync = {
+          token,
+          snapshot,
+          expectedRemoteRevision: options.expectedRemoteRevision,
+          waiters: [{ resolve, reject }],
+        };
+      }
+      this.ensureSyncDrain();
+    });
+  }
+
+  private ensureSyncDrain() {
+    if (this.syncDrain) return;
+    this.syncDrain = this.drainSyncQueue().finally(() => {
+      this.syncDrain = null;
+      // A caller resolved by the previous drain can immediately enqueue a new
+      // snapshot before this finally callback runs. Do not strand that request.
+      if (this.pendingSync) this.ensureSyncDrain();
+    });
+  }
+
+  private async drainSyncQueue() {
+    while (this.pendingSync) {
+      const pending = this.pendingSync;
+      this.pendingSync = null;
+      try {
+        const result = await this.performSync(pending.token, pending.snapshot, pending.expectedRemoteRevision);
+        const nextPending = this.pendingSync as PendingSync | null;
+        if (nextPending
+          && nextPending.token === pending.token
+          && nextPending.expectedRemoteRevision === pending.expectedRemoteRevision) {
+          nextPending.expectedRemoteRevision = result.remoteRevision;
+        }
+        pending.waiters.forEach((waiter) => waiter.resolve(result));
+      } catch (error) {
+        pending.waiters.forEach((waiter) => waiter.reject(error));
+      }
+    }
+  }
+
+  private performSync(token: string, snapshot: DriveSyncSnapshot, expectedRemoteRevision?: string | null): Promise<DriveSyncResult> {
     return this.mutate("sync", async () => {
       const persistentWorkspaces = persistentDocumentWorkspaces(snapshot.workspaces);
       const documentWorkspaces = persistentWorkspaces.filter((workspace) => workspace.documents.length > 0);
@@ -285,6 +383,8 @@ export class DriveSyncService {
         noteZoom: snapshot.noteZoom,
       });
       const library = await this.notes.exportLibrary();
+      const indexedAtStart = await this.inspectIndexed(token);
+      this.assertRemoteRevision(token, indexedAtStart.inspection.remoteRevision, expectedRemoteRevision);
       const shared = await this.remote.listSharedFiles(token);
       const folder = shared.folder || await this.remote.ensureSharedFolder(token);
       const remoteByMednoteId = indexFiles(shared.files);
@@ -323,8 +423,14 @@ export class DriveSyncService {
       }
 
       const backup = createDriveBackup(library);
-      const existingManifest = remoteByMednoteId.get(DRIVE_MANIFEST_ID);
-      await this.remote.upsertFile(token, {
+      // Re-read the manifest after potentially slow binary uploads. This closes
+      // the normal multi-device race window before replacing the canonical JSON.
+      const indexedBeforeCommit = await this.inspectIndexed(token);
+      this.assertRemoteRevision(token, indexedBeforeCommit.inspection.remoteRevision, expectedRemoteRevision);
+      const existingManifest = indexedBeforeCommit.inspection.storage === "shared"
+        ? indexedBeforeCommit.manifest
+        : undefined;
+      const uploadedManifest = await this.remote.upsertFile(token, {
         name: "MedNote Library v2.json",
         mimeType: "application/json",
         mednoteId: DRIVE_MANIFEST_ID,
@@ -332,10 +438,14 @@ export class DriveSyncService {
         existingId: existingManifest?.id,
         parentId: folder.id,
       });
+      const uploadedRevision = remoteRevision(uploadedManifest);
+      if (!uploadedRevision) throw new Error("Google Drive không trả về revision của manifest");
+      this.rememberRemoteRevision(token, uploadedRevision);
       uploadedFiles += 1;
       return {
         snapshot: { ...snapshot, savedAt: library.savedAt },
         uploadedFiles,
+        remoteRevision: uploadedRevision,
       };
     });
   }
@@ -344,6 +454,9 @@ export class DriveSyncService {
     return this.mutate("restore", async () => {
       const indexed = await this.inspectIndexed(token);
       if (!indexed.manifest || !indexed.inspection.sourceVersion) throw new Error("Google Drive chưa có bản lưu MedNote");
+      const restoredRemoteRevision = indexed.inspection.remoteRevision;
+      if (!restoredRemoteRevision) throw new Error("Google Drive không trả về revision của manifest");
+      this.rememberRemoteRevision(token, restoredRemoteRevision);
       const manifestPayload = await parseJsonBlob(
         await this.remote.downloadFile(token, indexed.manifest.id),
         "Bản lưu Drive không hợp lệ",
@@ -385,6 +498,7 @@ export class DriveSyncService {
           },
           missingFiles,
           sourceVersion: "v2",
+          remoteRevision: restoredRemoteRevision,
         };
       }
 
@@ -432,6 +546,7 @@ export class DriveSyncService {
         },
         missingFiles,
         sourceVersion: "v1",
+        remoteRevision: restoredRemoteRevision,
       };
     });
   }

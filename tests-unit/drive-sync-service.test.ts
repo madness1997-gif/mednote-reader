@@ -66,12 +66,14 @@ class MemoryDrive implements DriveRemoteGateway {
     const existing = options.existingId
       ? [...target.entries()].find(([, record]) => record.file.id === options.existingId)
       : undefined;
-    const id = existing?.[1].file.id || `remote-${++this.sequence}`;
+    const revision = ++this.sequence;
+    const id = existing?.[1].file.id || `remote-${revision}`;
     const file: DriveAppFile = {
       id,
       name: options.name,
       mimeType: options.mimeType,
-      modifiedTime: new Date(10 + this.sequence).toISOString(),
+      modifiedTime: new Date(10 + revision).toISOString(),
+      version: String(revision),
       size: String(options.blob.size),
       ...(options.parentId
         ? { properties: { mednoteId: options.mednoteId } }
@@ -232,7 +234,7 @@ test("legacy appData inspection failure does not block canonical Drive login", a
     const connection = await context.service.connect({ clientId: "desktop.apps.googleusercontent.com" });
     assert.equal(connection.token, "token:desktop.apps.googleusercontent.com");
     assert.equal(connection.user.emailAddress, "doctor@example.com");
-    assert.deepEqual(connection.remote, { hasBackup: false, sourceVersion: null, storage: null });
+    assert.deepEqual(connection.remote, { hasBackup: false, sourceVersion: null, storage: null, remoteRevision: null });
   } finally { await context.close(); }
 });
 
@@ -281,7 +283,13 @@ test("v2 wins over v1 across storage locations", async () => {
   remote.add("shared", DRIVE_LEGACY_MANIFEST_ID, new Blob([JSON.stringify(legacySnapshot())], { type: "application/json" }));
   const context = await harness(library({ body: "local" }), remote);
   try {
-    assert.deepEqual(await context.service.inspectRemote("token"), { hasBackup: true, sourceVersion: "v2", storage: "legacy-appdata" });
+    const inspection = await context.service.inspectRemote("token");
+    assert.deepEqual({ ...inspection, remoteRevision: Boolean(inspection.remoteRevision) }, {
+      hasBackup: true,
+      sourceVersion: "v2",
+      storage: "legacy-appdata",
+      remoteRevision: true,
+    });
     const restored = await context.service.restore("token");
     assert.equal(restored.sourceVersion, "v2");
     assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "canonical v2");
@@ -380,6 +388,63 @@ test("sync skips existing binaries and failed upload never rolls back local data
     assert.equal((await context.repository.loadSheetContent("sheet"))?.body, "local remains");
     assert.equal(await context.pdfs.get("doc-harrison")?.blob.text(), "local-pdf");
   } finally { await context.close(); }
+});
+
+test("concurrent auto-sync requests coalesce to one trailing upload with the latest snapshot", async () => {
+  const remote = new MemoryDrive();
+  const context = await harness(library({ body: "queued autosync", withAsset: false }), remote);
+  let manifestWrites = 0;
+  let releaseFirstManifest!: () => void;
+  let markFirstManifestStarted!: () => void;
+  const firstManifestStarted = new Promise<void>((resolve) => { markFirstManifestStarted = resolve; });
+  const firstManifestGate = new Promise<void>((resolve) => { releaseFirstManifest = resolve; });
+  const upsert = remote.upsertFile;
+  remote.upsertFile = async (token, options) => {
+    if (options.mednoteId === DRIVE_MANIFEST_ID) {
+      manifestWrites += 1;
+      if (manifestWrites === 1) {
+        markFirstManifestStarted();
+        await firstManifestGate;
+      }
+    }
+    return upsert(token, options);
+  };
+  try {
+    const first = context.service.sync("token", { ...context.snapshot, readerShare: 40 });
+    await firstManifestStarted;
+    const second = context.service.sync("token", { ...context.snapshot, readerShare: 46 });
+    const latest = context.service.sync("token", { ...context.snapshot, readerShare: 52 });
+    assert.equal(context.service.isBusy(), true);
+    releaseFirstManifest();
+    await Promise.all([first, second, latest]);
+    assert.equal(manifestWrites, 2);
+    const manifest = remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    assert.equal(parseDriveBackup(JSON.parse(await manifest.blob.text())).preferences.readerShare, 52);
+  } finally { await context.close(); }
+});
+
+test("a second connected device cannot silently overwrite a newer remote manifest", async () => {
+  const remote = new MemoryDrive();
+  remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(library({ body: "common base", withAsset: false })))], { type: "application/json" }));
+  const firstDevice = await harness(library({ body: "device one", withAsset: false }), remote);
+  const secondDevice = await harness(library({ body: "device two", withAsset: false }), remote);
+  try {
+    const firstConnection = await firstDevice.service.connect({ clientId: "first.apps.googleusercontent.com" });
+    const secondConnection = await secondDevice.service.connect({ clientId: "second.apps.googleusercontent.com" });
+    assert.equal(firstConnection.remote.remoteRevision, secondConnection.remote.remoteRevision);
+    await firstDevice.service.sync(firstConnection.token, firstDevice.snapshot);
+    await assert.rejects(
+      secondDevice.service.sync(secondConnection.token, secondDevice.snapshot),
+      /đã thay đổi trên thiết bị khác/,
+    );
+    const manifest = remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    assert.equal(parseDriveBackup(JSON.parse(await manifest.blob.text())).sheetContents.sheet.body, "device one");
+  } finally {
+    await firstDevice.close();
+    await secondDevice.close();
+  }
 });
 
 test("disconnect revokes OAuth without deleting local data", async () => {

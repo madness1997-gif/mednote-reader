@@ -56,6 +56,7 @@ export type DriveAppFile = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
+  version?: string;
   size?: string;
   properties?: Record<string, string>;
   appProperties?: Record<string, string>;
@@ -159,7 +160,7 @@ async function listDriveFiles(token: string, input: { spaces?: string; q: string
     const params = new URLSearchParams({
       q: input.q,
       pageSize: "1000",
-      fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size,properties,appProperties)",
+      fields: "nextPageToken,files(id,name,mimeType,modifiedTime,version,size,properties,appProperties)",
     });
     if (input.spaces) params.set("spaces", input.spaces);
     if (pageToken) params.set("pageToken", pageToken);
@@ -204,7 +205,7 @@ export async function listDriveSharedFiles(token: string): Promise<DriveSharedFi
 export async function ensureDriveSharedFolder(token: string) {
   const existing = newestFile(await listSharedRootFolders(token));
   if (existing) return existing;
-  const response = await driveFetch(token, `${DRIVE_API}/files?fields=id,name,mimeType,modifiedTime,size,properties,appProperties`, {
+  const response = await driveFetch(token, `${DRIVE_API}/files?fields=id,name,mimeType,modifiedTime,version,size,properties,appProperties`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -242,8 +243,8 @@ export async function upsertDriveFile(
     `\r\n--${boundary}--`,
   ]);
   const url = options.existingId
-    ? `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(options.existingId)}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,properties,appProperties`
-    : `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,properties,appProperties`;
+    ? `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(options.existingId)}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,version,size,properties,appProperties`
+    : `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,version,size,properties,appProperties`;
   const response = await driveFetch(token, url, {
     method: options.existingId ? "PATCH" : "POST",
     headers: { "Content-Type": `multipart/related; boundary=${boundary}` },

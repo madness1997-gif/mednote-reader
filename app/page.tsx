@@ -46,7 +46,7 @@ import {
   undoPdfAnnotations as undoPdfAnnotationCommand,
   type PdfAnnotationHistory,
 } from "./pdf-annotation-session";
-import { driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
+import { DriveSyncConflictError, driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
 import { cancelDriveAuthorization } from "./google-drive";
 import { resolveDocumentSource } from "./note-document-source";
 import {
@@ -124,12 +124,21 @@ type DictionaryLookupState = {
 
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
+const DRIVE_REMOTE_REVISION_KEY_PREFIX = "mednote-drive-remote-revision-v1:";
 const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
 const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
 const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
+
+function storedDriveRevision(emailAddress: string) {
+  try { return localStorage.getItem(`${DRIVE_REMOTE_REVISION_KEY_PREFIX}${emailAddress.trim().toLowerCase()}`); } catch { return null; }
+}
+
+function persistDriveRevision(emailAddress: string, revision: string) {
+  try { localStorage.setItem(`${DRIVE_REMOTE_REVISION_KEY_PREFIX}${emailAddress.trim().toLowerCase()}`, revision); } catch { /* revision persistence is best effort */ }
+}
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
   a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
@@ -542,6 +551,9 @@ export default function Home() {
   const [driveLastSyncedAt, setDriveLastSyncedAt] = useState<number | null>(null);
   const [driveError, setDriveError] = useState<string | null>(null);
   const desktopDriveResumeClientRef = useRef<string | null>(null);
+  const driveRemoteRevisionRef = useRef<string | null>(null);
+  const driveObservedRevisionRef = useRef<string | null>(null);
+  const driveUserRef = useRef<DriveAccount | null>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
@@ -1644,6 +1656,13 @@ export default function Home() {
     savedAt: localSavedAtRef.current,
   });
 
+  const recordDriveRevision = (revision: string) => {
+    driveRemoteRevisionRef.current = revision;
+    driveObservedRevisionRef.current = revision;
+    const account = driveUserRef.current;
+    if (account) persistDriveRevision(account.emailAddress, revision);
+  };
+
   const applyDriveRestore = (result: DriveRestoreResult) => {
     const { snapshot } = result;
     workspacesRef.current = snapshot.workspaces;
@@ -1658,13 +1677,26 @@ export default function Home() {
   };
 
   const syncToDrive = async (token = driveToken, silent = false) => {
-    if (!token || driveSyncService.isBusy()) return false;
+    if (!token) return false;
     setDriveStatus("syncing");
     setDriveError(null);
     if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
     try {
-      const result = await driveSyncService.sync(token, currentDriveSnapshot());
+      let expectedRemoteRevision = driveRemoteRevisionRef.current;
+      if (!silent) {
+        const inspection = await driveSyncService.inspectRemote(token);
+        driveObservedRevisionRef.current = inspection.remoteRevision;
+        if (inspection.remoteRevision !== driveRemoteRevisionRef.current
+          && !window.confirm("Bản lưu Drive đã thay đổi kể từ lần đồng bộ gần nhất. Lưu bản trên thiết bị này sẽ ghi đè thay đổi đó. Tiếp tục?")) {
+          setDriveStatus("connected");
+          setToast("Đã giữ nguyên bản lưu hiện có trên Google Drive");
+          return false;
+        }
+        expectedRemoteRevision = inspection.remoteRevision;
+      }
+      const result = await driveSyncService.sync(token, currentDriveSnapshot(), { expectedRemoteRevision });
       localSavedAtRef.current = result.snapshot.savedAt;
+      recordDriveRevision(result.remoteRevision);
       setDriveReady(true);
       setDriveLastSyncedAt(result.snapshot.savedAt);
       setDriveStatus("connected");
@@ -1672,6 +1704,7 @@ export default function Home() {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Không thể đồng bộ Google Drive";
+      if (error instanceof DriveSyncConflictError) setDriveReady(false);
       setDriveError(message);
       setDriveStatus("error");
       setToast(`Lỗi Drive: ${message}`);
@@ -1688,6 +1721,7 @@ export default function Home() {
     try {
       const result = await driveSyncService.restore(token);
       applyDriveRestore(result);
+      recordDriveRevision(result.remoteRevision);
       setDriveReady(true);
       setDriveLastSyncedAt(result.snapshot.savedAt);
       setDriveStatus("connected");
@@ -1716,11 +1750,19 @@ export default function Home() {
         setDriveStatus("disconnected");
         return false;
       }
+      const storedRevision = storedDriveRevision(connection.user.emailAddress);
+      driveUserRef.current = connection.user;
+      driveRemoteRevisionRef.current = storedRevision;
+      driveObservedRevisionRef.current = connection.remote.remoteRevision;
       setDriveToken(connection.token);
       setDriveUser(connection.user);
-      setDriveReady(true);
+      const revisionMatches = storedRevision === connection.remote.remoteRevision
+        && (storedRevision !== null || !connection.remote.hasBackup);
+      setDriveReady(revisionMatches);
       setDriveStatus("connected");
-      if (announce) setToast("Đã khôi phục kết nối Google Drive");
+      if (!revisionMatches) {
+        setToast("Drive đã thay đổi hoặc chưa có mốc đồng bộ — chọn tải lên hoặc khôi phục trước khi bật tự động đồng bộ");
+      } else if (announce) setToast("Đã khôi phục kết nối Google Drive");
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Không thể duy trì kết nối Google Drive";
@@ -1752,6 +1794,9 @@ export default function Home() {
         clientSecret: IS_DESKTOP_APP ? desktopGoogleClientSecret.trim() : "",
       });
       if (IS_DESKTOP_APP) setDesktopGoogleClientSecret("");
+      driveUserRef.current = connection.user;
+      driveRemoteRevisionRef.current = storedDriveRevision(connection.user.emailAddress);
+      driveObservedRevisionRef.current = connection.remote.remoteRevision;
       setDriveToken(connection.token);
       setDriveUser(connection.user);
       setDriveStatus("connected");
@@ -1786,6 +1831,9 @@ export default function Home() {
 
   const disconnectDrive = () => {
     const token = driveToken;
+    driveUserRef.current = null;
+    driveRemoteRevisionRef.current = null;
+    driveObservedRevisionRef.current = null;
     setDriveToken(null);
     setDriveUser(null);
     setDriveReady(false);
@@ -1798,6 +1846,9 @@ export default function Home() {
 
   const changeDriveClient = () => {
     const token = driveToken;
+    driveUserRef.current = null;
+    driveRemoteRevisionRef.current = null;
+    driveObservedRevisionRef.current = null;
     desktopDriveResumeClientRef.current = desktopGoogleClientId.trim();
     setDriveToken(null);
     setDriveUser(null);
