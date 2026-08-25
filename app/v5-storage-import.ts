@@ -1,4 +1,16 @@
-import type { V5MigrationSource } from "./note-migration";
+import type { SheetContentMap } from "./note-domain";
+import {
+  cloneMigrationValue,
+  defaultMigrationActive,
+  finishMigratedLibrary,
+  migrationReport,
+  normalizedMigrationOrder,
+  normalizeMigrationSiblingOrders,
+  stripMigrationNavigation,
+  type AnyRecord,
+  type MigrationResult,
+} from "./note-migration-core";
+import type { LegacyRelationV2 } from "./relation-v2-migration";
 
 const V5_KEYS = {
   meta: "library:v5:meta",
@@ -11,7 +23,54 @@ const V5_KEYS = {
   context: "library:v5:document-context:",
 } as const;
 
-type AnyRecord = Record<string, any>;
+export type V5MigrationSource = {
+  meta: AnyRecord;
+  workspace: AnyRecord;
+  notebooks: AnyRecord[];
+  sections: AnyRecord[];
+  pages: AnyRecord[];
+  sheets: AnyRecord[];
+  links: AnyRecord[];
+  contexts: AnyRecord[];
+};
+
+export function migrateV5ToV6(source: V5MigrationSource, relation?: LegacyRelationV2): MigrationResult {
+  const warnings: string[] = [];
+  const notesBase = {
+    workspace: { id: String(source.workspace?.id || "workspace"), title: String(source.workspace?.title || "MedNote") },
+    notebooks: cloneMigrationValue(source.notebooks).map((record, index) => ({ id: String(record.id), title: String(record.title || "Sổ ghi chú"), order: normalizedMigrationOrder(record.order, index) })),
+    sections: cloneMigrationValue(source.sections).map((record, index) => ({ id: String(record.id), notebookId: String(record.notebookId), title: String(record.title || "Phần 1"), order: normalizedMigrationOrder(record.order, index) })),
+    pages: cloneMigrationValue(source.pages).map((record, index) => ({ id: String(record.id), sectionId: String(record.sectionId), title: String(record.title || "Page mới"), order: normalizedMigrationOrder(record.order, index) })),
+    sheets: cloneMigrationValue(source.sheets).map((record, index) => ({ id: String(record.id), pageId: String(record.pageId), order: normalizedMigrationOrder(record.order, index) })),
+  };
+  const sheetContents = Object.fromEntries(source.sheets.map((record) => [String(record.id), stripMigrationNavigation(record.content || {})])) as SheetContentMap;
+  normalizeMigrationSiblingOrders(notesBase.notebooks, () => "workspace");
+  normalizeMigrationSiblingOrders(notesBase.sections, (record) => record.notebookId);
+  normalizeMigrationSiblingOrders(notesBase.pages, (record) => record.sectionId);
+  normalizeMigrationSiblingOrders(notesBase.sheets, (record) => record.pageId);
+  const active = defaultMigrationActive(notesBase, {
+    activeNotebookId: String(source.meta.activeNotebookId || ""),
+    activeSectionId: String(source.meta.activeSectionId || ""),
+    activePageId: String(source.meta.activePageId || ""),
+    activeSheetId: String(source.meta.activeSheetId || ""),
+  });
+  const library = finishMigratedLibrary(
+    { ...notesBase, active },
+    sheetContents,
+    source.contexts,
+    relation,
+    source.links,
+    {
+      activeDocumentContextId: String(source.meta.activeDocumentContextId || source.contexts[0]?.id || ""),
+      readerShare: Number(source.meta.readerShare) || 50,
+      workspaceMode: source.meta.workspaceMode,
+      noteZoom: Number(source.meta.noteZoom) || 1,
+    },
+    Number(source.meta.savedAt) || Date.now(),
+    warnings,
+  );
+  return { library, report: migrationReport(5, library, warnings) };
+}
 
 const requestValue = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
   request.onsuccess = () => resolve(request.result);
@@ -34,7 +93,7 @@ function openDb(dbName: string, storeName: string) {
  * cutover. It owns no cache or write path and is loaded dynamically only when
  * the canonical v6 repository is absent.
  */
-export async function readStoredV5Library(dbName: string, storeName: string): Promise<V5MigrationSource | null> {
+async function readStoredV5Library(dbName: string, storeName: string): Promise<V5MigrationSource | null> {
   const db = await openDb(dbName, storeName);
   try {
     const transaction = db.transaction(storeName, "readonly");
@@ -67,4 +126,9 @@ export async function readStoredV5Library(dbName: string, storeName: string): Pr
   } finally {
     db.close();
   }
+}
+
+export async function importStoredV5Library(dbName: string, storeName: string, relation?: LegacyRelationV2): Promise<MigrationResult | null> {
+  const source = await readStoredV5Library(dbName, storeName);
+  return source ? migrateV5ToV6(source, relation) : null;
 }

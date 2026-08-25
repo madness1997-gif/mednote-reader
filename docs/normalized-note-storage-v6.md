@@ -38,7 +38,7 @@ Status: production cutover complete. `NoteStore`, command navigation, the editor
 
 - v3/v4/v5 content hashes are calculated before persistence and verified again after v6 reload.
 - v3/v4 and v5 migrate directly to v6; migration never creates or updates an intermediate v5 store.
-- The v5 reader is dynamically loaded only when no v6 repository exists. After the v6 transaction reloads and verifies all Sheet hashes, every `library:v5:*` record is deleted.
+- The v5 reader and converter are dynamically loaded only when no v6 repository exists. After the v6 transaction reloads and verifies all Sheet hashes, every `library:v5:*` record is deleted and `migrationState.v5Purged` is recorded in v6 metadata so later bootstraps do not scan the v5 namespace again.
 - Once v6 verifies, bootstrap never reads or resolves preferences from v5 and never falls back to it. A failed cutover preserves the original v5 records for a later retry.
 - A relation, group, preset or locator that cannot round-trip blocks the v6 marker write.
 - Startup loads structure metadata plus only the active `SheetContent`. Navigation flushes the outgoing draft, commits the four active IDs, then hydrates the destination Sheet without a page reload.

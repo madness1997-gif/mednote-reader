@@ -46,5 +46,9 @@ test("legacy v5 is a lazy one-shot reader with no production write or cache modu
   assert.doesNotMatch(bootstrap, /incremental-library-store|library:v5|loadIncrementalLibrary/);
   assert.match(migration, /await import\("\.\/v5-storage-import"\)/);
   assert.doesNotMatch(migration, /from "\.\/v5-storage-import"/);
+  assert.doesNotMatch(migration, /migrateV5ToV6|V5MigrationSource/);
+  assert.match(v5Reader, /export function migrateV5ToV6/);
+  assert.match(migration, /migrationState\?\.v5Purged/);
+  assert.doesNotMatch(migration, /export async function discardStoredV5Library/);
   assert.doesNotMatch(v5Reader, /\.put\(|\.delete\(|saveQueue|canonicalCache|persistedSignatures/);
 });

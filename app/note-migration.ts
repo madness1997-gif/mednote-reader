@@ -1,13 +1,27 @@
-import { assertDocumentGraph, type DocumentGraph, type DocumentRecord } from "./document-domain";
-import { assertNoteStructure, assertSheetContents, ordered, type ActiveNoteState, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
-import { IndexedDbNoteRepository } from "./indexeddb-note-repository";
+import { assertDocumentGraph } from "./document-domain";
+import { assertNoteStructure, assertSheetContents, type NoteStructure, type Page, type Section, type Sheet, type SheetContentMap } from "./note-domain";
+import { IndexedDbNoteRepository, V6_KEYS } from "./indexeddb-note-repository";
+import {
+  LEGACY_META_WORKSPACE,
+  contentHash,
+  dedupeNotebookTitles,
+  defaultMigrationActive as defaultActive,
+  finishMigratedLibrary as finishLibrary,
+  migrationReport,
+  normalizedMigrationOrder as normalizedOrder,
+  stableMigrationStringify as stableStringify,
+  stripMigrationNavigation as stripNavigation,
+  type AnyRecord,
+  type MigrationReport,
+  type MigrationResult,
+} from "./note-migration-core";
 import { NOTE_SCHEMA_VERSION, type LibraryV6 } from "./note-repository";
-import { migrateRelationV2, type LegacyRelationV2 } from "./relation-v2-migration";
-import { stableHash, stableId } from "./stable-id";
+import type { LegacyRelationV2 } from "./relation-v2-migration";
+import { stableId } from "./stable-id";
 
 export type { LegacyRelationV2 } from "./relation-v2-migration";
-
-type AnyRecord = Record<string, any>;
+export { contentHash } from "./note-migration-core";
+export type { MigrationReport, MigrationResult } from "./note-migration-core";
 
 export type LegacySnapshot = {
   workspaces: AnyRecord[];
@@ -18,233 +32,7 @@ export type LegacySnapshot = {
   savedAt?: number;
 };
 
-export type V5MigrationSource = {
-  meta: AnyRecord;
-  workspace: AnyRecord;
-  notebooks: AnyRecord[];
-  sections: AnyRecord[];
-  pages: AnyRecord[];
-  sheets: AnyRecord[];
-  links: AnyRecord[];
-  contexts: AnyRecord[];
-};
-
-export type MigrationReport = {
-  sourceVersion: 3 | 4 | 5 | 6;
-  notebookCount: number;
-  sectionCount: number;
-  pageCount: number;
-  sheetCount: number;
-  documentCount: number;
-  linkCount: number;
-  sheetContentHashes: Record<string, string>;
-  warnings: string[];
-};
-
-export type MigrationResult = { library: LibraryV6; report: MigrationReport };
-
-const LEGACY_META_WORKSPACE = "__mednote_relations_v2__";
-const LAZY_FLAG = "__mednoteLazyPage";
 const V5_STORAGE_PREFIX = "library:v5:";
-const NAVIGATION_FIELDS = new Set([
-  "id", "title", "titleHtml", "pageId", "sectionId", "notebookId", "order",
-  "logicalPageId", "logicalPageTitle", "sheetTitle", "sheetOrder", LAZY_FLAG,
-]);
-
-const clone = <T>(value: T): T => {
-  if (typeof structuredClone === "function") return structuredClone(value);
-  return JSON.parse(JSON.stringify(value)) as T;
-};
-
-const normalizeNotebookTitle = (title: string) => title.normalize("NFKC").trim().replace(/\s+/g, " ");
-const notebookTitleKey = (title: string) => normalizeNotebookTitle(title).toLocaleLowerCase("vi-VN");
-
-function dedupeNotebookTitles(notebooks: NoteStructure["notebooks"]) {
-  const used = new Set<string>();
-  return ordered(notebooks).map((notebook) => {
-    const base = normalizeNotebookTitle(notebook.title) || "Sổ ghi chú";
-    let title = base;
-    let suffix = 2;
-    while (used.has(notebookTitleKey(title))) title = `${base} (${suffix++})`;
-    used.add(notebookTitleKey(title));
-    return { ...notebook, title };
-  });
-}
-
-const normalizedOrder = (value: unknown, fallback: number) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export function contentHash(value: SheetContent) {
-  return stableHash(stableStringify(value));
-}
-
-function stripNavigation(record: AnyRecord): SheetContent {
-  return Object.fromEntries(Object.entries(record).filter(([key]) => !NAVIGATION_FIELDS.has(key)));
-}
-
-function documentFromLegacy(record: AnyRecord): DocumentRecord {
-  const { id, name, size, lastModified, available, ...payload } = record;
-  return {
-    id: String(id),
-    name: String(name || "Tài liệu PDF"),
-    size: Number(size) || 0,
-    lastModified: Number(lastModified) || 0,
-    available: available !== false,
-    payload: clone(payload),
-  };
-}
-
-function collectDocuments(contexts: AnyRecord[], relation?: LegacyRelationV2) {
-  const documents = new Map<string, DocumentRecord>();
-  contexts.forEach((context) => (context.documents || []).forEach((record: AnyRecord) => {
-    if (record?.id) documents.set(String(record.id), documentFromLegacy(record));
-  }));
-  (relation?.documents || []).forEach((record) => {
-    if (!record?.id) return;
-    const id = String(record.id);
-    const current = documents.get(id);
-    const next = documentFromLegacy(record);
-    documents.set(id, current ? { ...next, ...current, available: record.available !== false } : next);
-  });
-  return [...documents.values()];
-}
-
-function buildDocumentContexts(contexts: AnyRecord[], documents: DocumentRecord[]) {
-  const documentIds = new Set(documents.map((record) => record.id));
-  return contexts.filter((context) => String(context.id) !== LEGACY_META_WORKSPACE).map((context) => {
-    const ids = [...new Set<string>((context.documents || []).map((record: AnyRecord) => String(record.id)).filter((id: string) => documentIds.has(id)))];
-    return {
-      id: String(context.id),
-      kind: String(context.kind || "empty"),
-      name: String(context.name || "Workspace"),
-      documentIds: ids,
-      activeDocumentId: ids.includes(String(context.activeDocumentId || "")) ? String(context.activeDocumentId) : ids[0] || null,
-      sourcePage: Number(context.sourcePage) || 1,
-    };
-  });
-}
-
-function normalizeSiblingOrders<T extends { order: number }>(records: T[], parent: (record: T) => string) {
-  const groups = new Map<string, T[]>();
-  records.forEach((record) => {
-    const id = parent(record);
-    const group = groups.get(id) || [];
-    group.push(record);
-    groups.set(id, group);
-  });
-  groups.forEach((group) => group.sort((left, right) => left.order - right.order).forEach((record, index) => { record.order = index; }));
-  return records;
-}
-
-function defaultActive(notes: Omit<NoteStructure, "active">, requested: Partial<ActiveNoteState> = {}): ActiveNoteState {
-  const requestedPage = notes.pages.find((record) => record.id === requested.activePageId);
-  const requestedSection = notes.sections.find((record) => record.id === requested.activeSectionId);
-  const requestedNotebookId = notes.notebooks.some((record) => record.id === requested.activeNotebookId) ? requested.activeNotebookId : "";
-  const pageFromSection = requestedSection && ordered(notes.pages.filter((record) => record.sectionId === requestedSection.id))[0];
-  const sectionFromNotebook = requestedNotebookId && ordered(notes.sections.filter((record) => record.notebookId === requestedNotebookId))[0];
-  const pageFromNotebook = sectionFromNotebook && ordered(notes.pages.filter((record) => record.sectionId === sectionFromNotebook.id))[0];
-  const fallbackPage = requestedPage || pageFromSection || pageFromNotebook;
-  const requestedSheet = notes.sheets.find((record) => record.id === requested.activeSheetId);
-  const sheet = requestedSheet || (fallbackPage && ordered(notes.sheets.filter((record) => record.pageId === fallbackPage.id))[0]) || notes.sheets[0];
-  const page = sheet && notes.pages.find((record) => record.id === sheet.pageId);
-  const section = page && notes.sections.find((record) => record.id === page.sectionId);
-  if (!sheet || !page || !section) return { activeNotebookId: "", activeSectionId: "", activePageId: "", activeSheetId: "" };
-  return { activeNotebookId: section.notebookId, activeSectionId: section.id, activePageId: page.id, activeSheetId: sheet.id };
-}
-
-function finishLibrary(
-  notes: Omit<NoteStructure, "active"> & { active?: ActiveNoteState },
-  sheetContents: SheetContentMap,
-  contexts: AnyRecord[],
-  relation: LegacyRelationV2 | undefined,
-  existingLinks: AnyRecord[],
-  preferences: LibraryV6["preferences"],
-  savedAt: number,
-  warnings: string[],
-) {
-  const noteStructure: NoteStructure = { ...notes, notebooks: dedupeNotebookTitles(notes.notebooks), active: notes.active || defaultActive(notes) };
-  const documents = collectDocuments(contexts, relation);
-  const documentContexts = buildDocumentContexts(contexts, documents);
-  const normalizedRelations = migrateRelationV2(noteStructure, documents, existingLinks, relation);
-  warnings.push(...normalizedRelations.warnings);
-  const documentGraph: DocumentGraph = {
-    documents,
-    contexts: documentContexts,
-    groups: normalizedRelations.groups,
-    links: normalizedRelations.links,
-    linkRelations: normalizedRelations.linkRelations,
-  };
-  assertNoteStructure(noteStructure);
-  assertSheetContents(noteStructure, sheetContents);
-  assertDocumentGraph(documentGraph, noteStructure);
-  return {
-    version: NOTE_SCHEMA_VERSION,
-    notes: noteStructure,
-    sheetContents,
-    documents: documentGraph,
-    preferences,
-    savedAt,
-  } satisfies LibraryV6;
-}
-
-function migrationReport(sourceVersion: 3 | 4 | 5 | 6, library: LibraryV6, warnings: string[] = []): MigrationReport {
-  return {
-    sourceVersion,
-    notebookCount: library.notes.notebooks.length,
-    sectionCount: library.notes.sections.length,
-    pageCount: library.notes.pages.length,
-    sheetCount: library.notes.sheets.length,
-    documentCount: library.documents.documents.length,
-    linkCount: library.documents.links.length,
-    sheetContentHashes: Object.fromEntries(library.notes.sheets.map((sheet) => [sheet.id, contentHash(library.sheetContents[sheet.id])])),
-    warnings,
-  };
-}
-
-export function migrateV5ToV6(source: V5MigrationSource, relation?: LegacyRelationV2): MigrationResult {
-  const warnings: string[] = [];
-  const notesBase = {
-    workspace: { id: String(source.workspace?.id || "workspace"), title: String(source.workspace?.title || "MedNote") },
-    notebooks: clone(source.notebooks).map((record, index) => ({ id: String(record.id), title: String(record.title || "Sổ ghi chú"), order: normalizedOrder(record.order, index) })),
-    sections: clone(source.sections).map((record, index) => ({ id: String(record.id), notebookId: String(record.notebookId), title: String(record.title || "Phần 1"), order: normalizedOrder(record.order, index) })),
-    pages: clone(source.pages).map((record, index) => ({ id: String(record.id), sectionId: String(record.sectionId), title: String(record.title || "Page mới"), order: normalizedOrder(record.order, index) })),
-    sheets: clone(source.sheets).map((record, index) => ({ id: String(record.id), pageId: String(record.pageId), order: normalizedOrder(record.order, index) })),
-  };
-  const sheetContents = Object.fromEntries(source.sheets.map((record) => [String(record.id), stripNavigation(record.content || {})])) as SheetContentMap;
-  normalizeSiblingOrders(notesBase.notebooks, () => "workspace");
-  normalizeSiblingOrders(notesBase.sections, (record) => record.notebookId);
-  normalizeSiblingOrders(notesBase.pages, (record) => record.sectionId);
-  normalizeSiblingOrders(notesBase.sheets, (record) => record.pageId);
-  const active = defaultActive(notesBase, {
-    activeNotebookId: String(source.meta.activeNotebookId || ""),
-    activeSectionId: String(source.meta.activeSectionId || ""),
-    activePageId: String(source.meta.activePageId || ""),
-    activeSheetId: String(source.meta.activeSheetId || ""),
-  });
-  const library = finishLibrary(
-    { ...notesBase, active },
-    sheetContents,
-    source.contexts,
-    relation,
-    source.links,
-    {
-      activeDocumentContextId: String(source.meta.activeDocumentContextId || source.contexts[0]?.id || ""),
-      readerShare: Number(source.meta.readerShare) || 50,
-      workspaceMode: source.meta.workspaceMode,
-      noteZoom: Number(source.meta.noteZoom) || 1,
-    },
-    Number(source.meta.savedAt) || Date.now(),
-    warnings,
-  );
-  return { library, report: migrationReport(5, library, warnings) };
-}
 
 export function migrateLegacySnapshotToV6(snapshot: LegacySnapshot, sourceVersion: 3 | 4, relation?: LegacyRelationV2): MigrationResult {
   const warnings: string[] = [];
@@ -366,9 +154,10 @@ async function openLegacyDb(dbName: string, storeName: string) {
 /**
  * Remove the import-only v5 namespace after v6 has been loaded and verified.
  * The object store is shared with PDFs/assets, so cleanup is intentionally
- * prefix-bound and never clears the store wholesale.
+ * prefix-bound and never clears the store wholesale. A marker in canonical
+ * v6 metadata makes this scan a one-shot operation across later bootstraps.
  */
-export async function discardStoredV5Library(options: { dbName?: string; storeName?: string } = {}) {
+async function discardStoredV5Library(options: { dbName?: string; storeName?: string } = {}) {
   const dbName = options.dbName || "mednote-local";
   const storeName = options.storeName || "documents";
   const db = await openLegacyDb(dbName, storeName);
@@ -376,20 +165,36 @@ export async function discardStoredV5Library(options: { dbName?: string; storeNa
     return await new Promise<number>((resolve, reject) => {
       const transaction = db.transaction(storeName, "readwrite");
       const store = transaction.objectStore(storeName);
-      const range = IDBKeyRange.bound(V5_STORAGE_PREFIX, `${V5_STORAGE_PREFIX}\uffff`);
-      const request = store.openKeyCursor(range);
       let removed = 0;
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) return;
-        store.delete(cursor.primaryKey);
-        removed += 1;
-        cursor.continue();
+      const metaRequest = store.get(V6_KEYS.meta);
+      metaRequest.onsuccess = () => {
+        const meta = metaRequest.result as AnyRecord | undefined;
+        if (!meta || meta.version !== NOTE_SCHEMA_VERSION) {
+          transaction.abort();
+          return;
+        }
+        if (meta.migrationState?.v5Purged === true) return;
+        const range = IDBKeyRange.bound(V5_STORAGE_PREFIX, `${V5_STORAGE_PREFIX}\uffff`);
+        const cursorRequest = store.openKeyCursor(range);
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (cursor) {
+            store.delete(cursor.primaryKey);
+            removed += 1;
+            cursor.continue();
+            return;
+          }
+          store.put({
+            ...meta,
+            migrationState: { ...meta.migrationState, v5Purged: true },
+          }, V6_KEYS.meta);
+        };
+        cursorRequest.onerror = () => reject(cursorRequest.error);
       };
-      request.onerror = () => reject(request.error);
+      metaRequest.onerror = () => reject(metaRequest.error);
       transaction.oncomplete = () => resolve(removed);
       transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error || new Error("Không thể xóa kho v5 sau cutover"));
+      transaction.onabort = () => reject(transaction.error || new Error("Không thể xác nhận cleanup v5 trên kho v6"));
     });
   } finally {
     db.close();
@@ -476,9 +281,8 @@ export async function migrateStoredLibraryToV6(options: {
     return { library: current, report };
   }
   let result: MigrationResult | null = null;
-  const { readStoredV5Library } = await import("./v5-storage-import");
-  const v5 = await readStoredV5Library(dbName, storeName);
-  if (v5) result = migrateV5ToV6(v5, options.relation);
+  const { importStoredV5Library } = await import("./v5-storage-import");
+  result = await importStoredV5Library(dbName, storeName, options.relation);
   if (!result) {
     const legacy = await readV34Snapshot(dbName, storeName);
     if (legacy) result = migrateLegacySnapshotToV6(legacy.snapshot, legacy.version, options.relation);

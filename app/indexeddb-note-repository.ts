@@ -32,6 +32,9 @@ type V6Meta = {
   active: ActiveNoteState;
   preferences: LibraryPreferences;
   savedAt: number;
+  migrationState?: {
+    v5Purged?: boolean;
+  };
 };
 
 type StoreTransaction = { transaction: IDBTransaction; store: IDBObjectStore };

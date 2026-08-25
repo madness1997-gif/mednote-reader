@@ -5,8 +5,10 @@ import test from "node:test";
 
 import { validateNoteStructure, validateSheetContents, type NoteStructure } from "../app/note-domain";
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository, V6_KEYS } from "../app/indexeddb-note-repository";
-import { contentHash, migrateLegacySnapshotToV6, migrateStoredLibraryToV6, migrateV5ToV6, verifyMigration, type LegacySnapshot, type V5MigrationSource } from "../app/note-migration";
+import { contentHash, migrateLegacySnapshotToV6, migrateStoredLibraryToV6, verifyMigration, type LegacySnapshot } from "../app/note-migration";
 import { relationV2FromV6, type LegacyRelationV2 } from "../app/relation-v2-migration";
+import { migrateV5ToV6, type V5MigrationSource } from "../app/v5-storage-import";
+import { createV6LibraryFixture } from "./v6-library-fixture";
 
 const fixture = <T>(path: string) => JSON.parse(readFileSync(path, "utf8")) as T;
 const v3 = fixture<LegacySnapshot>("tests/fixtures/v3/library.json");
@@ -84,6 +86,21 @@ async function traceIndexedDbReads<T>(operation: () => Promise<T>) {
   }
 }
 
+async function traceIndexedDbKeyCursorScans<T>(operation: () => Promise<T>) {
+  const prototype = IDBObjectStore.prototype as any;
+  const original = prototype.openKeyCursor;
+  let scans = 0;
+  prototype.openKeyCursor = function tracedOpenKeyCursor(...args: unknown[]) {
+    scans += 1;
+    return original.apply(this, args);
+  };
+  try {
+    return { value: await operation(), scans };
+  } finally {
+    prototype.openKeyCursor = original;
+  }
+}
+
 test("domain v6 separates Sheet metadata from content and rejects invalid active chains", () => {
   const structure: NoteStructure = {
     workspace: { id: "workspace", title: "MedNote" },
@@ -157,7 +174,7 @@ test("repository v6 uses direct transactional CRUD", async () => {
   const dbName = `mednote-wave1-repository-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
   try {
-    await repository.replaceLibrary(migrateV5ToV6(v5, relation).library);
+    await repository.replaceLibrary(createV6LibraryFixture());
     const beforeMeta = await rawRead(dbName, V6_KEYS.meta);
     const beforeSheet = await rawRead(dbName, `${V6_KEYS.sheet}sheet-dm-1`);
     const beforeContent = await rawRead(dbName, `${V6_KEYS.sheetContent}sheet-dm-1`);
@@ -200,7 +217,7 @@ test("create Notebook atomically creates Section, Page and Sheet", async () => {
   const dbName = `mednote-wave1-create-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
   try {
-    await repository.replaceLibrary(migrateV5ToV6(v5, relation).library);
+    await repository.replaceLibrary(createV6LibraryFixture());
     const active = await repository.createNotebook({ id: "nb-new", title: "Sổ mới", sectionId: "sec-new", pageId: "page-new", sheetId: "sheet-new", content: { body: "Không gắn PDF" } });
     assert.deepEqual(active, { activeNotebookId: "nb-new", activeSectionId: "sec-new", activePageId: "page-new", activeSheetId: "sheet-new" });
     const structure = await repository.loadNoteStructure();
@@ -219,7 +236,7 @@ test("structure reads and hierarchy mutations never hydrate SheetContent", async
   const dbName = `mednote-wave15-lazy-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
   try {
-    await repository.replaceLibrary(migrateV5ToV6(v5, relation).library);
+    await repository.replaceLibrary(createV6LibraryFixture());
     const structureRead = await traceIndexedDbReads(() => repository.loadNoteStructure());
     assert.ok(structureRead.value);
     assert.equal(structureRead.keys.some((key) => key.startsWith(V6_KEYS.sheetContent)), false);
@@ -250,7 +267,7 @@ test("missing SheetContent is isolated from structure loading and reported on hy
   const dbName = `mednote-wave15-corrupt-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
   try {
-    await repository.replaceLibrary(migrateV5ToV6(v5, relation).library);
+    await repository.replaceLibrary(createV6LibraryFixture());
     await rawDelete(dbName, `${V6_KEYS.sheetContent}sheet-dm-1`);
     assert.ok(await repository.loadNoteStructure(), "Structure còn nguyên phải vẫn load được");
     await assert.rejects(repository.loadSheetContent("sheet-dm-1"), /thiếu record/);
@@ -263,7 +280,7 @@ test("missing SheetContent is isolated from structure loading and reported on hy
 test("full-library validation rejects orphan SheetContent and replaceLibrary removes it", async () => {
   const dbName = `mednote-wave15-orphan-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
-  const library = migrateV5ToV6(v5, relation).library;
+  const library = createV6LibraryFixture();
   const orphanKey = `${V6_KEYS.sheetContent}orphan`;
   try {
     await repository.replaceLibrary(library);
@@ -322,11 +339,15 @@ test("storage migration commits v6, verifies hashes, then removes the v5 namespa
     ];
     for (const key of v5Keys) assert.equal(await rawRead(dbName, key), undefined, `${key} phải bị xóa sau cutover`);
     assert.deepEqual(await rawRead(dbName, "pdf:v5-name-is-not-a-schema-key"), { keep: true });
-    assert.equal((await rawRead<{ version: number }>(dbName, V6_KEYS.meta))?.version, 6);
+    const migratedMeta = await rawRead<{ version: number; migrationState?: { v5Purged?: boolean } }>(dbName, V6_KEYS.meta);
+    assert.equal(migratedMeta?.version, 6);
+    assert.equal(migratedMeta?.migrationState?.v5Purged, true);
     assert.deepEqual(reloaded.notes.active, { activeNotebookId: "nb-endo", activeSectionId: "sec-diabetes", activePageId: "page-dm", activeSheetId: "sheet-dm-2" });
     assert.deepEqual(Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(reloaded.sheetContents[sheet.id])])), migrated.report.sheetContentHashes);
-    const reopened = await migrateStoredLibraryToV6({ dbName, relation });
+    const reopenedTrace = await traceIndexedDbKeyCursorScans(() => migrateStoredLibraryToV6({ dbName, relation }));
+    const reopened = reopenedTrace.value;
     assert.equal(reopened?.report.sourceVersion, 6);
+    assert.equal(reopenedTrace.scans, 0, "Bootstrap sau cleanup không được quét lại namespace v5");
     const rebuilt = relationV2FromV6(reloaded);
     assert.deepEqual(rebuilt.groups?.[0].documentIds, ["doc-ada", "doc-idsa"]);
     assert.equal(rebuilt.notebooks?.[0].sections.length, 2);

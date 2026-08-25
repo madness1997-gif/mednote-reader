@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { deleteNoteRepositoryDatabase, IndexedDbNoteRepository, V6_KEYS } from "../app/indexeddb-note-repository";
-import { migrateV5ToV6, type V5MigrationSource } from "../app/note-migration";
+import { migrateV5ToV6, type V5MigrationSource } from "../app/v5-storage-import";
 
 type LargeFixtureManifest = {
   notebookCount: number;
