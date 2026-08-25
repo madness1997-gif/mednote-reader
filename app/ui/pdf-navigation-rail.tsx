@@ -1,48 +1,41 @@
 import { Bookmark, BookmarkCheck, ChevronLeft, Highlighter, ListTree, ScanText, Search, Trash2, X } from "lucide-react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { Dispatch, SetStateAction } from "react";
-import type { LibraryDocument, ReaderState, WorkspaceItem } from "../document-runtime-adapter";
-import type { PdfAnnotation } from "../pdf-domain";
+import { pdfAnnotationLabel, pdfAnnotationSummary, useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { VirtualPdfThumbnailList } from "../virtualized-thumbnails";
-import type { PdfOutlineEntry, PdfRailTab, SearchResult } from "./ui-contracts";
 
-export type PdfNavigationRailScope = {
-  activeDocument: LibraryDocument | null;
-  activeSearchQuery: string;
-  activeWorkspace: WorkspaceItem;
-  bookmarks: number[];
-  currentPdfDocument: PDFDocumentProxy | null;
-  goToPageFromRail: (page: number) => void;
-  openSearchResult: (result: SearchResult) => void;
-  outline: PdfOutlineEntry[];
-  pdfAnnotationLabel: (annotation: PdfAnnotation) => string;
-  pdfAnnotationSummary: (annotation: PdfAnnotation) => string;
-  pdfAnnotations: PdfAnnotation[];
-  pdfRailTab: PdfRailTab;
-  performSearch: () => void | Promise<unknown>;
-  removePdfAnnotation: (annotationId: string) => void;
-  searchQuery: string;
-  searchResults: SearchResult[];
-  searchWholeCollection: boolean;
-  searching: boolean;
-  setPdfRailTab: Dispatch<SetStateAction<PdfRailTab>>;
-  setSearchQuery: Dispatch<SetStateAction<string>>;
-  setSearchWholeCollection: Dispatch<SetStateAction<boolean>>;
-  setShowPdfRail: Dispatch<SetStateAction<boolean>>;
-  sourcePage: number;
-  sourcePages: number[];
-  updateReader: (updater: (reader: ReaderState) => ReaderState) => void;
-};
-
-export function PdfNavigationRail({ scope }: { scope: PdfNavigationRailScope }) {
-  const { activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader } = scope;
+export function PdfNavigationRail() {
+  const navigation = useActivePdfNavigationController();
+  const {
+    activeDocument,
+    activeQuery: activeSearchQuery,
+    activeWorkspace,
+    annotations: pdfAnnotations,
+    bookmarks,
+    currentDocument: currentPdfDocument,
+    goToPage: goToPageFromRail,
+    hideRail,
+    openSearchResult,
+    outline,
+    performSearch,
+    query: searchQuery,
+    railTab: pdfRailTab,
+    removeAnnotation: removePdfAnnotation,
+    removeBookmark,
+    searchResults,
+    searchWholeCollection,
+    searching,
+    setQuery: setSearchQuery,
+    setRailTab: setPdfRailTab,
+    setSearchWholeCollection,
+    sourcePage,
+    sourcePages,
+  } = navigation;
   return (<><aside className={`pdf-thumbnails pdf-panel-${pdfRailTab}`} aria-label="Điều hướng tài liệu">
           <div className="pdf-rail-tabs">
             <button className={pdfRailTab === "pages" ? "active" : ""} onClick={() => setPdfRailTab("pages")} title="Trang" aria-label="Hình thu nhỏ các trang"><ScanText size={17} /></button>
             <button className={pdfRailTab === "outline" ? "active" : ""} onClick={() => setPdfRailTab("outline")} title="Mục lục" aria-label="Mục lục PDF"><ListTree size={17} /></button>
             <button className={pdfRailTab === "search" ? "active" : ""} onClick={() => setPdfRailTab("search")} title="Tìm kiếm" aria-label="Tìm kiếm"><Search size={17} /></button>
             <button className={pdfRailTab === "marks" ? "active" : ""} onClick={() => setPdfRailTab("marks")} title="Đánh dấu" aria-label="Bookmark và chú thích"><Bookmark size={17} /></button>
-            <button onClick={() => setShowPdfRail(false)} title="Thu gọn" aria-label="Thu gọn bảng điều hướng"><ChevronLeft size={17} /></button>
+            <button onClick={hideRail} title="Thu gọn" aria-label="Thu gọn bảng điều hướng"><ChevronLeft size={17} /></button>
           </div>
 
           {pdfRailTab === "pages" && (
@@ -78,7 +71,7 @@ export function PdfNavigationRail({ scope }: { scope: PdfNavigationRailScope }) 
           {pdfRailTab === "marks" && (
             <div className="pdf-rail-content marks-panel">
               <h3>Đánh dấu trang</h3>
-              {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPageFromRail(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => updateReader((reader) => ({ ...reader, bookmarks: reader.bookmarks.filter((item) => item !== page) }))}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
+              {bookmarks.length ? bookmarks.map((page) => <div className="mark-row" key={`bookmark-${page}`}><button onClick={() => goToPageFromRail(page)}><BookmarkCheck size={15} /><span>Trang {page}</span></button><button aria-label={`Bỏ đánh dấu trang ${page}`} onClick={() => removeBookmark(page)}><X size={14} /></button></div>) : <p className="marks-empty">Chưa có trang được đánh dấu.</p>}
               <h3>Chú thích</h3>
               {pdfAnnotations.length ? [...pdfAnnotations].sort((a, b) => a.page - b.page).map((annotation) => <div className="annotation-row" key={annotation.id}><button onClick={() => goToPageFromRail(annotation.page)}><span className={`annotation-kind kind-${annotation.kind}`}>{pdfAnnotationLabel(annotation)}</span><b>Trang {annotation.page}</b><p>{pdfAnnotationSummary(annotation)}</p></button><button className="delete-mark" onClick={() => removePdfAnnotation(annotation.id)} aria-label="Xóa chú thích"><Trash2 size={14} /></button></div>) : <div className="rail-empty"><Highlighter size={24} /><span>Highlight, hình vẽ, ghi chú và nét bút sẽ xuất hiện tại đây.</span></div>}
             </div>

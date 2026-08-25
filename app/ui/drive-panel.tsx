@@ -1,105 +1,56 @@
 import { CloudOff, DownloadCloud, RefreshCw, UploadCloud, X } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
-import type { DriveAccount } from "../drive-sync-service";
+import { useActiveDriveController } from "../drive-controller";
 
-type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "error";
-
-export type DrivePanelScope = {
-  IS_DESKTOP_APP: boolean;
-  cancelDriveConnection: () => void | Promise<unknown>;
-  changeDriveClient: () => void | Promise<unknown>;
-  connectDrive: () => void | Promise<unknown>;
-  desktopGoogleClientId: string;
-  desktopGoogleClientSecret: string;
-  disconnectDrive: () => void | Promise<unknown>;
-  driveAutoSync: boolean;
-  driveError: string | null;
-  driveLastSyncedAt: number | null;
-  driveReady: boolean;
-  driveStatus: DriveStatus;
-  driveUser: DriveAccount | null;
-  restoreFromDrive: () => void | Promise<unknown>;
-  setDesktopGoogleClientId: Dispatch<SetStateAction<string>>;
-  setDesktopGoogleClientSecret: Dispatch<SetStateAction<string>>;
-  setDriveAutoSync: Dispatch<SetStateAction<boolean>>;
-  setDriveError: Dispatch<SetStateAction<string | null>>;
-  setDrivePanelOpen: Dispatch<SetStateAction<boolean>>;
-  syncToDrive: () => void | Promise<unknown>;
-};
-
-export function DrivePanel({ scope }: { scope: DrivePanelScope }) {
-  const { IS_DESKTOP_APP, cancelDriveConnection, changeDriveClient, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive } = scope;
-
-  const importDesktopOAuth = async (file?: File) => {
-    if (!file) return;
-    try {
-      const payload = JSON.parse(await file.text()) as {
-        installed?: { client_id?: unknown; client_secret?: unknown };
-        web?: unknown;
-      };
-      if (!payload.installed) {
-        throw new Error(payload.web
-          ? "Đây là OAuth Web application. Hãy tải JSON của OAuth Client loại Desktop app."
-          : "Tệp không chứa cấu hình OAuth Desktop (installed).");
-      }
-      const clientId = typeof payload.installed.client_id === "string" ? payload.installed.client_id.trim() : "";
-      const clientSecret = typeof payload.installed.client_secret === "string" ? payload.installed.client_secret.trim() : "";
-      if (!clientId.endsWith(".apps.googleusercontent.com")) throw new Error("OAuth Client ID trong tệp không hợp lệ.");
-      setDesktopGoogleClientId(clientId);
-      setDesktopGoogleClientSecret(clientSecret);
-      setDriveError(null);
-    } catch (error) {
-      setDriveError(error instanceof Error ? error.message : "Không đọc được tệp OAuth Desktop JSON.");
-    }
-  };
+export function DrivePanel() {
+  const drive = useActiveDriveController();
 
   return (<><aside className="drive-panel" aria-label="Google Drive">
           <div className="drive-panel-header">
             <div><strong>Google Drive</strong><span>JSON, PDF gốc và hình cắt</span></div>
-            <button className="icon-button compact" onClick={() => setDrivePanelOpen(false)} aria-label="Đóng"><X size={17} /></button>
+            <button className="icon-button compact" onClick={drive.closePanel} aria-label="Đóng"><X size={17} /></button>
           </div>
-          {driveUser ? (
+          {drive.user ? (
             <>
               <div className="drive-account">
-                {driveUser.photoLink ? <img src={driveUser.photoLink} alt="" /> : <span>{driveUser.displayName.slice(0, 1).toUpperCase()}</span>}
-                <div><strong>{driveUser.displayName}</strong><small>{driveUser.emailAddress}</small></div>
-                <i className={driveStatus === "error" ? "error" : ""} />
+                {drive.user.photoLink ? <img src={drive.user.photoLink} alt="" /> : <span>{drive.user.displayName.slice(0, 1).toUpperCase()}</span>}
+                <div><strong>{drive.user.displayName}</strong><small>{drive.user.emailAddress}</small></div>
+                <i className={drive.status === "error" ? "error" : ""} />
               </div>
-              {!driveReady && <div className="drive-conflict"><strong>Chọn bản dữ liệu muốn dùng</strong><span>Drive và thiết bị này đều đang có workspace. MedNote sẽ không tự ghi đè khi chưa chọn.</span></div>}
+              {!drive.ready && <div className="drive-conflict"><strong>Chọn bản dữ liệu muốn dùng</strong><span>Drive và thiết bị này đều đang có workspace. MedNote sẽ không tự ghi đè khi chưa chọn.</span></div>}
               <div className="drive-actions">
-                <button onClick={() => { void syncToDrive(); }} disabled={driveStatus === "syncing"}><UploadCloud size={17} /><span><strong>Lưu bản này lên Drive</strong><small>Cập nhật Drive từ thiết bị hiện tại</small></span></button>
-                <button onClick={() => { void restoreFromDrive(); }} disabled={driveStatus === "syncing"}><DownloadCloud size={17} /><span><strong>Tải bản từ Drive</strong><small>Khôi phục workspace và các tệp</small></span></button>
+                <button onClick={() => { void drive.sync(); }} disabled={drive.status === "syncing"}><UploadCloud size={17} /><span><strong>Lưu bản này lên Drive</strong><small>Cập nhật Drive từ thiết bị hiện tại</small></span></button>
+                <button onClick={() => { void drive.restore(); }} disabled={drive.status === "syncing"}><DownloadCloud size={17} /><span><strong>Tải bản từ Drive</strong><small>Khôi phục workspace và các tệp</small></span></button>
               </div>
-              <label className="drive-auto-sync"><input type="checkbox" checked={driveAutoSync} disabled={!driveReady} onChange={(event) => setDriveAutoSync(event.target.checked)} /><span><strong>Tự động đồng bộ</strong><small>Vẫn luôn lưu một bản cục bộ trên thiết bị</small></span></label>
+              <label className="drive-auto-sync"><input type="checkbox" checked={drive.autoSync} disabled={!drive.ready} onChange={(event) => drive.setAutoSync(event.target.checked)} /><span><strong>Tự động đồng bộ</strong><small>Vẫn luôn lưu một bản cục bộ trên thiết bị</small></span></label>
               <div className="drive-panel-footer">
-                <span>{driveError || (driveLastSyncedAt ? `Lần cuối: ${new Date(driveLastSyncedAt).toLocaleString("vi-VN")}` : "Đã kết nối, chưa đồng bộ")}</span>
-                <div>{driveStatus === "error" && <button onClick={() => { void connectDrive(); }}>Kết nối lại</button>}{IS_DESKTOP_APP && <button onClick={changeDriveClient}>Đổi OAuth client</button>}<button onClick={disconnectDrive}>Ngắt kết nối</button></div>
+                <span>{drive.error || (drive.lastSyncedAt ? `Lần cuối: ${new Date(drive.lastSyncedAt).toLocaleString("vi-VN")}` : "Đã kết nối, chưa đồng bộ")}</span>
+                <div>{drive.status === "error" && <button onClick={() => { void drive.connect(); }}>Kết nối lại</button>}{drive.isDesktopApp && <button onClick={drive.changeClient}>Đổi OAuth client</button>}<button onClick={drive.disconnect}>Ngắt kết nối</button></div>
               </div>
             </>
           ) : (
-            <div className={`drive-empty ${driveError ? "error" : ""}`}>
-              {driveStatus === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
-              <strong>{driveStatus === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
-              <span>{driveError || "Đăng nhập để lưu workspace trên Drive."}</span>
-              {IS_DESKTOP_APP && <>
-                <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input disabled={driveStatus === "connecting"} value={desktopGoogleClientId} onChange={(event) => { setDesktopGoogleClientId(event.target.value.trim()); setDriveError(null); }} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
-                <label className="drive-client-id"><span>Client Secret (Desktop)</span><input disabled={driveStatus === "connecting"} type="password" value={desktopGoogleClientSecret} onChange={(event) => { setDesktopGoogleClientSecret(event.target.value.trim()); setDriveError(null); }} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
-                <label className={`drive-oauth-import ${driveStatus === "connecting" ? "disabled" : ""}`}>
+            <div className={`drive-empty ${drive.error ? "error" : ""}`}>
+              {drive.status === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
+              <strong>{drive.status === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
+              <span>{drive.error || "Đăng nhập để lưu workspace trên Drive."}</span>
+              {drive.isDesktopApp && <>
+                <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input disabled={drive.status === "connecting"} value={drive.desktopClientId} onChange={(event) => drive.setDesktopClientId(event.target.value)} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
+                <label className="drive-client-id"><span>Client Secret (Desktop)</span><input disabled={drive.status === "connecting"} type="password" value={drive.desktopClientSecret} onChange={(event) => drive.setDesktopClientSecret(event.target.value)} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
+                <label className={`drive-oauth-import ${drive.status === "connecting" ? "disabled" : ""}`}>
                   <input
                     type="file"
                     accept="application/json,.json"
-                    disabled={driveStatus === "connecting"}
+                    disabled={drive.status === "connecting"}
                     onChange={(event) => {
                       const input = event.currentTarget;
-                      void importDesktopOAuth(input.files?.[0]).finally(() => { input.value = ""; });
+                      void drive.importDesktopOAuth(input.files?.[0]).finally(() => { input.value = ""; });
                     }}
                   />
                   <span>Nhập tệp OAuth Desktop JSON</span>
                 </label>
               </>}
-              {driveStatus === "connecting"
-                ? <button onClick={() => { void cancelDriveConnection(); }}>Hủy kết nối</button>
-                : <button onClick={() => { void connectDrive(); }}>Kết nối</button>}
+              {drive.status === "connecting"
+                ? <button onClick={() => { void drive.cancelConnection(); }}>Hủy kết nối</button>
+                : <button onClick={() => { void drive.connect(); }}>Kết nối</button>}
             </div>
           )}
         </aside></>);

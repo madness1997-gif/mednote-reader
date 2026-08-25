@@ -6,14 +6,17 @@ const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url)
 
 test("desktop Drive opens manual configuration before authorization", async () => {
   const topBar = await source("app/ui/app-top-bar.tsx");
-  assert.match(topBar, /onClick=\{\(\) => setDrivePanelOpen\(\(open\) => !open\)\}/);
-  assert.doesNotMatch(topBar, /void connectDrive\(\)/);
+  assert.match(topBar, /onClick=\{drive\.togglePanel\}/);
+  assert.doesNotMatch(topBar, /drive\.connect/);
 });
 
 test("desktop Drive accepts only an installed OAuth JSON file", async () => {
-  const panel = await source("app/ui/drive-panel.tsx");
-  assert.match(panel, /payload\.installed/);
-  assert.match(panel, /Đây là OAuth Web application/);
+  const [panel, controller] = await Promise.all([
+    source("app/ui/drive-panel.tsx"),
+    source("app/drive-controller.tsx"),
+  ]);
+  assert.match(controller, /record\.installed/);
+  assert.match(controller, /Đây là OAuth Web application/);
   assert.match(panel, /Nhập tệp OAuth Desktop JSON/);
 });
 
@@ -29,9 +32,9 @@ test("an in-progress desktop authorization can be cancelled", async () => {
   assert.match(drive, /cancelDriveAuthorization/);
 });
 
-test("desktop Drive restores and refreshes its encrypted session without reopening consent", async () => {
-  const [page, panel, main, preload, drive] = await Promise.all([
-    source("app/page.tsx"),
+test("desktop Drive controller restores and refreshes its encrypted session without reopening consent", async () => {
+  const [controller, panel, main, preload, drive] = await Promise.all([
+    source("app/drive-controller.tsx"),
     source("app/ui/drive-panel.tsx"),
     source("electron/main.cjs"),
     source("electron/preload.cjs"),
@@ -41,6 +44,6 @@ test("desktop Drive restores and refreshes its encrypted session without reopeni
   assert.match(main, /resumeDrive/);
   assert.match(preload, /resumeDrive/);
   assert.match(drive, /resumeDriveToken/);
-  assert.match(page, /driveSyncService\.resume/);
+  assert.match(controller, /driveSyncService\.resume/);
   assert.match(panel, /Đổi OAuth client/);
 });

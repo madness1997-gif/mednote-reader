@@ -52,3 +52,40 @@ test("legacy v5 is a lazy one-shot reader with no production write or cache modu
   assert.doesNotMatch(migration, /export async function discardStoredV5Library/);
   assert.doesNotMatch(v5Reader, /\.put\(|\.delete\(|saveQueue|canonicalCache|persistedSignatures/);
 });
+
+test("Drive UI consumes a stateful controller instead of page scope props", async () => {
+  const [page, controller, topBar, panel] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/drive-controller.tsx"),
+    source("app/ui/app-top-bar.tsx"),
+    source("app/ui/drive-panel.tsx"),
+  ]);
+  assert.match(page, /useDriveController/);
+  assert.match(page, /DriveControllerProvider controller=\{drive\}/);
+  assert.doesNotMatch(page, /driveStatus|driveToken|setDrivePanelOpen/);
+  assert.match(controller, /useState<DriveStatus>/);
+  assert.match(controller, /driveSyncService\.resume/);
+  assert.match(topBar, /useActiveDriveController/);
+  assert.match(panel, /useActiveDriveController/);
+  assert.doesNotMatch(panel, /DrivePanelScope|\{ scope \}/);
+});
+
+test("PDF navigation owns rail and search behavior instead of receiving a page scope", async () => {
+  const [page, controller, rail, toolbar, stage] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/pdf-navigation-controller.tsx"),
+    source("app/ui/pdf-navigation-rail.tsx"),
+    source("app/ui/pdf-toolbar.tsx"),
+    source("app/ui/pdf-reader-stage.tsx"),
+  ]);
+  assert.match(page, /usePdfNavigationController/);
+  assert.match(page, /PdfNavigationControllerProvider controller=\{pdfNavigation\}/);
+  assert.doesNotMatch(page, /pdfSearchAbortRef|setSearchResults|setPdfRailTab|setShowPdfRail/);
+  assert.match(controller, /const \[railTab, setRailTab\] = useState/);
+  assert.match(controller, /const \[searchResults, setSearchResults\] = useState/);
+  assert.match(controller, /current\.reader\.search/);
+  assert.match(rail, /useActivePdfNavigationController/);
+  assert.doesNotMatch(rail, /PdfNavigationRailScope|\{ scope \}/);
+  assert.match(toolbar, /useActivePdfNavigationController/);
+  assert.match(stage, /useActivePdfNavigationController/);
+});

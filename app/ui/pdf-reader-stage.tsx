@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { ComponentProps, Dispatch, RefObject, SetStateAction, WheelEvent } from "react";
 import type { LibraryDocument, ReaderState, WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
 import type { PdfAnnotation, PdfFitMode, PdfRect, PdfTool, PdfViewMode } from "../pdf-domain";
+import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
 import type { PDFiumDocument } from "../pdfium-renderer";
 import type { PdfPanel } from "./ui-contracts";
@@ -10,7 +11,6 @@ import type { PdfPanel } from "./ui-contracts";
 export type PdfReaderStageScope = {
   INK_COLORS: string[];
   activeDocument: LibraryDocument | null;
-  activeSearchQuery: string;
   activeWorkspace: WorkspaceItem;
   addImageExcerpt: ComponentProps<typeof PdfPageView>["onCrop"];
   changeWorkspaceMode: (mode: WorkspaceMode) => void;
@@ -88,7 +88,8 @@ function DemoDocument({ page }: { page: number }) {
 }
 
 export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
-  const { INK_COLORS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, changeWorkspaceMode, commitPdfPageAnnotations, currentPdfDocument, documentStageRef, fitMode, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, sourceFocus, sourcePage, sourcePages, sourceZoom, updatePdfPanelColor, updateReader, viewMode, workspaceMode } = scope;
+  const { INK_COLORS, activeDocument, activeWorkspace, addImageExcerpt, changeWorkspaceMode, commitPdfPageAnnotations, currentPdfDocument, documentStageRef, fitMode, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, sourceFocus, sourcePage, sourcePages, sourceZoom, updatePdfPanelColor, updateReader, viewMode, workspaceMode } = scope;
+  const { activeQuery: activeSearchQuery } = useActivePdfNavigationController();
   return (<>{pdfPanel === "view" && (
             <div className="floating-tool-panel pdf-view-panel" role="dialog" aria-label="Tùy chọn hiển thị PDF">
               <div className="tool-panel-heading"><div><strong>Hiển thị PDF</strong><span>Thu phóng và bố cục trang</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>

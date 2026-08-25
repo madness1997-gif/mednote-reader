@@ -1,8 +1,7 @@
 import { BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw } from "lucide-react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
-
-type DriveStatus = "disconnected" | "connecting" | "connected" | "syncing" | "error";
+import { useActiveDriveController } from "../drive-controller";
 
 export type AppTopBarScope = {
   activeWorkspace: WorkspaceItem;
@@ -10,20 +9,18 @@ export type AppTopBarScope = {
   addNotebook: () => void | Promise<unknown>;
   changeWorkspaceMode: (mode: WorkspaceMode) => void;
   documentName: string;
-  driveStatus: DriveStatus;
-  driveToken: string | null;
   hasActiveNote: boolean;
   previewPdfInputRef: RefObject<HTMLInputElement | null>;
   ready: boolean;
   saveTemporaryWorkspace: () => void | Promise<unknown>;
-  setDrivePanelOpen: Dispatch<SetStateAction<boolean>>;
   setLibraryOpen: Dispatch<SetStateAction<boolean>>;
   toast: string;
   workspaceMode: WorkspaceMode;
 };
 
 export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
-  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode } = scope;
+  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setLibraryOpen, toast, workspaceMode } = scope;
+  const drive = useActiveDriveController();
   return (<><header className="topbar">
         <div className="brand-group">
           <button className="icon-button menu-button" aria-label="Mở thư viện" onClick={() => setLibraryOpen(true)}><Menu size={19} /></button>
@@ -38,13 +35,13 @@ export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
           </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button
-            className={`drive-button ${driveToken ? "connected" : ""} ${driveStatus === "syncing" || driveStatus === "connecting" ? "busy" : ""}`}
-            onClick={() => setDrivePanelOpen((open) => !open)}
-            aria-label={driveToken ? "Mở đồng bộ Google Drive" : "Kết nối Google Drive"}
+            className={`drive-button ${drive.token ? "connected" : ""} ${drive.status === "syncing" || drive.status === "connecting" ? "busy" : ""}`}
+            onClick={drive.togglePanel}
+            aria-label={drive.token ? "Mở đồng bộ Google Drive" : "Kết nối Google Drive"}
             title="Lưu và đồng bộ bằng Google Drive"
           >
-            {driveStatus === "syncing" || driveStatus === "connecting" ? <RefreshCw size={16} /> : driveToken ? <Cloud size={16} /> : <CloudOff size={16} />}
-            <span>{driveStatus === "syncing" ? "Đang đồng bộ" : driveToken ? "Drive" : "Kết nối Drive"}</span>
+            {drive.status === "syncing" || drive.status === "connecting" ? <RefreshCw size={16} /> : drive.token ? <Cloud size={16} /> : <CloudOff size={16} />}
+            <span>{drive.status === "syncing" ? "Đang đồng bộ" : drive.token ? "Drive" : "Kết nối Drive"}</span>
           </button>
           {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
           {activeWorkspace.documents.length > 0 && !activeWorkspaceHasLinkedNote && <button className="save-session-button" onClick={() => { void addNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}

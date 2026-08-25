@@ -544,19 +544,24 @@ test("disconnect revokes OAuth without deleting local data", async () => {
   } finally { await context.close(); }
 });
 
-test("page delegates Drive algorithms and web/desktop request the same cross-platform scopes", async () => {
-  const [page, service, browserDrive, desktopMain] = await Promise.all([
+test("page delegates Drive lifecycle to its controller and web/desktop request the same cross-platform scopes", async () => {
+  const [page, controller, service, browserDrive, desktopMain] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/drive-controller.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/drive-sync-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/google-drive.ts", import.meta.url), "utf8"),
     readFile(new URL("../electron/main.cjs", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /driveSyncService\.connect/);
-  assert.match(page, /driveSyncService\.sync/);
-  assert.match(page, /driveSyncService\.restore/);
-  assert.match(page, /driveSyncService\.disconnect/);
+  assert.match(page, /useDriveController/);
+  assert.doesNotMatch(page, /driveSyncService/);
+  assert.doesNotMatch(page, /setDrive(?:Token|Status|Ready|AutoSync|Error)/);
+  assert.match(controller, /driveSyncService\.connect/);
+  assert.match(controller, /driveSyncService\.sync/);
+  assert.match(controller, /driveSyncService\.restore/);
+  assert.match(controller, /driveSyncService\.disconnect/);
   for (const forbidden of ["listDriveAppFiles", "downloadDriveFile", "upsertDriveFile", "createDriveBackup", "stageDriveBackup", "requestDriveToken", "getDriveUser", "revokeDriveToken"]) {
     assert.equal(page.includes(forbidden), false, `page.tsx still knows ${forbidden}`);
+    assert.equal(controller.includes(forbidden), false, `Drive controller still knows low-level operation ${forbidden}`);
     assert.equal(service.includes(forbidden), true, `DriveSyncService must own ${forbidden}`);
   }
   for (const scope of ["https://www.googleapis.com/auth/drive.appdata", "https://www.googleapis.com/auth/drive"]) {
@@ -651,10 +656,19 @@ test("Drive v2 preserves the note runtime as active even when documents exist", 
   }
 });
 
-test("Drive auto-sync watches canonical NoteStore content and hierarchy changes", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  assert.match(
-    page,
-    /\[activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces, noteState\.activeSheetContent, noteState\.structure\]/,
-  );
+test("Drive controller owns auto-sync and watches canonical NoteStore content and hierarchy changes", async () => {
+  const [page, controller] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/drive-controller.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(page, /window\.setTimeout\(\(\) => \{ void syncToDrive/);
+  for (const dependency of [
+    "integration.activeSheetContent",
+    "integration.activeWorkspaceId",
+    "integration.noteStructure",
+    "integration.noteZoom",
+    "integration.readerShare",
+    "integration.workspaceMode",
+    "integration.workspaces",
+  ]) assert.match(controller, new RegExp(dependency.replace(".", "\\.")));
 });

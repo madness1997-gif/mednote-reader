@@ -37,6 +37,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PdfAnnotation, PdfCropResult, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
 import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
+import { PdfNavigationControllerProvider, usePdfNavigationController } from "./pdf-navigation-controller";
 import {
   addPdfMarkup as addPdfMarkupCommand,
   deletePdfAnnotation as deletePdfAnnotationCommand,
@@ -46,8 +47,7 @@ import {
   undoPdfAnnotations as undoPdfAnnotationCommand,
   type PdfAnnotationHistory,
 } from "./pdf-annotation-session";
-import { DriveSyncConflictError, driveSyncService, type DriveAccount, type DriveRestoreResult, type DriveSyncSnapshot } from "./drive-sync-service";
-import { cancelDriveAuthorization } from "./google-drive";
+import { DriveControllerProvider, useDriveController } from "./drive-controller";
 import { resolveDocumentSource } from "./note-document-source";
 import {
   lookupEnglishVietnamese,
@@ -82,10 +82,7 @@ import type {
   NoteSheetViewMode,
   NumberingStyle,
   PdfHistory,
-  PdfOutlineEntry,
   PdfPanel,
-  PdfRailTab,
-  SearchResult,
   StickerPresetId,
   TableBorderSettings,
   TextInsertPopover,
@@ -122,23 +119,11 @@ type DictionaryLookupState = {
   error: string | null;
 };
 
-const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
-const DESKTOP_GOOGLE_CLIENT_ID_KEY = "mednote-google-desktop-client-id";
-const DRIVE_REMOTE_REVISION_KEY_PREFIX = "mednote-drive-remote-revision-v1:";
-const IS_DESKTOP_APP = typeof window !== "undefined" && Boolean(window.mednoteDesktop?.isDesktop);
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
 const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
 const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
-
-function storedDriveRevision(emailAddress: string) {
-  try { return localStorage.getItem(`${DRIVE_REMOTE_REVISION_KEY_PREFIX}${emailAddress.trim().toLowerCase()}`); } catch { return null; }
-}
-
-function persistDriveRevision(emailAddress: string, revision: string) {
-  try { localStorage.setItem(`${DRIVE_REMOTE_REVISION_KEY_PREFIX}${emailAddress.trim().toLowerCase()}`, revision); } catch { /* revision persistence is best effort */ }
-}
 
 const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
   a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
@@ -263,31 +248,6 @@ function equationMarkup(template: EquationTemplate, parts: string[]) {
   if (template === "sum") return `<span style="${math};white-space:nowrap">∑<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]}</span>`;
   if (template === "integral") return `<span style="${math};white-space:nowrap">∫<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]} d${values[3]}</span>`;
   return `<span style="${math};display:inline-flex;align-items:center;vertical-align:middle;white-space:nowrap"><b>[</b><span style="display:inline-grid;grid-template-columns:auto auto;column-gap:10px;row-gap:2px;margin:0 4px;text-align:center"><span>${values[0]}</span><span>${values[1]}</span><span>${values[2]}</span><span>${values[3]}</span></span><b>]</b></span>`;
-}
-
-function pdfAnnotationLabel(annotation: PdfAnnotation) {
-  const labels: Record<PdfAnnotation["kind"], string> = {
-    highlight: "Tô sáng",
-    "area-highlight": "Tô vùng",
-    underline: "Gạch chân",
-    strikeout: "Gạch ngang",
-    squiggly: "Lượn sóng",
-    ink: "Nét bút",
-    note: "Ghi chú",
-    text: "Chữ",
-    rectangle: "Chữ nhật",
-    ellipse: "Elip",
-    arrow: "Mũi tên",
-    stamp: "Con dấu",
-    signature: "Chữ ký",
-  };
-  return labels[annotation.kind];
-}
-
-function pdfAnnotationSummary(annotation: PdfAnnotation) {
-  if (annotation.kind === "ink") return `${annotation.points.length} điểm bút`;
-  if ("text" in annotation && annotation.text) return annotation.text;
-  return pdfAnnotationLabel(annotation);
 }
 
 function cssColorToHex(color: string) {
@@ -473,13 +433,6 @@ export default function Home() {
   const [firstAidCropResult, setFirstAidCropResult] = useState<FirstAidCropResult | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
   const dictionaryAbortRef = useRef<AbortController | null>(null);
-  const [pdfRailTab, setPdfRailTab] = useState<PdfRailTab>("outline");
-  const [outline, setOutline] = useState<PdfOutlineEntry[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeSearchQuery, setActiveSearchQuery] = useState("");
-  const [searchWholeCollection, setSearchWholeCollection] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
   const workspaceModeRef = useRef<WorkspaceMode>(workspaceMode);
   const lastWorkspacePaneRef = useRef<"reader" | "note">("reader");
@@ -496,7 +449,6 @@ export default function Home() {
   const pdfReader = useMemo(() => new PdfReaderController({
     readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
   }), []);
-  const pdfSearchAbortRef = useRef<AbortController | null>(null);
   const pdfWheelAccumulatorRef = useRef(0);
   const pdfWheelZoomingRef = useRef(false);
   const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string; lastModified: number } | null>(null);
@@ -513,7 +465,6 @@ export default function Home() {
   const [toast, setToast] = useState("Đã tự lưu");
   const [ready, setReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [showPdfRail, setShowPdfRail] = useState(true);
   const [showNoteSidebar, setShowNoteSidebar] = useState(() => {
     try {
       const preference = localStorage.getItem(NOTE_SIDEBAR_PREFERENCE_KEY);
@@ -537,23 +488,6 @@ export default function Home() {
   const textCharacterToolbarRef = useRef<HTMLDivElement | null>(null);
   const textParagraphToolbarRef = useRef<HTMLDivElement | null>(null);
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
-  const [drivePanelOpen, setDrivePanelOpen] = useState(false);
-  const [desktopGoogleClientId, setDesktopGoogleClientId] = useState(() => {
-    if (!IS_DESKTOP_APP) return "";
-    try { return localStorage.getItem(DESKTOP_GOOGLE_CLIENT_ID_KEY)?.trim() ?? ""; } catch { return ""; }
-  });
-  const [desktopGoogleClientSecret, setDesktopGoogleClientSecret] = useState("");
-  const [driveToken, setDriveToken] = useState<string | null>(null);
-  const [driveUser, setDriveUser] = useState<DriveAccount | null>(null);
-  const [driveStatus, setDriveStatus] = useState<"disconnected" | "connecting" | "connected" | "syncing" | "error">("disconnected");
-  const [driveReady, setDriveReady] = useState(false);
-  const [driveAutoSync, setDriveAutoSync] = useState(true);
-  const [driveLastSyncedAt, setDriveLastSyncedAt] = useState<number | null>(null);
-  const [driveError, setDriveError] = useState<string | null>(null);
-  const desktopDriveResumeClientRef = useRef<string | null>(null);
-  const driveRemoteRevisionRef = useRef<string | null>(null);
-  const driveObservedRevisionRef = useRef<string | null>(null);
-  const driveUserRef = useRef<DriveAccount | null>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
@@ -970,11 +904,6 @@ export default function Home() {
     }
   };
 
-  const goToPageFromRail = (page: number) => {
-    goToPage(page);
-    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
-  };
-
   const switchDocument = (documentId: string, page?: number, rect?: PdfRect) => {
     const selection = pdfReader.selectDocumentTarget(activeWorkspace.documents, documentId, page);
     if (!selection) return;
@@ -1025,10 +954,6 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
-  }, []);
-
   // MEDNOTE_AUTOSAVE_EFFECT_START
   useEffect(() => {
     if (!ready) return;
@@ -1068,11 +993,9 @@ export default function Home() {
     setPdfiumDocument(session?.pdfium ?? null);
     setLoadedDocumentId(session?.documentId ?? null);
     setPdfStatus(status === "loading" ? "loading" : status === "error" ? "error" : "idle");
-    if (session) setOutline(session.outline);
   }), [pdfReader]);
 
   useEffect(() => () => {
-    pdfSearchAbortRef.current?.abort();
     void pdfReader.close();
   }, [pdfReader]);
 
@@ -1099,16 +1022,6 @@ export default function Home() {
     });
     return () => { cancelled = true; };
   }, [activeWorkspaceId, pdfReader, pdfSource]);
-
-  useEffect(() => {
-    if (currentPdfDocument) return;
-    setOutline(activeDocument || activeWorkspace.kind !== "demo" ? [] : [
-      { title: "3.4 Diabetic Neuropathy", page: 123, depth: 0 },
-      { title: "Introduction", page: 123, depth: 1 },
-      { title: "Pathophysiology", page: 126, depth: 1 },
-      { title: "Clinical features", page: 127, depth: 1 },
-    ]);
-  }, [activeDocument, activeWorkspace.kind, currentPdfDocument]);
 
   useEffect(() => {
     if (!toast || toast === "Đã tự lưu") return;
@@ -1647,305 +1560,54 @@ export default function Home() {
     return workspace.notebooks.some((notebook) => notebook.pages.some((page) => page.body.trim() || page.excerpts.length || page.strokes.length));
   });
 
-  const currentDriveSnapshot = (): DriveSyncSnapshot => ({
-    workspaces: workspacesRef.current,
-    activeWorkspaceId: activeWorkspaceIdRef.current,
+  const drive = useDriveController({
+    ready,
+    workspaces,
+    activeWorkspaceId,
     readerShare,
-    workspaceMode: workspaceModeRef.current,
+    workspaceMode,
     noteZoom,
-    savedAt: localSavedAtRef.current,
+    activeSheetContent: noteState.activeSheetContent,
+    noteStructure: noteState.structure,
+    createSnapshot: () => ({
+      workspaces: workspacesRef.current,
+      activeWorkspaceId: activeWorkspaceIdRef.current,
+      readerShare,
+      workspaceMode: workspaceModeRef.current,
+      noteZoom,
+      savedAt: localSavedAtRef.current,
+    }),
+    applyRestore: ({ snapshot }) => {
+      workspacesRef.current = snapshot.workspaces;
+      activeWorkspaceIdRef.current = snapshot.activeWorkspaceId;
+      workspaceModeRef.current = snapshot.workspaceMode;
+      setWorkspaces(snapshot.workspaces);
+      setActiveWorkspaceId(snapshot.activeWorkspaceId);
+      setReaderShare(snapshot.readerShare);
+      setWorkspaceMode(snapshot.workspaceMode);
+      setNoteZoom(snapshot.noteZoom);
+    },
+    hasMeaningfulLocalData,
+    onSnapshotSaved: (savedAt) => { localSavedAtRef.current = savedAt; },
+    notify: setToast,
   });
 
-  const recordDriveRevision = (revision: string) => {
-    driveRemoteRevisionRef.current = revision;
-    driveObservedRevisionRef.current = revision;
-    const account = driveUserRef.current;
-    if (account) persistDriveRevision(account.emailAddress, revision);
-  };
-
-  const applyDriveRestore = (result: DriveRestoreResult) => {
-    const { snapshot } = result;
-    workspacesRef.current = snapshot.workspaces;
-    activeWorkspaceIdRef.current = snapshot.activeWorkspaceId;
-    workspaceModeRef.current = snapshot.workspaceMode;
-    localSavedAtRef.current = snapshot.savedAt;
-    setWorkspaces(snapshot.workspaces);
-    setActiveWorkspaceId(snapshot.activeWorkspaceId);
-    setReaderShare(snapshot.readerShare);
-    setWorkspaceMode(snapshot.workspaceMode);
-    setNoteZoom(snapshot.noteZoom);
-  };
-
-  const syncToDrive = async (token = driveToken, silent = false) => {
-    if (!token) return false;
-    setDriveStatus("syncing");
-    setDriveError(null);
-    if (!silent) setToast("Đang lưu toàn bộ dữ liệu lên Google Drive…");
-    try {
-      let expectedRemoteRevision = driveRemoteRevisionRef.current;
-      if (!silent) {
-        const inspection = await driveSyncService.inspectRemote(token);
-        driveObservedRevisionRef.current = inspection.remoteRevision;
-        if (inspection.remoteRevision !== driveRemoteRevisionRef.current
-          && !window.confirm("Bản lưu Drive đã thay đổi kể từ lần đồng bộ gần nhất. Lưu bản trên thiết bị này sẽ ghi đè thay đổi đó. Tiếp tục?")) {
-          setDriveStatus("connected");
-          setToast("Đã giữ nguyên bản lưu hiện có trên Google Drive");
-          return false;
-        }
-        expectedRemoteRevision = inspection.remoteRevision;
-      }
-      const result = await driveSyncService.sync(token, currentDriveSnapshot(), { expectedRemoteRevision });
-      localSavedAtRef.current = result.snapshot.savedAt;
-      recordDriveRevision(result.remoteRevision);
-      setDriveReady(true);
-      setDriveLastSyncedAt(result.snapshot.savedAt);
-      setDriveStatus("connected");
-      if (!silent) setToast("Đã đồng bộ đầy đủ lên Google Drive");
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không thể đồng bộ Google Drive";
-      if (error instanceof DriveSyncConflictError) setDriveReady(false);
-      setDriveError(message);
-      setDriveStatus("error");
-      setToast(`Lỗi Drive: ${message}`);
-      return false;
-    }
-  };
-
-  const restoreFromDrive = async (token = driveToken, askBeforeReplace = true) => {
-    if (!token || driveSyncService.isBusy()) return false;
-    if (askBeforeReplace && hasMeaningfulLocalData() && !window.confirm("Tải dữ liệu từ Google Drive sẽ thay thế workspace đang có trên thiết bị này. Tiếp tục?")) return false;
-    setDriveStatus("syncing");
-    setDriveError(null);
-    setToast("Đang tải dữ liệu từ Google Drive…");
-    try {
-      const result = await driveSyncService.restore(token);
-      applyDriveRestore(result);
-      recordDriveRevision(result.remoteRevision);
-      setDriveReady(true);
-      setDriveLastSyncedAt(result.snapshot.savedAt);
-      setDriveStatus("connected");
-      const source = result.sourceVersion === "v2" ? "thư viện v2" : "bản lưu v1";
-      setToast(result.missingFiles
-        ? `Đã khôi phục ${source}; thiếu ${result.missingFiles} tệp trên Drive`
-        : `Đã khôi phục đầy đủ ${source} từ Google Drive`);
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không thể tải dữ liệu từ Google Drive";
-      setDriveError(message);
-      setDriveStatus("error");
-      setToast(`Lỗi Drive: ${message}`);
-      return false;
-    }
-  };
-
-  const resumeDesktopDrive = async (announce = false) => {
-    const clientId = desktopGoogleClientId.trim();
-    if (!IS_DESKTOP_APP || !clientId.endsWith(".apps.googleusercontent.com") || driveSyncService.isBusy()) return false;
-    setDriveStatus("connecting");
-    setDriveError(null);
-    try {
-      const connection = await driveSyncService.resume({ clientId });
-      if (!connection) {
-        setDriveStatus("disconnected");
-        return false;
-      }
-      const storedRevision = storedDriveRevision(connection.user.emailAddress);
-      driveUserRef.current = connection.user;
-      driveRemoteRevisionRef.current = storedRevision;
-      driveObservedRevisionRef.current = connection.remote.remoteRevision;
-      setDriveToken(connection.token);
-      setDriveUser(connection.user);
-      const revisionMatches = storedRevision === connection.remote.remoteRevision
-        && (storedRevision !== null || !connection.remote.hasBackup);
-      setDriveReady(revisionMatches);
-      setDriveStatus("connected");
-      if (!revisionMatches) {
-        setToast("Drive đã thay đổi hoặc chưa có mốc đồng bộ — chọn tải lên hoặc khôi phục trước khi bật tự động đồng bộ");
-      } else if (announce) setToast("Đã khôi phục kết nối Google Drive");
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không thể duy trì kết nối Google Drive";
-      setDriveError(message);
-      setDriveStatus("error");
-      if (announce) setToast(`Lỗi Drive: ${message}`);
-      return false;
-    }
-  };
-
-  const connectDrive = async () => {
-    setDrivePanelOpen(true);
-    const clientId = IS_DESKTOP_APP ? desktopGoogleClientId.trim() : GOOGLE_CLIENT_ID;
-    if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) {
-      setDriveStatus("error");
-      setDriveError(IS_DESKTOP_APP ? "Nhập OAuth Client ID loại Desktop app để kết nối Drive" : "Bản triển khai chưa có Google Client ID");
-      setToast("Cần cấu hình Google Client ID để bật Drive");
-      return;
-    }
-    if (IS_DESKTOP_APP) {
-      try { localStorage.setItem(DESKTOP_GOOGLE_CLIENT_ID_KEY, clientId); } catch { /* keep the public client ID in memory */ }
-      desktopDriveResumeClientRef.current = clientId;
-    }
-    setDriveStatus("connecting");
-    setDriveError(null);
-    try {
-      const connection = await driveSyncService.connect({
-        clientId,
-        clientSecret: IS_DESKTOP_APP ? desktopGoogleClientSecret.trim() : "",
-      });
-      if (IS_DESKTOP_APP) setDesktopGoogleClientSecret("");
-      driveUserRef.current = connection.user;
-      driveRemoteRevisionRef.current = storedDriveRevision(connection.user.emailAddress);
-      driveObservedRevisionRef.current = connection.remote.remoteRevision;
-      setDriveToken(connection.token);
-      setDriveUser(connection.user);
-      setDriveStatus("connected");
-      if (connection.remote.hasBackup && !hasMeaningfulLocalData()) {
-        await restoreFromDrive(connection.token, false);
-      } else if (!connection.remote.hasBackup) {
-        await syncToDrive(connection.token);
-      } else {
-        setDriveReady(false);
-        setToast("Drive đã có dữ liệu — chọn tải lên hoặc khôi phục");
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không thể kết nối Google Drive";
-      if (message === "Đã hủy kết nối Google Drive") {
-        setDriveStatus("disconnected");
-        setDriveError(null);
-        setToast(message);
-        return;
-      }
-      setDriveError(message);
-      setDriveStatus("error");
-      setToast(`Không thể kết nối Drive: ${message}`);
-    }
-  };
-
-  const cancelDriveConnection = async () => {
-    if (IS_DESKTOP_APP) await cancelDriveAuthorization();
-    setDriveStatus("disconnected");
-    setDriveError(null);
-    setToast("Đã hủy kết nối Google Drive");
-  };
-
-  const disconnectDrive = () => {
-    const token = driveToken;
-    driveUserRef.current = null;
-    driveRemoteRevisionRef.current = null;
-    driveObservedRevisionRef.current = null;
-    setDriveToken(null);
-    setDriveUser(null);
-    setDriveReady(false);
-    setDriveStatus("disconnected");
-    setDriveError(null);
-    setDrivePanelOpen(false);
-    setToast("Đã ngắt Google Drive; dữ liệu cục bộ vẫn được giữ");
-    void driveSyncService.disconnect(token).catch(() => undefined);
-  };
-
-  const changeDriveClient = () => {
-    const token = driveToken;
-    driveUserRef.current = null;
-    driveRemoteRevisionRef.current = null;
-    driveObservedRevisionRef.current = null;
-    desktopDriveResumeClientRef.current = desktopGoogleClientId.trim();
-    setDriveToken(null);
-    setDriveUser(null);
-    setDriveReady(false);
-    setDriveStatus("disconnected");
-    setDriveError(null);
-    setDrivePanelOpen(true);
-    setToast("Có thể nhập OAuth client khác rồi kết nối lại");
-    void driveSyncService.disconnect(token).catch(() => undefined);
-  };
-
-  useEffect(() => {
-    const clientId = desktopGoogleClientId.trim();
-    if (!ready || !IS_DESKTOP_APP || driveToken || !clientId.endsWith(".apps.googleusercontent.com")) return;
-    if (desktopDriveResumeClientRef.current === clientId) return;
-    desktopDriveResumeClientRef.current = clientId;
-    void resumeDesktopDrive();
-  }, [desktopGoogleClientId, driveToken, ready]);
-
-  useEffect(() => {
-    if (!IS_DESKTOP_APP || !driveToken || !desktopGoogleClientId.trim()) return;
-    const refresh = () => { void resumeDesktopDrive(); };
-    const timer = window.setInterval(refresh, 45 * 60 * 1000);
-    window.addEventListener("online", refresh);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("online", refresh);
-    };
-  }, [desktopGoogleClientId, driveToken]);
-
-  useEffect(() => {
-    if (!ready || !driveToken || !driveReady || !driveAutoSync) return;
-    const timer = window.setTimeout(() => { void syncToDrive(driveToken, true); }, 2200);
-    return () => window.clearTimeout(timer);
-  }, [activeWorkspaceId, driveAutoSync, driveReady, driveToken, noteZoom, readerShare, ready, workspaceMode, workspaces, noteState.activeSheetContent, noteState.structure]);
-
-  useEffect(() => {
-    pdfSearchAbortRef.current?.abort();
-    pdfSearchAbortRef.current = null;
-  }, [activeDocument?.id, searchQuery, searchWholeCollection]);
-
-  const performSearch = async () => {
-    const query = searchQuery.trim();
-    if (!query) {
-      setSearchResults([]);
-      setActiveSearchQuery("");
-      return;
-    }
-    pdfSearchAbortRef.current?.abort();
-    const abort = new AbortController();
-    pdfSearchAbortRef.current = abort;
-    setSearching(true);
-    setActiveSearchQuery(query);
-    setSearchResults([]);
-    const normalizedQuery = query.toLocaleLowerCase();
-    if (!activeWorkspace.documents.length) {
-      if (activeWorkspace.kind !== "demo") {
-        setSearching(false);
-        setToast("Chưa có PDF để tìm kiếm");
-        return;
-      }
-      const demoText = "Diabetic neuropathy pathophysiology hyperglycemia polyol pathway clinical features diagnosis management peripheral autonomic neuropathy";
-      const matches = demoText.toLocaleLowerCase().includes(normalizedQuery)
-        ? [{ documentId: null, documentName: "Tài liệu mẫu", page: 126, snippet: demoText, occurrences: 1 }]
-        : [];
-      if (!abort.signal.aborted) { setSearchResults(matches); setSearching(false); }
-      return;
-    }
-    const targets = (searchWholeCollection ? activeWorkspace.documents : activeDocument ? [activeDocument] : []).map((target) => ({
-      id: target.id,
-      name: target.name,
-      lastModified: target.lastModified,
-      proxy: target.id === loadedDocumentId ? currentPdfDocument : null,
-    }));
-    try {
-      const found = await pdfReader.search(query, targets, {
-        signal: abort.signal,
-        concurrency: window.matchMedia("(max-width: 820px)").matches ? 2 : 4,
-        maxResults: 300,
-      });
-      if (abort.signal.aborted) return;
-      setSearchResults(found);
-      setToast(found.length ? `Tìm thấy ở ${found.length} trang` : "Không tìm thấy kết quả");
-    } catch (error) {
-      if (!abort.signal.aborted && (error as Error).name !== "AbortError") setToast("Không thể tìm kiếm PDF");
-    } finally {
-      if (pdfSearchAbortRef.current === abort) pdfSearchAbortRef.current = null;
-      if (!abort.signal.aborted) setSearching(false);
-    }
-  };
-
-  const openSearchResult = (result: SearchResult) => {
-    if (result.documentId && result.documentId !== activeDocument?.id) switchDocument(result.documentId, result.page);
-    else goToPageFromRail(result.page);
-    if (window.matchMedia("(max-width: 820px)").matches) setShowPdfRail(false);
-    setPdfRailTab("search");
-  };
+  const pdfNavigation = usePdfNavigationController({
+    reader: pdfReader,
+    activeDocument,
+    activeWorkspace,
+    currentDocument: currentPdfDocument,
+    loadedDocumentId,
+    sourcePage,
+    sourcePages,
+    bookmarks,
+    annotations: pdfAnnotations,
+    goToPage,
+    switchDocument,
+    updateReader,
+    removeAnnotation: removePdfAnnotation,
+    notify: setToast,
+  });
 
   const exportAnnotatedPdf = async (mode: "download" | "print") => {
     if (!activeDocument) {
@@ -2181,9 +1843,7 @@ export default function Home() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
         event.preventDefault();
         setWorkspaceMode("reader");
-        setShowPdfRail(true);
-        setPdfRailTab("search");
-        window.setTimeout(() => document.getElementById("pdf-search-input")?.focus(), 0);
+        pdfNavigation.openSearch();
         return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "p" && activeDocument) {
@@ -2665,13 +2325,15 @@ export default function Home() {
   const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, TEXT_FONTS, activeNote, activeTool, applyTextCommand, applyTextLineHeight, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo });
 
   return (
+    <DriveControllerProvider controller={drive}>
+    <PdfNavigationControllerProvider controller={pdfNavigation}>
     <main className="app-shell">
       <input ref={previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, false); event.currentTarget.value = ""; }} />
       <input ref={libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, true); event.currentTarget.value = ""; }} />
-      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, driveStatus, driveToken, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setDrivePanelOpen, setLibraryOpen, toast, workspaceMode }} />
+      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setLibraryOpen, toast, workspaceMode }} />
 
-      {drivePanelOpen && (
-        <DrivePanel scope={{ IS_DESKTOP_APP, cancelDriveConnection, changeDriveClient, connectDrive, desktopGoogleClientId, desktopGoogleClientSecret, disconnectDrive, driveAutoSync, driveError, driveLastSyncedAt, driveReady, driveStatus, driveUser, restoreFromDrive, setDesktopGoogleClientId, setDesktopGoogleClientSecret, setDriveAutoSync, setDriveError, setDrivePanelOpen, syncToDrive }} />
+      {drive.panelOpen && (
+        <DrivePanel />
       )}
 
       {libraryOpen && (
@@ -2736,10 +2398,10 @@ export default function Home() {
         </div>
       )}
 
-      <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${showPdfRail ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfRailTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
-        <PdfNavigationRail scope={{ activeDocument, activeSearchQuery, activeWorkspace, bookmarks, currentPdfDocument, goToPageFromRail, openSearchResult, outline, pdfAnnotationLabel, pdfAnnotationSummary, pdfAnnotations, pdfRailTab, performSearch, removePdfAnnotation, searchQuery, searchResults, searchWholeCollection, searching, setPdfRailTab, setSearchQuery, setSearchWholeCollection, setShowPdfRail, sourcePage, sourcePages, updateReader }} />
+      <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${pdfNavigation.railVisible ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfNavigation.railTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
+        <PdfNavigationRail />
 
-        <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeSearchQuery, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setShowPdfRail, setSourceZoom, showPdfRail, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
 
         <SplitDivider onPointerDown={startResize} />
 
@@ -2747,5 +2409,7 @@ export default function Home() {
         {showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
       </WorkspaceShell>
     </main>
+    </PdfNavigationControllerProvider>
+    </DriveControllerProvider>
   );
 }
