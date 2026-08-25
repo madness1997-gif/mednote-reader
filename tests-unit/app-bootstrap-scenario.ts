@@ -119,6 +119,21 @@ function writeRawRecord(key: string, value: unknown) {
   });
 }
 
+function readRawRecord(key: string) {
+  return new Promise<unknown>((resolve, reject) => {
+    const request = indexedDB.open("mednote-local", 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction("documents", "readonly");
+      const read = transaction.objectStore("documents").get(key);
+      read.onsuccess = () => resolve(read.result);
+      read.onerror = () => reject(read.error);
+      transaction.oncomplete = () => database.close();
+    };
+  });
+}
+
 async function seed() {
   if (scenario === "v6") {
     await new IndexedDbNoteRepository().replaceLibrary(v6Library());
@@ -129,6 +144,13 @@ async function seed() {
       runtimeWorkspace("context-a", "runtime a"),
       runtimeWorkspace("context-b", "runtime b"),
     ], "context-b", { readerShare: 72, workspaceMode: "note", noteZoom: 1.6, savedAt: 777 })));
+  }
+  if (scenario === "v6-with-v5") {
+    await new IndexedDbNoteRepository().replaceLibrary(v6Library());
+    // Deliberately malformed: reading this as a v5 library would throw. A
+    // verified v6 bootstrap must delete the namespace without hydrating it.
+    await writeRawRecord("library:v5:meta", { version: 5, contextIds: null });
+    await writeRawRecord("library:v5:orphan", { stale: true });
   }
   if (scenario === "v5-precedence") {
     const { saveIncrementalLibrary } = await import("../app/incremental-library-store");
@@ -199,6 +221,9 @@ if (scenario === "legacy-pdf") {
 
 const state = noteStore.getSnapshot();
 const library = await noteRepository.loadLibrary();
+const v5StoragePresent = scenario === "v6-with-v5"
+  ? Boolean(await readRawRecord("library:v5:meta") || await readRawRecord("library:v5:orphan"))
+  : undefined;
 process.stdout.write(JSON.stringify({
   result: {
     workspaceIds: first.workspaces.map((workspace) => workspace.id),
@@ -215,4 +240,5 @@ process.stdout.write(JSON.stringify({
   notebookTitles: state.structure?.notebooks.map((notebook) => notebook.title) || [],
   libraryDocumentNames: library?.documents.documents.map((document) => document.name) || [],
   pdf,
+  v5StoragePresent,
 }));

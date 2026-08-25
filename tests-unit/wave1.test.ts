@@ -278,7 +278,7 @@ test("full-library validation rejects orphan SheetContent and replaceLibrary rem
   }
 });
 
-test("storage migration commits v6, verifies hashes, and keeps v5 fallback", async () => {
+test("storage migration commits v6, verifies hashes, then removes the v5 namespace", async () => {
   const dbName = `mednote-wave1-migration-${crypto.randomUUID()}`;
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(dbName, 1);
@@ -297,6 +297,7 @@ test("storage migration commits v6, verifies hashes, and keeps v5 fallback", asy
     v5.sheets.forEach((item) => store.put(item, `library:v5:sheet:${item.id}`));
     v5.links.forEach((item) => store.put(item, `library:v5:note-document-link:${item.id}`));
     v5.contexts.forEach((item) => store.put(item, `library:v5:document-context:${item.id}`));
+    store.put({ keep: true }, "pdf:v5-name-is-not-a-schema-key");
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
@@ -309,13 +310,37 @@ test("storage migration commits v6, verifies hashes, and keeps v5 fallback", asy
     const repository = new IndexedDbNoteRepository({ dbName });
     const reloaded = await repository.loadLibrary();
     assert.ok(reloaded);
-    assert.equal((await rawRead<{ version: number }>(dbName, "library:v5:meta"))?.version, 5);
+    const v5Keys = [
+      "library:v5:meta",
+      "library:v5:workspace",
+      ...v5.notebooks.map((item) => `library:v5:notebook:${item.id}`),
+      ...v5.sections.map((item) => `library:v5:section:${item.id}`),
+      ...v5.pages.map((item) => `library:v5:page:${item.id}`),
+      ...v5.sheets.map((item) => `library:v5:sheet:${item.id}`),
+      ...v5.links.map((item) => `library:v5:note-document-link:${item.id}`),
+      ...v5.contexts.map((item) => `library:v5:document-context:${item.id}`),
+    ];
+    for (const key of v5Keys) assert.equal(await rawRead(dbName, key), undefined, `${key} phải bị xóa sau cutover`);
+    assert.deepEqual(await rawRead(dbName, "pdf:v5-name-is-not-a-schema-key"), { keep: true });
     assert.equal((await rawRead<{ version: number }>(dbName, V6_KEYS.meta))?.version, 6);
     assert.deepEqual(reloaded.notes.active, { activeNotebookId: "nb-endo", activeSectionId: "sec-diabetes", activePageId: "page-dm", activeSheetId: "sheet-dm-2" });
     assert.deepEqual(Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(reloaded.sheetContents[sheet.id])])), migrated.report.sheetContentHashes);
     const rebuilt = relationV2FromV6(reloaded);
     assert.deepEqual(rebuilt.groups?.[0].documentIds, ["doc-ada", "doc-idsa"]);
     assert.equal(rebuilt.notebooks?.[0].sections.length, 2);
+  } finally {
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
+test("failed v5 migration preserves the import source and writes no v6 marker", async () => {
+  const dbName = `mednote-wave1-v5-blocked-${crypto.randomUUID()}`;
+  try {
+    await new IndexedDbNoteRepository({ dbName }).loadLibrary();
+    await rawWrite(dbName, "library:v5:meta", v5.meta);
+    await assert.rejects(migrateStoredLibraryToV6({ dbName, relation }), /Kho v5 thiếu record/);
+    assert.equal((await rawRead<{ version: number }>(dbName, "library:v5:meta"))?.version, 5);
+    assert.equal(await rawRead(dbName, V6_KEYS.meta), undefined);
   } finally {
     await deleteNoteRepositoryDatabase(dbName);
   }

@@ -19,6 +19,7 @@ type ScenarioResult = {
   notebookTitles: string[];
   libraryDocumentNames: string[];
   pdf?: { name?: string; text?: string; textAfterSecondBootstrap?: string };
+  v5StoragePresent?: boolean;
 };
 
 const scenarioFixture = fileURLToPath(new URL("./app-bootstrap-scenario.ts", import.meta.url));
@@ -55,6 +56,13 @@ test("P6.5 v6 documents keep document-runtime preference for active context and 
   assert.equal(result.workspaceMode, "note");
   assert.equal(result.noteZoom, 1.6);
   assert.equal(result.savedAt, 777);
+});
+
+test("P6.5 verified v6 skips malformed v5 and removes its storage namespace", () => {
+  const restored = runScenario("v6-with-v5");
+  assert.equal(restored.activeBody, "from v6");
+  assert.equal(restored.v5StoragePresent, false);
+  assert.equal(restored.result.warnings.some((warning) => warning.includes("incremental library v5")), false);
 });
 
 test("P6.5 incremental v5 wins over localStorage v2 for note migration and runtime fallback", () => {

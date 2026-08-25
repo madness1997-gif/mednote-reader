@@ -1,7 +1,7 @@
 import { loadIncrementalLibrary } from "./incremental-library-store";
 import { localBinaryStorage, type StoredPdf } from "./local-binary-storage";
 import { noteRepository, noteStore } from "./note-store";
-import type { LegacyRelationV2 } from "./note-migration";
+import { discardStoredV5Library, type LegacyRelationV2 } from "./note-migration";
 import {
   createBlankPage,
   normalizePage,
@@ -104,7 +104,7 @@ function readLegacyRelation(warnings: string[]) {
   }
 }
 
-async function readLegacySnapshots(warnings: string[]): Promise<BootstrapSnapshots> {
+async function readLegacySnapshots(warnings: string[], includeIncrementalV5: boolean): Promise<BootstrapSnapshots> {
   const localSnapshot = readSnapshot(STORAGE_KEY, "library v2", warnings);
   let documentSnapshot: PersistedLibrary | null = null;
   let incrementalSnapshot: PersistedLibrary | null = null;
@@ -113,10 +113,12 @@ async function readLegacySnapshots(warnings: string[]): Promise<BootstrapSnapsho
   } catch {
     warnings.push("Không thể đọc document runtime v1; đã dùng runtime dự phòng.");
   }
-  try {
-    incrementalSnapshot = await loadIncrementalLibrary() as PersistedLibrary | null;
-  } catch {
-    warnings.push("Không thể đọc incremental library v5; migration tiếp tục với nguồn cũ hơn.");
+  if (includeIncrementalV5) {
+    try {
+      incrementalSnapshot = await loadIncrementalLibrary() as PersistedLibrary | null;
+    } catch {
+      warnings.push("Không thể đọc incremental library v5; migration tiếp tục với nguồn cũ hơn.");
+    }
   }
   return {
     localSnapshot,
@@ -140,7 +142,7 @@ async function hasCanonicalV6Library(warnings: string[]) {
   }
 }
 
-async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: string[]) {
+async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: string[], alreadyCanonical: boolean) {
   const fallbackWorkspace = createEmptyWorkspace();
   const fallbackSnapshot: PersistedLibrary = {
     workspaces: [fallbackWorkspace],
@@ -155,6 +157,7 @@ async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: stri
       relation: snapshots.relation,
       localSnapshot: snapshots.incrementalSnapshot || snapshots.localSnapshot || undefined,
       fallbackSnapshot,
+      skipMigration: alreadyCanonical,
     });
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : "Không thể mở kho note v6");
@@ -292,11 +295,20 @@ async function migrateLegacyNotebook(
 
 export async function bootstrapMedNote(): Promise<BootstrapResult> {
   const warnings: string[] = [];
-  const snapshots = await readLegacySnapshots(warnings);
-  const preferred = readPreferredRuntimeSnapshot(snapshots);
   const hadCanonicalLibrary = await hasCanonicalV6Library(warnings);
+  if (hadCanonicalLibrary) {
+    try {
+      await discardStoredV5Library();
+    } catch {
+      warnings.push("Kho v6 đã hợp lệ nhưng chưa xóa được dữ liệu v5 cũ.");
+    }
+  }
+  // v5 is an import source only. Once the canonical repository verifies, it
+  // must not participate in bootstrap preference or fallback resolution.
+  const snapshots = await readLegacySnapshots(warnings, !hadCanonicalLibrary);
+  const preferred = readPreferredRuntimeSnapshot(snapshots);
 
-  await initializeV6Library(snapshots, warnings);
+  await initializeV6Library(snapshots, warnings, hadCanonicalLibrary);
 
   const v6Runtime = restoreV6DocumentRuntime(preferred, warnings);
   const v6HasDocuments = Boolean(v6Runtime?.workspaces.some((workspace) => workspace.documents.length > 0));

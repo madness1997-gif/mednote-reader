@@ -45,6 +45,7 @@ export type MigrationResult = { library: LibraryV6; report: MigrationReport };
 
 const LEGACY_META_WORKSPACE = "__mednote_relations_v2__";
 const LAZY_FLAG = "__mednoteLazyPage";
+const V5_STORAGE_PREFIX = "library:v5:";
 const NAVIGATION_FIELDS = new Set([
   "id", "title", "titleHtml", "pageId", "sectionId", "notebookId", "order",
   "logicalPageId", "logicalPageTitle", "sheetTitle", "sheetOrder", LAZY_FLAG,
@@ -362,6 +363,50 @@ async function openLegacyDb(dbName: string, storeName: string) {
   });
 }
 
+/**
+ * Remove the import-only v5 namespace after v6 has been loaded and verified.
+ * The object store is shared with PDFs/assets, so cleanup is intentionally
+ * prefix-bound and never clears the store wholesale.
+ */
+export async function discardStoredV5Library(options: { dbName?: string; storeName?: string } = {}) {
+  const dbName = options.dbName || "mednote-local";
+  const storeName = options.storeName || "documents";
+  const db = await openLegacyDb(dbName, storeName);
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      const store = transaction.objectStore(storeName);
+      const range = IDBKeyRange.bound(V5_STORAGE_PREFIX, `${V5_STORAGE_PREFIX}\uffff`);
+      const request = store.openKeyCursor(range);
+      let removed = 0;
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        store.delete(cursor.primaryKey);
+        removed += 1;
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve(removed);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error("Không thể xóa kho v5 sau cutover"));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function discardV5AfterVerifiedCutover(dbName: string, storeName: string, report: MigrationReport) {
+  try {
+    await discardStoredV5Library({ dbName, storeName });
+  } catch {
+    // v6 is already authoritative and verified. A cleanup failure must not
+    // send the app back through legacy fallback; the next bootstrap still
+    // skips v5 whenever the v6 repository loads successfully.
+    report.warnings.push("Kho v6 đã hợp lệ nhưng chưa xóa được dữ liệu v5 cũ");
+  }
+}
+
 async function readV5Source(dbName: string, storeName: string): Promise<V5MigrationSource | null> {
   const db = await openLegacyDb(dbName, storeName);
   try {
@@ -447,9 +492,13 @@ export async function migrateStoredLibraryToV6(options: {
       await repository.replaceLibrary(repaired);
       const reloaded = await repository.loadLibrary();
       if (!reloaded) throw new Error("Đã sửa tên Notebook trùng nhưng không load lại được");
-      return { library: reloaded, report: migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"] ) };
+      const report = migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"]);
+      await discardV5AfterVerifiedCutover(dbName, storeName, report);
+      return { library: reloaded, report };
     }
-    return { library: current, report: migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"] ) };
+    const report = migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"]);
+    await discardV5AfterVerifiedCutover(dbName, storeName, report);
+    return { library: current, report };
   }
   let result: MigrationResult | null = null;
   const v5 = await readV5Source(dbName, storeName);
@@ -470,5 +519,6 @@ export async function migrateStoredLibraryToV6(options: {
   const reloadedHashes = Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(reloaded.sheetContents[sheet.id])]));
   verifyMigration({ library: reloaded, report: result.report }, result.report.sheetContentHashes);
   if (stableStringify(reloadedHashes) !== stableStringify(result.report.sheetContentHashes)) throw new Error("Hash Sheet.content thay đổi sau transaction v6");
+  await discardV5AfterVerifiedCutover(dbName, storeName, result.report);
   return { library: reloaded, report: result.report };
 }
