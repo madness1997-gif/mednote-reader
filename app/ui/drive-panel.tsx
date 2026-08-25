@@ -3,6 +3,7 @@ import { useActiveDriveController } from "../drive-controller";
 
 export function DrivePanel() {
   const drive = useActiveDriveController();
+  const preparingWebAuthorization = !drive.isDesktopApp && !drive.authorizationReady && drive.preparingAuthorization;
 
   return (<><aside className="drive-panel" aria-label="Google Drive">
           <div className="drive-panel-header">
@@ -29,9 +30,9 @@ export function DrivePanel() {
             </>
           ) : (
             <div className={`drive-empty ${drive.error ? "error" : ""}`}>
-              {drive.status === "connecting" ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
-              <strong>{drive.status === "connecting" ? "Đang kết nối…" : "Chưa thể dùng Google Drive"}</strong>
-              <span>{drive.error || "Đăng nhập để lưu workspace trên Drive."}</span>
+              {drive.status === "connecting" || preparingWebAuthorization ? <RefreshCw className="spin" size={28} /> : <CloudOff size={28} />}
+              <strong>{drive.status === "connecting" ? "Đang kết nối…" : preparingWebAuthorization ? "Đang chuẩn bị đăng nhập…" : "Chưa thể dùng Google Drive"}</strong>
+              <span>{drive.error || (preparingWebAuthorization ? "Đang tải dịch vụ đăng nhập Google." : "Đăng nhập để lưu workspace trên Drive.")}</span>
               {drive.isDesktopApp && <>
                 <label className="drive-client-id"><span>OAuth Client ID (Desktop)</span><input disabled={drive.status === "connecting"} value={drive.desktopClientId} onChange={(event) => drive.setDesktopClientId(event.target.value)} placeholder="…apps.googleusercontent.com" spellCheck={false} /><small>Dùng Client ID loại Desktop app.</small></label>
                 <label className="drive-client-id"><span>Client Secret (Desktop)</span><input disabled={drive.status === "connecting"} type="password" value={drive.desktopClientSecret} onChange={(event) => drive.setDesktopClientSecret(event.target.value)} placeholder="GOCSPX-…" autoComplete="off" spellCheck={false} /><small>Dán installed.client_secret; để trống nếu Google không cấp Secret. Chỉ lưu mã hóa sau khi kết nối.</small></label>
@@ -50,6 +51,8 @@ export function DrivePanel() {
               </>}
               {drive.status === "connecting"
                 ? <button onClick={() => { void drive.cancelConnection(); }}>Hủy kết nối</button>
+                : !drive.isDesktopApp && !drive.authorizationReady
+                  ? <button disabled={drive.preparingAuthorization} onClick={() => { void drive.retryAuthorizationPreparation(); }}>{drive.preparingAuthorization ? "Đang tải đăng nhập…" : "Tải lại đăng nhập"}</button>
                 : <button onClick={() => { void drive.connect(); }}>Kết nối</button>}
             </div>
           )}

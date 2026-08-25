@@ -8,7 +8,7 @@ import {
   type DriveRestoreResult,
   type DriveSyncSnapshot,
 } from "./drive-sync-service";
-import { cancelDriveAuthorization } from "./google-drive";
+import { cancelDriveAuthorization, prepareDriveAuthorization } from "./google-drive";
 import type { WorkspaceItem, WorkspaceMode } from "./document-runtime-adapter";
 
 const GOOGLE_CLIENT_ID = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
@@ -46,12 +46,15 @@ export type DriveController = {
   autoSync: boolean;
   lastSyncedAt: number | null;
   error: string | null;
+  authorizationReady: boolean;
+  preparingAuthorization: boolean;
   togglePanel: () => void;
   closePanel: () => void;
   setDesktopClientId: (value: string) => void;
   setDesktopClientSecret: (value: string) => void;
   setAutoSync: (enabled: boolean) => void;
   importDesktopOAuth: (file?: File) => Promise<void>;
+  retryAuthorizationPreparation: () => Promise<void>;
   connect: () => Promise<void>;
   cancelConnection: () => Promise<void>;
   disconnect: () => void;
@@ -98,11 +101,38 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
   const [autoSync, setAutoSync] = useState(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authorizationReady, setAuthorizationReady] = useState(IS_DESKTOP_APP);
+  const [preparingAuthorization, setPreparingAuthorization] = useState(!IS_DESKTOP_APP);
   const desktopResumeClientRef = useRef<string | null>(null);
   const remoteRevisionRef = useRef<string | null>(null);
   const userRef = useRef<DriveAccount | null>(null);
 
   const notify = useCallback((message: string) => integrationRef.current.notify(message), []);
+
+  const prepareAuthorization = useCallback(async (announceError = false) => {
+    if (IS_DESKTOP_APP) {
+      setAuthorizationReady(true);
+      setPreparingAuthorization(false);
+      return true;
+    }
+    setPreparingAuthorization(true);
+    try {
+      await prepareDriveAuthorization();
+      setAuthorizationReady(true);
+      setError(null);
+      setStatus((current) => current === "error" ? "disconnected" : current);
+      return true;
+    } catch (preparationError) {
+      const message = preparationError instanceof Error ? preparationError.message : "Không tải được dịch vụ đăng nhập Google";
+      setAuthorizationReady(false);
+      setError(message);
+      setStatus("error");
+      if (announceError) notify(`Lỗi Drive: ${message}`);
+      return false;
+    } finally {
+      setPreparingAuthorization(false);
+    }
+  }, [notify]);
 
   const recordRevision = useCallback((revision: string) => {
     remoteRevisionRef.current = revision;
@@ -209,6 +239,15 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
 
   const connect = useCallback(async () => {
     setPanelOpen(true);
+    if (!IS_DESKTOP_APP && !authorizationReady) {
+      const message = preparingAuthorization
+        ? "Dịch vụ đăng nhập Google đang được tải. Hãy chờ vài giây rồi thử lại."
+        : "Dịch vụ đăng nhập Google chưa sẵn sàng. Hãy tải lại đăng nhập rồi thử lại.";
+      setStatus("error");
+      setError(message);
+      notify(message);
+      return;
+    }
     const clientId = IS_DESKTOP_APP ? desktopClientId.trim() : GOOGLE_CLIENT_ID;
     if (!clientId || !clientId.endsWith(".apps.googleusercontent.com")) {
       setStatus("error");
@@ -253,7 +292,7 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
       setStatus("error");
       notify(`Không thể kết nối Drive: ${message}`);
     }
-  }, [desktopClientId, desktopClientSecret, notify, restoreFromDrive, syncToDrive]);
+  }, [authorizationReady, desktopClientId, desktopClientSecret, notify, preparingAuthorization, restoreFromDrive, syncToDrive]);
 
   const cancelConnection = useCallback(async () => {
     if (IS_DESKTOP_APP) await cancelDriveAuthorization();
@@ -313,6 +352,10 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
   }, []);
 
   useEffect(() => {
+    void prepareAuthorization();
+  }, [prepareAuthorization]);
+
+  useEffect(() => {
     const clientId = desktopClientId.trim();
     if (!integration.ready || !IS_DESKTOP_APP || token || !clientId.endsWith(".apps.googleusercontent.com")) return;
     if (desktopResumeClientRef.current === clientId) return;
@@ -362,12 +405,15 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
     autoSync,
     lastSyncedAt,
     error,
+    authorizationReady,
+    preparingAuthorization,
     togglePanel: () => setPanelOpen((open) => !open),
     closePanel: () => setPanelOpen(false),
     setDesktopClientId,
     setDesktopClientSecret,
     setAutoSync,
     importDesktopOAuth,
+    retryAuthorizationPreparation: async () => { await prepareAuthorization(true); },
     connect,
     cancelConnection,
     disconnect,

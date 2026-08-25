@@ -54,9 +54,10 @@ test("legacy v5 is a lazy one-shot reader with no production write or cache modu
 });
 
 test("Drive UI consumes a stateful controller instead of page scope props", async () => {
-  const [page, controller, topBar, panel] = await Promise.all([
+  const [page, controller, googleDrive, topBar, panel] = await Promise.all([
     source("app/page.tsx"),
     source("app/drive-controller.tsx"),
+    source("app/google-drive.ts"),
     source("app/ui/app-top-bar.tsx"),
     source("app/ui/drive-panel.tsx"),
   ]);
@@ -65,6 +66,10 @@ test("Drive UI consumes a stateful controller instead of page scope props", asyn
   assert.doesNotMatch(page, /driveStatus|driveToken|setDrivePanelOpen/);
   assert.match(controller, /useState<DriveStatus>/);
   assert.match(controller, /driveSyncService\.resume/);
+  assert.match(controller, /prepareDriveAuthorization/);
+  assert.match(googleDrive, /error_callback/);
+  assert.match(googleDrive, /DRIVE_AUTH_TIMEOUT_MS/);
+  assert.match(googleDrive, /DRIVE_FETCH_TIMEOUT_MS/);
   assert.match(topBar, /useActiveDriveController/);
   assert.match(panel, /useActiveDriveController/);
   assert.doesNotMatch(panel, /DrivePanelScope|\{ scope \}/);
