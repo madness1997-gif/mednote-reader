@@ -5,7 +5,24 @@ import { pdfWorkScheduler, scheduleIdleWork, type ScheduledPdfWork } from "./pdf
 const DEFAULT_PDF_ITEM_SIZE = 142;
 const OVERSCAN_ITEMS = 2;
 
-type VirtualRange = { start: number; end: number };
+export type VirtualRange = { start: number; end: number };
+
+export function pdfThumbnailVirtualRange(
+  total: number,
+  firstVisible: number,
+  visibleCount: number,
+  overscan = OVERSCAN_ITEMS,
+): VirtualRange {
+  const normalizedTotal = Math.max(0, Math.trunc(total));
+  if (!normalizedTotal) return { start: 0, end: 0 };
+  const normalizedFirst = Math.max(0, Math.min(normalizedTotal - 1, Math.trunc(firstVisible)));
+  const normalizedVisible = Math.max(1, Math.trunc(visibleCount));
+  const normalizedOverscan = Math.max(0, Math.trunc(overscan));
+  return {
+    start: Math.max(0, normalizedFirst - normalizedOverscan),
+    end: Math.min(normalizedTotal, normalizedFirst + normalizedVisible + normalizedOverscan + 1),
+  };
+}
 
 type VirtualWindow = {
   listRef: RefObject<HTMLDivElement | null>;
@@ -40,9 +57,8 @@ function useVirtualWindow(total: number, activeIndex: number, defaultItemSize: n
     if (!metrics) return;
     const firstVisible = Math.floor(metrics.viewportTop / itemSize);
     const visibleCount = Math.max(1, Math.ceil(metrics.viewportHeight / itemSize));
-    const start = Math.max(0, firstVisible - OVERSCAN_ITEMS);
-    const end = Math.min(total, firstVisible + visibleCount + OVERSCAN_ITEMS + 1);
-    setRange((current) => current.start === start && current.end === end ? current : { start, end });
+    const next = pdfThumbnailVirtualRange(total, firstVisible, visibleCount);
+    setRange((current) => current.start === next.start && current.end === next.end ? current : next);
   }, [itemSize, total]);
 
   useLayoutEffect(() => {

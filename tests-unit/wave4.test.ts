@@ -34,6 +34,32 @@ function library(): LibraryV6 {
   };
 }
 
+function largeContinuousLibrary(activePageSheets = 128, siblingPageSheets = 16): LibraryV6 {
+  const source = library();
+  const activeSheets = Array.from({ length: activePageSheets }, (_, order) => ({
+    id: `sheet-a-${order + 1}`,
+    pageId: "page-a",
+    order,
+  }));
+  const siblingSheets = Array.from({ length: siblingPageSheets }, (_, order) => ({
+    id: `sheet-b-${order + 1}`,
+    pageId: "page-b",
+    order,
+  }));
+  source.notes.sheets = [...activeSheets, ...siblingSheets];
+  source.notes.active = {
+    activeNotebookId: "nb",
+    activeSectionId: "sec",
+    activePageId: "page-a",
+    activeSheetId: activeSheets[0].id,
+  };
+  source.sheetContents = Object.fromEntries([...activeSheets, ...siblingSheets].map((sheet) => [
+    sheet.id,
+    { body: `${sheet.id}: ${"clinical-note ".repeat(80)}` },
+  ]));
+  return source;
+}
+
 test("continuous mode hydrates only Sheets in the active Page and keeps one draft owner", async () => {
   const dbName = `mednote-wave4-${crypto.randomUUID()}`;
   const repository = new IndexedDbNoteRepository({ dbName });
@@ -64,6 +90,45 @@ test("continuous mode hydrates only Sheets in the active Page and keeps one draf
 
     await store.openSheet("sheet-b1");
     assert.deepEqual(Object.keys(store.getSnapshot().pageSheetContents), ["sheet-b1"], "cross-Page navigation must release the old Page cache");
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});
+
+test("stress: continuous mode preserves drafts and Page boundaries with 128 Sheets", { timeout: 15_000 }, async () => {
+  const dbName = `mednote-wave4-128-sheets-${crypto.randomUUID()}`;
+  const repository = new IndexedDbNoteRepository({ dbName });
+  await repository.replaceLibrary(largeContinuousLibrary());
+  const reads: string[] = [];
+  const loadSheetContent = repository.loadSheetContent.bind(repository);
+  repository.loadSheetContent = async (sheetId: string) => {
+    reads.push(sheetId);
+    return loadSheetContent(sheetId);
+  };
+  const store = new NoteStore(repository);
+  try {
+    await store.initialize({ skipMigration: true });
+    reads.length = 0;
+    const startedAt = performance.now();
+    await store.loadPageSheetContents("page-a");
+    const elapsedMs = performance.now() - startedAt;
+    const snapshot = store.getSnapshot();
+
+    assert.equal(reads.length, 128);
+    assert.equal(new Set(reads).size, 128);
+    assert.equal(reads.some((id) => id.startsWith("sheet-b-")), false);
+    assert.equal(Object.keys(snapshot.pageSheetContents).length, 128);
+    assert.ok(elapsedMs < 5_000, `128-Sheet hydration exceeded budget: ${elapsedMs.toFixed(1)} ms`);
+
+    store.patchActiveSheetContent({ body: "draft under 128-Sheet load" });
+    await store.openSheet("sheet-a-128");
+    assert.equal((await loadSheetContent("sheet-a-1"))?.body, "draft under 128-Sheet load");
+    assert.equal(store.getSnapshot().structure?.active.activeSheetId, "sheet-a-128");
+    assert.equal(Object.keys(store.getSnapshot().pageSheetContents).length, 128);
+
+    store.releaseInactiveSheetContents();
+    assert.deepEqual(Object.keys(store.getSnapshot().pageSheetContents), ["sheet-a-128"]);
   } finally {
     await store.flush();
     await deleteNoteRepositoryDatabase(dbName);

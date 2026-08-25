@@ -424,6 +424,92 @@ test("concurrent auto-sync requests coalesce to one trailing upload with the lat
   } finally { await context.close(); }
 });
 
+test("stress: 128 overlapping auto-sync requests collapse to one latest trailing commit", { timeout: 15_000 }, async () => {
+  const remote = new MemoryDrive();
+  const context = await harness(library({ body: "sync stress", withAsset: false }), remote);
+  let manifestWrites = 0;
+  let releaseFirstManifest!: () => void;
+  let markFirstManifestStarted!: () => void;
+  const firstManifestStarted = new Promise<void>((resolve) => { markFirstManifestStarted = resolve; });
+  const firstManifestGate = new Promise<void>((resolve) => { releaseFirstManifest = resolve; });
+  const upsert = remote.upsertFile;
+  remote.upsertFile = async (token, options) => {
+    if (options.mednoteId === DRIVE_MANIFEST_ID) {
+      manifestWrites += 1;
+      if (manifestWrites === 1) {
+        markFirstManifestStarted();
+        await firstManifestGate;
+      }
+    }
+    return upsert(token, options);
+  };
+  try {
+    const first = context.service.sync("stress-token", { ...context.snapshot, readerShare: 21 });
+    await firstManifestStarted;
+    const queued = Array.from({ length: 128 }, (_, index) => context.service.sync("stress-token", {
+      ...context.snapshot,
+      readerShare: index === 127 ? 79 : 20 + (index % 59),
+      noteZoom: 1 + index / 1_000,
+    }));
+    assert.equal(context.service.isBusy(), true);
+    releaseFirstManifest();
+    const [firstResult, ...queuedResults] = await Promise.all([first, ...queued]);
+
+    assert.equal(firstResult.snapshot.readerShare, 21);
+    assert.equal(manifestWrites, 2);
+    assert.ok(queuedResults.every((result) => result.snapshot.readerShare === 79));
+    const manifest = remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    const backup = parseDriveBackup(JSON.parse(await manifest.blob.text()));
+    assert.equal(backup.preferences.readerShare, 79);
+    assert.equal(backup.preferences.noteZoom, 1.127);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    assert.equal(context.service.isBusy(), false);
+  } finally { await context.close(); }
+});
+
+test("stress: an overlapping second-device commit invalidates a slow stale sync", { timeout: 15_000 }, async () => {
+  const remote = new MemoryDrive();
+  remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(library({ body: "shared base", withAsset: false })))], { type: "application/json" }));
+  const slowDevice = await harness(library({ body: "slow stale device", withAsset: false }), remote);
+  const fastDevice = await harness(library({ body: "fresh overlapping device", withAsset: false }), remote);
+  try {
+    const slowConnection = await slowDevice.service.connect({ clientId: "slow.apps.googleusercontent.com" });
+    const fastConnection = await fastDevice.service.connect({ clientId: "fast.apps.googleusercontent.com" });
+    slowDevice.pdfs.set("doc-harrison", { name: "Harrison.pdf", blob: new Blob(["slow-device-pdf"], { type: "application/pdf" }) });
+
+    let releaseSlowUpload!: () => void;
+    let markSlowUploadStarted!: () => void;
+    const slowUploadStarted = new Promise<void>((resolve) => { markSlowUploadStarted = resolve; });
+    const slowUploadGate = new Promise<void>((resolve) => { releaseSlowUpload = resolve; });
+    const upsert = remote.upsertFile;
+    let blocked = false;
+    remote.upsertFile = async (token, options) => {
+      if (!blocked && token === slowConnection.token && options.mednoteId === "pdf:doc-harrison") {
+        blocked = true;
+        markSlowUploadStarted();
+        await slowUploadGate;
+      }
+      return upsert(token, options);
+    };
+
+    const staleSync = slowDevice.service.sync(slowConnection.token, slowDevice.snapshot);
+    const staleRejected = assert.rejects(staleSync, /đã thay đổi trên thiết bị khác/);
+    await slowUploadStarted;
+    await fastDevice.service.sync(fastConnection.token, fastDevice.snapshot);
+    releaseSlowUpload();
+    await staleRejected;
+
+    const manifest = remote.shared.get(DRIVE_MANIFEST_ID);
+    assert.ok(manifest);
+    assert.equal(parseDriveBackup(JSON.parse(await manifest.blob.text())).sheetContents.sheet.body, "fresh overlapping device");
+    assert.equal(remote.upserts.filter((id) => id === DRIVE_MANIFEST_ID).length, 1);
+  } finally {
+    await slowDevice.close();
+    await fastDevice.close();
+  }
+});
+
 test("a second connected device cannot silently overwrite a newer remote manifest", async () => {
   const remote = new MemoryDrive();
   remote.add("shared", DRIVE_MANIFEST_ID, new Blob([JSON.stringify(createDriveBackup(library({ body: "common base", withAsset: false })))], { type: "application/json" }));
