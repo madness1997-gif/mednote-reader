@@ -142,7 +142,7 @@ async function hasCanonicalV6Library(warnings: string[]) {
   }
 }
 
-async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: string[], alreadyCanonical: boolean) {
+async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: string[]) {
   const fallbackWorkspace = createEmptyWorkspace();
   const fallbackSnapshot: PersistedLibrary = {
     workspaces: [fallbackWorkspace],
@@ -157,7 +157,6 @@ async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: stri
       relation: snapshots.relation,
       localSnapshot: snapshots.incrementalSnapshot || snapshots.localSnapshot || undefined,
       fallbackSnapshot,
-      skipMigration: alreadyCanonical,
     });
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : "Không thể mở kho note v6");
@@ -308,7 +307,7 @@ export async function bootstrapMedNote(): Promise<BootstrapResult> {
   const snapshots = await readLegacySnapshots(warnings, !hadCanonicalLibrary);
   const preferred = readPreferredRuntimeSnapshot(snapshots);
 
-  await initializeV6Library(snapshots, warnings, hadCanonicalLibrary);
+  await initializeV6Library(snapshots, warnings);
 
   const v6Runtime = restoreV6DocumentRuntime(preferred, warnings);
   const v6HasDocuments = Boolean(v6Runtime?.workspaces.some((workspace) => workspace.documents.length > 0));
