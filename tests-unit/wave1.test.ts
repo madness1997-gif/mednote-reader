@@ -325,6 +325,8 @@ test("storage migration commits v6, verifies hashes, then removes the v5 namespa
     assert.equal((await rawRead<{ version: number }>(dbName, V6_KEYS.meta))?.version, 6);
     assert.deepEqual(reloaded.notes.active, { activeNotebookId: "nb-endo", activeSectionId: "sec-diabetes", activePageId: "page-dm", activeSheetId: "sheet-dm-2" });
     assert.deepEqual(Object.fromEntries(reloaded.notes.sheets.map((sheet) => [sheet.id, contentHash(reloaded.sheetContents[sheet.id])])), migrated.report.sheetContentHashes);
+    const reopened = await migrateStoredLibraryToV6({ dbName, relation });
+    assert.equal(reopened?.report.sourceVersion, 6);
     const rebuilt = relationV2FromV6(reloaded);
     assert.deepEqual(rebuilt.groups?.[0].documentIds, ["doc-ada", "doc-idsa"]);
     assert.equal(rebuilt.notebooks?.[0].sections.length, 2);

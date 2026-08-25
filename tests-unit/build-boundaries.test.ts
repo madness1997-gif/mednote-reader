@@ -37,3 +37,14 @@ test("heavy PDF export libraries stay outside the initial application chunk", as
   assert.doesNotMatch(core, /import html2canvas(?:Pro)? from/);
   assert.doesNotMatch(core, /import \{ PDFDocument \} from "pdf-lib"/);
 });
+
+test("legacy v5 is a lazy one-shot reader with no production write or cache module", async () => {
+  const bootstrap = await source("app/app-bootstrap.ts");
+  const migration = await source("app/note-migration.ts");
+  const v5Reader = await source("app/v5-storage-import.ts");
+  assert.equal(await missing("app/incremental-library-store.ts"), true);
+  assert.doesNotMatch(bootstrap, /incremental-library-store|library:v5|loadIncrementalLibrary/);
+  assert.match(migration, /await import\("\.\/v5-storage-import"\)/);
+  assert.doesNotMatch(migration, /from "\.\/v5-storage-import"/);
+  assert.doesNotMatch(v5Reader, /\.put\(|\.delete\(|saveQueue|canonicalCache|persistedSignatures/);
+});

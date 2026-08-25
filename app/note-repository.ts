@@ -11,6 +11,11 @@ export type LibraryPreferences = {
   noteZoom?: number;
 };
 
+export type LibraryRuntimeMetadata = {
+  preferences: LibraryPreferences;
+  savedAt: number;
+};
+
 export type LibraryV6 = {
   version: typeof NOTE_SCHEMA_VERSION;
   notes: NoteStructure;
@@ -38,6 +43,8 @@ export type CreateSheetInput = { id?: string; pageId: string; content?: SheetCon
 export interface NoteRepository extends DocumentRepository {
   /** Full, eager bundle reserved for migration, export, backup and integrity verification. */
   loadLibrary(): Promise<LibraryV6 | null>;
+  /** Meta-only startup read for active document context and view preferences. */
+  loadRuntimeMetadata(): Promise<LibraryRuntimeMetadata | null>;
   /** Default startup read: hierarchy and active IDs only; never reads SheetContent records. */
   loadNoteStructure(): Promise<NoteStructure | null>;
   /** Hydrates exactly one Sheet at the repository boundary. */

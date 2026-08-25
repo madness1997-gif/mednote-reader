@@ -134,6 +134,50 @@ function readRawRecord(key: string) {
   });
 }
 
+async function seedStoredV5Library() {
+  const contextId = "v5-workspace";
+  const notebookId = "v5-notebook";
+  const sectionId = "v5-section";
+  const pageId = "v5-page";
+  const sheetId = "v5-sheet";
+  const documentId = "v5-document";
+  const records: Array<[string, unknown]> = [
+    ["library:v5:meta", {
+      version: 5,
+      notebookIds: [notebookId],
+      sectionIds: [sectionId],
+      pageIds: [pageId],
+      sheetIds: [sheetId],
+      linkIds: [],
+      contextIds: [contextId],
+      activeDocumentContextId: contextId,
+      activeNotebookId: notebookId,
+      activeSectionId: sectionId,
+      activePageId: pageId,
+      activeSheetId: sheetId,
+      readerShare: 61,
+      workspaceMode: "reader",
+      noteZoom: 1.25,
+      savedAt: 505,
+    }],
+    ["library:v5:workspace", { id: "workspace", title: "MedNote" }],
+    [`library:v5:notebook:${notebookId}`, { id: notebookId, title: "V5 notebook", order: 0 }],
+    [`library:v5:section:${sectionId}`, { id: sectionId, notebookId, title: "V5 section", order: 0 }],
+    [`library:v5:page:${pageId}`, { id: pageId, sectionId, title: "V5 page", order: 0 }],
+    [`library:v5:sheet:${sheetId}`, { id: sheetId, pageId, order: 0, content: { body: "from v5" } }],
+    [`library:v5:document-context:${contextId}`, {
+      id: contextId,
+      kind: "document",
+      name: contextId,
+      documents: [{ id: documentId, name: "v5-workspace.pdf", size: 7, lastModified: 1, reader: { ...DEFAULT_READER } }],
+      activeDocumentId: documentId,
+      notebookIds: [notebookId],
+      sourcePage: 1,
+    }],
+  ];
+  for (const [key, value] of records) await writeRawRecord(key, value);
+}
+
 async function seed() {
   if (scenario === "v6") {
     await new IndexedDbNoteRepository().replaceLibrary(v6Library());
@@ -153,13 +197,7 @@ async function seed() {
     await writeRawRecord("library:v5:orphan", { stale: true });
   }
   if (scenario === "v5-precedence") {
-    const { saveIncrementalLibrary } = await import("../app/incremental-library-store");
-    await saveIncrementalLibrary(snapshot([runtimeWorkspace("v5-workspace", "from v5")], "v5-workspace", {
-      readerShare: 61,
-      workspaceMode: "reader",
-      noteZoom: 1.25,
-      savedAt: 505,
-    }));
+    await seedStoredV5Library();
     localStorage.setItem("mednote-library-v2", JSON.stringify(snapshot([runtimeWorkspace("v2-workspace", "from v2")], "v2-workspace", {
       readerShare: 30,
       workspaceMode: "note",

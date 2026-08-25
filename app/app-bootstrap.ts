@@ -1,7 +1,7 @@
-import { loadIncrementalLibrary } from "./incremental-library-store";
 import { localBinaryStorage, type StoredPdf } from "./local-binary-storage";
 import { noteRepository, noteStore } from "./note-store";
-import { discardStoredV5Library, type LegacyRelationV2 } from "./note-migration";
+import type { LegacyRelationV2 } from "./note-migration";
+import type { LibraryRuntimeMetadata } from "./note-repository";
 import {
   createBlankPage,
   normalizePage,
@@ -40,10 +40,11 @@ type LegacyNotebookState = {
 type BootstrapSnapshots = {
   localSnapshot: PersistedLibrary | null;
   documentSnapshot: PersistedLibrary | null;
-  incrementalSnapshot: PersistedLibrary | null;
   legacyNotebook: LegacyNotebookState | null;
   relation: LegacyRelationV2 | undefined;
 };
+
+type RuntimeSettingsSource = Pick<PersistedLibrary, "activeWorkspaceId" | "readerShare" | "workspaceMode" | "noteZoom" | "savedAt">;
 
 export type BootstrapResult = {
   workspaces: WorkspaceItem[];
@@ -55,7 +56,7 @@ export type BootstrapResult = {
   warnings?: string[];
 };
 
-function runtimeSettings(snapshot: PersistedLibrary | null | undefined, fallbackMode: WorkspaceMode) {
+function runtimeSettings(snapshot: RuntimeSettingsSource | null | undefined, fallbackMode: WorkspaceMode) {
   return {
     readerShare: snapshot?.readerShare || 50,
     workspaceMode: snapshot?.workspaceMode === "reader" || snapshot?.workspaceMode === "note"
@@ -104,41 +105,39 @@ function readLegacyRelation(warnings: string[]) {
   }
 }
 
-async function readLegacySnapshots(warnings: string[], includeIncrementalV5: boolean): Promise<BootstrapSnapshots> {
+async function readLegacySnapshots(warnings: string[]): Promise<BootstrapSnapshots> {
   const localSnapshot = readSnapshot(STORAGE_KEY, "library v2", warnings);
   let documentSnapshot: PersistedLibrary | null = null;
-  let incrementalSnapshot: PersistedLibrary | null = null;
   try {
     documentSnapshot = readDocumentRuntimeSnapshot();
   } catch {
     warnings.push("Không thể đọc document runtime v1; đã dùng runtime dự phòng.");
   }
-  if (includeIncrementalV5) {
-    try {
-      incrementalSnapshot = await loadIncrementalLibrary() as PersistedLibrary | null;
-    } catch {
-      warnings.push("Không thể đọc incremental library v5; migration tiếp tục với nguồn cũ hơn.");
-    }
-  }
   return {
     localSnapshot,
     documentSnapshot,
-    incrementalSnapshot,
     legacyNotebook: readLegacyNotebook(warnings),
     relation: readLegacyRelation(warnings),
   };
 }
 
-function readPreferredRuntimeSnapshot(snapshots: BootstrapSnapshots) {
-  return snapshots.documentSnapshot || snapshots.incrementalSnapshot || snapshots.localSnapshot;
+function runtimeSourceFromV6(metadata: LibraryRuntimeMetadata | null): RuntimeSettingsSource | null {
+  if (!metadata) return null;
+  return {
+    activeWorkspaceId: metadata.preferences.activeDocumentContextId,
+    readerShare: metadata.preferences.readerShare,
+    workspaceMode: metadata.preferences.workspaceMode,
+    noteZoom: metadata.preferences.noteZoom,
+    savedAt: metadata.savedAt,
+  };
 }
 
-async function hasCanonicalV6Library(warnings: string[]) {
+async function readV6RuntimeMetadata(warnings: string[]) {
   try {
-    return Boolean(await noteRepository.loadLibrary());
+    return await noteRepository.loadRuntimeMetadata();
   } catch {
-    warnings.push("Không thể kiểm tra library v6 trước bootstrap; sẽ thử các nguồn migration cũ.");
-    return false;
+    warnings.push("Không thể đọc metadata library v6; sẽ thử migration hoặc runtime dự phòng.");
+    return null;
   }
 }
 
@@ -155,15 +154,17 @@ async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: stri
   try {
     await noteStore.initialize({
       relation: snapshots.relation,
-      localSnapshot: snapshots.incrementalSnapshot || snapshots.localSnapshot || undefined,
+      localSnapshot: snapshots.localSnapshot || undefined,
       fallbackSnapshot,
     });
+    return true;
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : "Không thể mở kho note v6");
+    return false;
   }
 }
 
-function restoreV6DocumentRuntime(preferred: PersistedLibrary | null, warnings: string[]) {
+function restoreV6DocumentRuntime(preferred: RuntimeSettingsSource | null, warnings: string[]) {
   const state = noteStore.getSnapshot();
   if (!state.structure) return null;
   const workspaces = runtimeWorkspacesFromDocumentGraph(state.documents, state.structure);
@@ -294,26 +295,19 @@ async function migrateLegacyNotebook(
 
 export async function bootstrapMedNote(): Promise<BootstrapResult> {
   const warnings: string[] = [];
-  const hadCanonicalLibrary = await hasCanonicalV6Library(warnings);
-  if (hadCanonicalLibrary) {
-    try {
-      await discardStoredV5Library();
-    } catch {
-      warnings.push("Kho v6 đã hợp lệ nhưng chưa xóa được dữ liệu v5 cũ.");
-    }
-  }
-  // v5 is an import source only. Once the canonical repository verifies, it
-  // must not participate in bootstrap preference or fallback resolution.
-  const snapshots = await readLegacySnapshots(warnings, !hadCanonicalLibrary);
-  const preferred = readPreferredRuntimeSnapshot(snapshots);
-
-  await initializeV6Library(snapshots, warnings);
+  const existingV6Metadata = await readV6RuntimeMetadata(warnings);
+  const snapshots = await readLegacySnapshots(warnings);
+  const initializedV6 = await initializeV6Library(snapshots, warnings);
+  const canonicalMetadata = initializedV6 ? await readV6RuntimeMetadata(warnings) : null;
+  const preferred = snapshots.documentSnapshot || runtimeSourceFromV6(canonicalMetadata) || snapshots.localSnapshot;
+  const preferredLegacy = snapshots.documentSnapshot || snapshots.localSnapshot;
+  const hadCanonicalLibrary = Boolean(existingV6Metadata && initializedV6);
 
   const v6Runtime = restoreV6DocumentRuntime(preferred, warnings);
   const v6HasDocuments = Boolean(v6Runtime?.workspaces.some((workspace) => workspace.documents.length > 0));
   if (v6Runtime && (hadCanonicalLibrary || v6HasDocuments)) return v6Runtime;
 
-  const legacyRuntime = restoreLegacyRuntime(preferred, warnings);
+  const legacyRuntime = restoreLegacyRuntime(preferredLegacy, warnings);
   if (legacyRuntime) return legacyRuntime;
 
   const pdfMigration = await migrateLegacyCurrentPdf(warnings);

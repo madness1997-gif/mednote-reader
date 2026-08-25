@@ -1,7 +1,7 @@
 import { assertDocumentGraph, type DocumentGraph, type DocumentLinkRelation, type NoteDocumentLink } from "./document-domain";
 import type { DocumentRepository, SaveDocumentWorkspaceInput } from "./document-repository";
 import { assertNoteStructure, assertSheetContents, hydrateSheet, noteContextForSheet, ordered, type ActiveNoteState, type Notebook, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
-import { NOTE_SCHEMA_VERSION, type CreateNotebookInput, type CreatePageInput, type CreateSectionInput, type CreateSheetInput, type LibraryPreferences, type LibraryV6, type NoteRepository } from "./note-repository";
+import { NOTE_SCHEMA_VERSION, type CreateNotebookInput, type CreatePageInput, type CreateSectionInput, type CreateSheetInput, type LibraryPreferences, type LibraryRuntimeMetadata, type LibraryV6, type NoteRepository } from "./note-repository";
 
 export const V6_KEYS = {
   meta: "library:v6:meta",
@@ -271,6 +271,16 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       const library: LibraryV6 = { version: NOTE_SCHEMA_VERSION, notes, sheetContents, documents, preferences: clone(meta.preferences), savedAt: meta.savedAt };
       assertLibrary(library);
       return library;
+    });
+  }
+
+  async loadRuntimeMetadata(): Promise<LibraryRuntimeMetadata | null> {
+    await this.flush();
+    return this.transaction("readonly", async ({ store }) => {
+      const meta = await requestValue(store.get(V6_KEYS.meta)) as V6Meta | undefined;
+      if (!meta) return null;
+      if (meta.version !== NOTE_SCHEMA_VERSION) throw new RepositoryCorruptionError([V6_KEYS.meta]);
+      return { preferences: clone(meta.preferences), savedAt: meta.savedAt };
     });
   }
 

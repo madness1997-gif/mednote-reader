@@ -1,6 +1,6 @@
 # Normalized note storage v6 contract
 
-Status: Wave 2 runtime cutover. `NoteStore`, command navigation, the editor, and the React sidebar use this repository as the production note source of truth. Legacy v3/v4/v5 and relation-v2 records remain read-only migration inputs until the later cleanup wave.
+Status: production cutover complete. `NoteStore`, command navigation, the editor, and the React sidebar use v6 as the only production note source of truth. Legacy records are one-shot import inputs only on devices where no valid v6 repository exists.
 
 ## Record ownership
 
@@ -37,7 +37,9 @@ Status: Wave 2 runtime cutover. `NoteStore`, command navigation, the editor, and
 ## Migration and cutover
 
 - v3/v4/v5 content hashes are calculated before persistence and verified again after v6 reload.
-- v5 and relation-v2 remain read-only fallback sources; Wave 2 does not delete them.
+- v3/v4 and v5 migrate directly to v6; migration never creates or updates an intermediate v5 store.
+- The v5 reader is dynamically loaded only when no v6 repository exists. After the v6 transaction reloads and verifies all Sheet hashes, every `library:v5:*` record is deleted.
+- Once v6 verifies, bootstrap never reads or resolves preferences from v5 and never falls back to it. A failed cutover preserves the original v5 records for a later retry.
 - A relation, group, preset or locator that cannot round-trip blocks the v6 marker write.
 - Startup loads structure metadata plus only the active `SheetContent`. Navigation flushes the outgoing draft, commits the four active IDs, then hydrates the destination Sheet without a page reload.
 - Production entrypoints must not load the old imperative navigation/runtime modules or publish note state through `window.__MEDNOTE_LIVE_STATE__`.

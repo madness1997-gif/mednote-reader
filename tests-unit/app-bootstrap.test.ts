@@ -46,6 +46,11 @@ test("P6.5 restores v6 NoteStructure and DocumentGraph plus one note runtime she
   assert.deepEqual(restored.result.workspaceIds, ["v6-workspace", "note-runtime-v6"]);
   assert.deepEqual(restored.result.documentNames, ["v6-workspace.pdf"]);
   assert.equal(restored.activeBody, "from v6");
+  assert.equal(restored.result.activeWorkspaceId, "v6-workspace");
+  assert.equal(restored.result.readerShare, 64);
+  assert.equal(restored.result.workspaceMode, "reader");
+  assert.equal(restored.result.noteZoom, 1.4);
+  assert.equal(restored.result.savedAt, 600);
 });
 
 test("P6.5 v6 documents keep document-runtime preference for active context and UI settings", () => {
@@ -65,7 +70,7 @@ test("P6.5 verified v6 skips malformed v5 and removes its storage namespace", ()
   assert.equal(restored.result.warnings.some((warning) => warning.includes("incremental library v5")), false);
 });
 
-test("P6.5 incremental v5 wins over localStorage v2 for note migration and runtime fallback", () => {
+test("P6.5 one-shot v5 import migrates preferences to v6 and wins over localStorage v2", () => {
   const restored = runScenario("v5-precedence");
   assert.deepEqual(restored.result.workspaceIds, ["v5-workspace", "note-runtime-v6"]);
   assert.equal(restored.result.activeWorkspaceId, "v5-workspace");

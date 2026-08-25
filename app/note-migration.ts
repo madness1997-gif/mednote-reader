@@ -30,7 +30,7 @@ export type V5MigrationSource = {
 };
 
 export type MigrationReport = {
-  sourceVersion: 3 | 4 | 5;
+  sourceVersion: 3 | 4 | 5 | 6;
   notebookCount: number;
   sectionCount: number;
   pageCount: number;
@@ -194,7 +194,7 @@ function finishLibrary(
   } satisfies LibraryV6;
 }
 
-function migrationReport(sourceVersion: 3 | 4 | 5, library: LibraryV6, warnings: string[] = []): MigrationReport {
+function migrationReport(sourceVersion: 3 | 4 | 5 | 6, library: LibraryV6, warnings: string[] = []): MigrationReport {
   return {
     sourceVersion,
     notebookCount: library.notes.notebooks.length,
@@ -407,31 +407,6 @@ async function discardV5AfterVerifiedCutover(dbName: string, storeName: string, 
   }
 }
 
-async function readV5Source(dbName: string, storeName: string): Promise<V5MigrationSource | null> {
-  const db = await openLegacyDb(dbName, storeName);
-  try {
-    const transaction = db.transaction(storeName, "readonly");
-    const store = transaction.objectStore(storeName);
-    const meta = await requestValue(store.get("library:v5:meta")) as AnyRecord | undefined;
-    if (!meta?.contextIds?.length) return null;
-    const read = (prefix: string, ids: string[]) => Promise.all(ids.map((id) => requestValue(store.get(`${prefix}${id}`))));
-    const [workspace, notebooks, sections, pages, sheets, links, contexts] = await Promise.all([
-      requestValue(store.get("library:v5:workspace")),
-      read("library:v5:notebook:", meta.notebookIds || []),
-      read("library:v5:section:", meta.sectionIds || []),
-      read("library:v5:page:", meta.pageIds || []),
-      read("library:v5:sheet:", meta.sheetIds || []),
-      read("library:v5:note-document-link:", meta.linkIds || []),
-      read("library:v5:document-context:", meta.contextIds || []),
-    ]);
-    const all = [workspace, ...notebooks, ...sections, ...pages, ...sheets, ...links, ...contexts];
-    if (all.some((record) => record === undefined)) throw new Error("Kho v5 thiếu record; không được cutover v6");
-    return { meta, workspace: workspace as AnyRecord, notebooks: notebooks as AnyRecord[], sections: sections as AnyRecord[], pages: pages as AnyRecord[], sheets: sheets as AnyRecord[], links: links as AnyRecord[], contexts: contexts as AnyRecord[] };
-  } finally {
-    db.close();
-  }
-}
-
 async function readV34Snapshot(dbName: string, storeName: string): Promise<{ version: 3 | 4; snapshot: LegacySnapshot } | null> {
   const db = await openLegacyDb(dbName, storeName);
   try {
@@ -492,16 +467,17 @@ export async function migrateStoredLibraryToV6(options: {
       await repository.replaceLibrary(repaired);
       const reloaded = await repository.loadLibrary();
       if (!reloaded) throw new Error("Đã sửa tên Notebook trùng nhưng không load lại được");
-      const report = migrationReport(5, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"]);
+      const report = migrationReport(6, reloaded, ["Đã tự đổi tên các Notebook trùng trong kho v6 hiện hữu"]);
       await discardV5AfterVerifiedCutover(dbName, storeName, report);
       return { library: reloaded, report };
     }
-    const report = migrationReport(5, current, ["Kho v6 đã tồn tại; migration không ghi lại"]);
+    const report = migrationReport(6, current, ["Kho v6 đã tồn tại; migration không ghi lại"]);
     await discardV5AfterVerifiedCutover(dbName, storeName, report);
     return { library: current, report };
   }
   let result: MigrationResult | null = null;
-  const v5 = await readV5Source(dbName, storeName);
+  const { readStoredV5Library } = await import("./v5-storage-import");
+  const v5 = await readStoredV5Library(dbName, storeName);
   if (v5) result = migrateV5ToV6(v5, options.relation);
   if (!result) {
     const legacy = await readV34Snapshot(dbName, storeName);
