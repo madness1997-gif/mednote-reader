@@ -101,13 +101,13 @@ import {
   createBlankPage, defaultExcerptLayout, escapeHtml,
   normalizeExcerptAppearance, normalizeText,
   notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml,
-  type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt, type Notebook,
+  type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt,
   type NotePage, type NotePageContentPatch, type PaperColor, type PaperSettings, type PaperSize,
   type PaperTemplate, type PenStyle, type ShapeKind, type Stroke, type TableBorderStyle, type TextAlign,
   type TextFont,
 } from "./note-runtime-adapter";
 import {
-  DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createDemoWorkspace,
+  DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createNoteRuntimeWorkspace,
   normalizeReader, type ReaderState,
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
@@ -368,7 +368,11 @@ const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof 
   { id: "signature", label: "Đặt chữ ký lên PDF", shortLabel: "Chữ ký", icon: Signature },
 ];
 
-const initialPages: NotePage[] = [createBlankPage()];
+const noteStorePendingPage: NotePage = {
+  ...createBlankPage(null),
+  id: "note-store-pending",
+  title: "Đang mở ghi chú",
+};
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -440,8 +444,8 @@ export default function Home() {
   const lastNoteFocusRef = useRef<HTMLElement | null>(null);
   const pendingWorkspaceFocusRef = useRef<"reader" | "note" | null>(null);
   const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
-  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createDemoWorkspace(initialPages)]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState("demo-workspace");
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createNoteRuntimeWorkspace()]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(NOTE_RUNTIME_WORKSPACE_ID);
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const noteInkSession = useMemo(() => new NoteInkSession(60), []);
@@ -521,14 +525,15 @@ export default function Home() {
   }, []);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
-  const legacyActiveNotebook = activeWorkspace.notebooks.find((notebook) => notebook.id === activeWorkspace.activeNotebookId) ?? activeWorkspace.notebooks[0];
-  const storeActiveNotebook = noteState.structure
+  const activeNotebook = noteState.structure
     ? notebookFromStructure(noteState.structure, noteState.structure.active.activeNotebookId, noteState.pageSheetContents, noteState.activeSheetContent)
     : null;
-  const activeNotebook = storeActiveNotebook || legacyActiveNotebook;
-  const notePages = activeNotebook.pages;
-  const activeNote = notePages.find((page) => page.id === activeNotebook.activePageId) ?? notePages[0];
-  const activeNoteHydrating = noteState.hydratingSheetId === activeNote.id || activeNote.__mednoteLazyPage === true;
+  const notePages = activeNotebook?.pages ?? [noteStorePendingPage];
+  const activeNote = notePages.find((page) => page.id === activeNotebook?.activePageId) ?? notePages[0];
+  const activeNoteHydrating = noteState.status !== "ready"
+    || !activeNotebook
+    || noteState.hydratingSheetId === activeNote.id
+    || activeNote.__mednoteLazyPage === true;
   const activeLogicalPage = noteState.structure?.pages.find((page) => page.id === noteState.structure?.active.activePageId);
   const activePageSheets = noteState.structure
     ? ordered(noteState.structure.sheets.filter((sheet) => sheet.pageId === noteState.structure?.active.activePageId))
@@ -868,12 +873,6 @@ export default function Home() {
     }));
   };
 
-  const updateActiveNotebook = (updater: (notebook: Notebook) => Notebook) => {
-    const updated = updater(activeNotebook);
-    const page = updated.pages.find((item) => item.id === updated.activePageId);
-    if (page && page.id === activeNote.id) noteStore.updateActiveSheetContent(notePageToSheetContent(page));
-  };
-
   const setSourcePage = (value: number | ((page: number) => number)) => {
     const next = pdfReader.clampPage(typeof value === "function" ? value(sourcePage) : value, totalPages);
     if (activeDocument) {
@@ -1071,17 +1070,14 @@ export default function Home() {
     savedTextRangeRef.current = null;
     setTextToolbar({ ...normalizeText(activeNote.text), strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
     setTextInsertPopover(null);
-  }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
+  }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
 
   const updateActiveNote = (changes: NotePageContentPatch) => {
-    if (activeNoteHydrating) {
+    if (activeNoteHydrating || activeNote.id !== noteState.structure?.active.activeSheetId) {
       setToast("Đang mở nội dung tờ note…");
       return;
     }
-    updateActiveNotebook((notebook) => ({
-      ...notebook,
-      pages: notebook.pages.map((page) => page.id === notebook.activePageId ? { ...page, ...changes } : page),
-    }));
+    noteStore.updateActiveSheetContent(notePageToSheetContent({ ...activeNote, ...changes }));
   };
 
   const activateContinuousSheet = async (sheetId: string) => {
@@ -1554,11 +1550,8 @@ export default function Home() {
     setToast(`Đã quay lại ${source.displayName} · trang ${source.page}`);
   };
 
-  const hasMeaningfulLocalData = () => Boolean(noteState.structure?.sheets.length) || workspaces.some((workspace) => {
-    if (workspace.kind === "document" || workspace.kind === "collection") return true;
-    if (workspace.kind === "demo") return false;
-    return workspace.notebooks.some((notebook) => notebook.pages.some((page) => page.body.trim() || page.excerpts.length || page.strokes.length));
-  });
+  const hasMeaningfulLocalData = () => Boolean(noteStore.getSnapshot().structure?.sheets.length)
+    || workspaces.some((workspace) => workspace.kind === "document" || workspace.kind === "collection");
 
   const drive = useDriveController({
     ready,
@@ -1650,11 +1643,13 @@ export default function Home() {
   const exportNotebook = async () => {
     setToast("Đang tạo tệp note…");
     const structure = noteState.structure;
-    if (!structure) return setToast("Kho note chưa sẵn sàng");
+    if (!structure || !activeNotebook) return setToast("Kho note chưa sẵn sàng");
     let exportNotebook = activeNotebook;
     try {
       const contents = await noteStore.loadNotebookContents(activeNotebook.id);
-      exportNotebook = notebookFromStructure(structure, activeNotebook.id, contents) || activeNotebook;
+      const hydratedNotebook = notebookFromStructure(structure, activeNotebook.id, contents);
+      if (!hydratedNotebook) throw new Error("Notebook không còn tồn tại");
+      exportNotebook = hydratedNotebook;
     } catch {
       setToast("Không thể nạp đầy đủ các tờ để xuất");
       return;
@@ -1681,11 +1676,11 @@ export default function Home() {
       }
       pagesHtml.push(`<section><h2>${index + 1}. ${escapeHtml(page.title)}</h2><div class="body" style="${textStyle}">${page.bodyHtml ?? plainTextToRichHtml(page.body)}</div>${excerptsHtml.join("")}</section>`);
     }
-    const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(activeNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(activeNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
+    const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(exportNotebook.title)}</title><style>body{max-width:820px;margin:40px auto;padding:0 24px;color:#24343c;font:16px/1.6 system-ui}h1{color:#0e6b70}section{padding:24px 0;border-top:1px solid #d8e1e5}.body{white-space:normal}figure{margin:20px 0;padding:14px;border-left:4px solid #0e6b70;background:#f4f8f8}blockquote{margin:0;font-style:italic}img{max-width:100%;height:auto}figcaption{margin-top:8px;color:#60737d;font-size:13px}</style></head><body><h1>${escapeHtml(exportNotebook.title)}</h1>${pagesHtml.join("")}</body></html>`;
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${activeNotebook.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "MedNote"}.html`;
+    link.download = `${exportNotebook.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "MedNote"}.html`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setToast("Đã xuất note kèm nguồn");
@@ -1773,7 +1768,7 @@ export default function Home() {
 
   useEffect(() => {
     setNotePanel(null);
-  }, [activeNote.id, activeNotebook.id, activeWorkspace.id]);
+  }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
 
   useEffect(() => {
     setPdfPanel(null);

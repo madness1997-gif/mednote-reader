@@ -94,3 +94,13 @@ test("PDF navigation owns rail and search behavior instead of receiving a page s
   assert.match(toolbar, /useActivePdfNavigationController/);
   assert.match(stage, /useActivePdfNavigationController/);
 });
+
+test("page uses noteStore as the sole owner of active Notebook and Sheet content", async () => {
+  const page = await source("app/page.tsx");
+  assert.match(page, /const activeNotebook = noteState\.structure/);
+  assert.match(page, /notebookFromStructure\(noteState\.structure/);
+  assert.match(page, /noteStore\.updateActiveSheetContent\(notePageToSheetContent\(\{ \.\.\.activeNote, \.\.\.changes \}\)\)/);
+  assert.doesNotMatch(page, /legacyActiveNotebook|storeActiveNotebook|updateActiveNotebook/);
+  assert.doesNotMatch(page, /\b(?:activeWorkspace|workspace)\.notebooks\b/);
+  assert.doesNotMatch(page, /createDemoWorkspace/);
+});
