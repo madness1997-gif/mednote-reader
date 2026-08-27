@@ -73,38 +73,30 @@ import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
 import type {
-  BulletStyle,
-  EquationTemplate,
   FirstAidCropPlacement,
   FirstAidCropResult,
   FirstAidCropTarget,
   NotePanel,
   NoteSheetViewMode,
-  NumberingStyle,
   PdfHistory,
   PdfPanel,
   StickerPresetId,
-  TableBorderSettings,
-  TextInsertPopover,
-  TextLineHeight,
-  TextToolbarState,
   Tool,
 } from "./ui/ui-contracts";
-import { noteRichTextController } from "./note-rich-text-controller";
 import { NoteInkSession } from "./note-ink-session";
+import { useNoteEditorController } from "./use-note-editor-controller";
 import { useNoteToolbar } from "./use-note-toolbar";
 import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered } from "./note-domain";
 import {
-  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_TEXT, DEFAULT_TEXT_BOX_APPEARANCE,
+  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_TEXT_BOX_APPEARANCE,
   createBlankPage, defaultExcerptLayout, escapeHtml,
   normalizeExcerptAppearance, normalizeText,
   notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml,
   type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt,
   type NotePage, type NotePageContentPatch, type PaperColor, type PaperSettings, type PaperSize,
-  type PaperTemplate, type PenStyle, type ShapeKind, type Stroke, type TableBorderStyle, type TextAlign,
-  type TextFont,
+  type PaperTemplate, type PenStyle, type ShapeKind, type Stroke,
 } from "./note-runtime-adapter";
 import {
   DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createNoteRuntimeWorkspace,
@@ -159,172 +151,8 @@ const PEN_STYLES: { id: PenStyle; label: string; icon: typeof PenTool }[] = [
   { id: "brush", label: "Bút cọ", icon: Brush },
 ];
 
-const TEXT_FONTS: { id: TextFont; label: string; family: string }[] = [
-  { id: "times", label: "Times New Roman", family: '"Times New Roman", Times, serif' },
-  { id: "segoe", label: "Segoe UI", family: '"Segoe UI", Arial, sans-serif' },
-  { id: "arial", label: "Arial", family: 'Arial, "Helvetica Neue", sans-serif' },
-  { id: "tahoma", label: "Tahoma", family: 'Tahoma, "Segoe UI", sans-serif' },
-  { id: "verdana", label: "Verdana", family: 'Verdana, Geneva, sans-serif' },
-  { id: "trebuchet", label: "Trebuchet MS", family: '"Trebuchet MS", Arial, sans-serif' },
-  { id: "calibri", label: "Calibri", family: 'Calibri, Carlito, "Segoe UI", sans-serif' },
-  { id: "aptos", label: "Aptos", family: 'Aptos, Calibri, "Segoe UI", sans-serif' },
-  { id: "sans", label: "Không chân (hệ thống)", family: 'Inter, "Segoe UI", Arial, sans-serif' },
-  { id: "cambria", label: "Cambria", family: 'Cambria, Georgia, serif' },
-  { id: "georgia", label: "Georgia", family: 'Georgia, "Times New Roman", serif' },
-  { id: "palatino", label: "Palatino Linotype", family: '"Palatino Linotype", Palatino, serif' },
-  { id: "serif", label: "Có chân (hệ thống)", family: 'Georgia, "Times New Roman", serif' },
-  { id: "courier", label: "Courier New", family: '"Courier New", Courier, monospace' },
-  { id: "cascadia", label: "Cascadia Mono", family: '"Cascadia Mono", Consolas, monospace' },
-  { id: "mono", label: "Đơn cách (hệ thống)", family: '"Courier New", monospace' },
-  { id: "handwriting", label: "Viết tay", family: '"Segoe Print", "Bradley Hand", cursive' },
-];
-
 const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
-const TEXT_COLORS = ["#26343a", "#000000", "#c00000", "#ff0000", "#ed7d31", "#ffc000", "#70ad47", "#00b0f0", "#4472c4", "#7030a0", "#7f7f7f", "#ffffff"];
-const TEXT_BACKGROUND_COLORS = ["transparent", "#fff2a8", "#ffe699", "#ccebf3", "#d8f1dc", "#f7d5dd", "#e4d8f3", "#d9e2f3", "#ffffff"];
 const TEXT_BOX_BACKGROUND_COLORS = ["transparent", "#ffffff", "#fff2a8", "#d8f1dc", "#ccebf3", "#f7d5dd", "#e4d8f3"];
-const BORDER_COLORS = ["transparent", "#60737d", "#111111", "#2465a8", "#c94b50", "#16836f"];
-const BULLET_STYLES: { id: BulletStyle; glyph: string; label: string }[] = [
-  { id: "none", glyph: "∅", label: "Không dùng dấu đầu dòng" },
-  { id: "disc", glyph: "●", label: "Chấm tròn đặc" },
-  { id: "circle", glyph: "○", label: "Chấm tròn rỗng" },
-  { id: "square", glyph: "▪", label: "Hình vuông" },
-  { id: "diamond", glyph: "◆", label: "Hình thoi" },
-  { id: "arrow", glyph: "➤", label: "Mũi tên" },
-  { id: "check", glyph: "✓", label: "Dấu kiểm" },
-  { id: "dash", glyph: "–", label: "Gạch ngang" },
-];
-const NUMBERING_STYLES: { id: NumberingStyle; sample: string; label: string }[] = [
-  { id: "decimal", sample: "1.  2.  3.", label: "Số thường" },
-  { id: "decimal-leading-zero", sample: "01.  02.  03.", label: "Số có số không đầu" },
-  { id: "lower-alpha", sample: "a.  b.  c.", label: "Chữ thường" },
-  { id: "upper-alpha", sample: "A.  B.  C.", label: "Chữ hoa" },
-  { id: "lower-roman", sample: "i.  ii.  iii.", label: "La Mã thường" },
-  { id: "upper-roman", sample: "I.  II.  III.", label: "La Mã hoa" },
-  { id: "lower-greek", sample: "α.  β.  γ.", label: "Chữ Hy Lạp" },
-  { id: "cjk-decimal", sample: "一.  二.  三.", label: "Số Hán" },
-];
-const LINE_PRESETS: { id: string; style: TableBorderStyle; width: number; label: string }[] = [
-  { id: "none", style: "solid", width: 0, label: "Không đường kẻ" },
-  { id: "hairline", style: "solid", width: 1, label: "Nét liền mảnh" },
-  { id: "solid-medium", style: "solid", width: 2, label: "Nét liền vừa" },
-  { id: "solid-heavy", style: "solid", width: 4, label: "Nét liền đậm" },
-  { id: "dotted", style: "dotted", width: 2, label: "Nét chấm" },
-  { id: "dotted-heavy", style: "dotted", width: 3, label: "Nét chấm đậm" },
-  { id: "dashed", style: "dashed", width: 2, label: "Nét gạch" },
-  { id: "dashed-heavy", style: "dashed", width: 3, label: "Nét gạch đậm" },
-  { id: "double", style: "double", width: 3, label: "Nét đôi" },
-  { id: "double-heavy", style: "double", width: 5, label: "Nét đôi đậm" },
-];
-const SYMBOL_GROUPS = [
-  { label: "Toán", symbols: ["±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "√", "∑", "∫", "∆"] },
-  { label: "Hy Lạp", symbols: ["α", "β", "γ", "δ", "θ", "λ", "μ", "π", "σ", "φ", "Ω"] },
-  { label: "Y học", symbols: ["°", "‰", "µ", "→", "←", "↔", "↑", "↓", "♂", "♀", "®", "©"] },
-];
-const EQUATION_PRESETS = ["x² + y² = z²", "eGFR = 142 × min(Scr/κ,1)ᵅ × max(Scr/κ,1)⁻¹·²⁰⁰ × 0.9938ᴬᵍᵉ", "BMI = kg/m²", "Δx/Δt", "μ ± σ"];
-const EQUATION_TEMPLATES: { id: EquationTemplate; label: string; sample: string; fields: string[]; defaults: string[] }[] = [
-  { id: "plain", label: "Tự nhập", sample: "x + y", fields: ["Công thức"], defaults: ["y = ax² + b"] },
-  { id: "fraction", label: "Phân số", sample: "a⁄b", fields: ["Tử số", "Mẫu số"], defaults: ["a", "b"] },
-  { id: "root", label: "Căn", sample: "ⁿ√x", fields: ["Biểu thức dưới căn", "Bậc căn (để trống = 2)"], defaults: ["x", ""] },
-  { id: "power", label: "Lũy thừa", sample: "xⁿ", fields: ["Cơ số", "Số mũ"], defaults: ["x", "n"] },
-  { id: "subscript", label: "Chỉ số dưới", sample: "xᵢ", fields: ["Ký hiệu", "Chỉ số"], defaults: ["x", "i"] },
-  { id: "sum", label: "Tổng", sample: "∑", fields: ["Biểu thức", "Cận dưới", "Cận trên"], defaults: ["xᵢ", "i = 1", "n"] },
-  { id: "integral", label: "Tích phân", sample: "∫", fields: ["Hàm số", "Cận dưới", "Cận trên", "Biến"], defaults: ["f(x)", "a", "b", "x"] },
-  { id: "matrix", label: "Ma trận 2×2", sample: "[ ]", fields: ["Hàng 1 · cột 1", "Hàng 1 · cột 2", "Hàng 2 · cột 1", "Hàng 2 · cột 2"], defaults: ["a", "b", "c", "d"] },
-];
-
-function equationTemplateById(template: EquationTemplate) {
-  return EQUATION_TEMPLATES.find((option) => option.id === template) ?? EQUATION_TEMPLATES[0];
-}
-
-function equationMarkup(template: EquationTemplate, parts: string[]) {
-  const values = parts.map((part) => escapeHtml(part.trim() || "□"));
-  const math = "font-family:Cambria Math,STIX Two Math,Times New Roman,serif;font-style:normal";
-  if (template === "plain") return `<span style="${math}">${values[0] ?? ""}</span>`;
-  if (template === "fraction") return `<span style="${math};display:inline-block;vertical-align:middle;text-align:center;line-height:1.05;white-space:nowrap"><span style="display:block;padding:0 4px;border-bottom:1px solid currentColor">${values[0]}</span><span style="display:block;padding:0 4px">${values[1]}</span></span>`;
-  if (template === "root") return `<span style="${math};white-space:nowrap">${parts[1]?.trim() ? `<sup>${values[1]}</sup>` : ""}√<span style="border-top:1px solid currentColor;padding:0 2px">${values[0]}</span></span>`;
-  if (template === "power") return `<span style="${math};white-space:nowrap">${values[0]}<sup>${values[1]}</sup></span>`;
-  if (template === "subscript") return `<span style="${math};white-space:nowrap">${values[0]}<sub>${values[1]}</sub></span>`;
-  if (template === "sum") return `<span style="${math};white-space:nowrap">∑<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]}</span>`;
-  if (template === "integral") return `<span style="${math};white-space:nowrap">∫<sub>${values[1]}</sub><sup>${values[2]}</sup>&nbsp;${values[0]} d${values[3]}</span>`;
-  return `<span style="${math};display:inline-flex;align-items:center;vertical-align:middle;white-space:nowrap"><b>[</b><span style="display:inline-grid;grid-template-columns:auto auto;column-gap:10px;row-gap:2px;margin:0 4px;text-align:center"><span>${values[0]}</span><span>${values[1]}</span><span>${values[2]}</span><span>${values[3]}</span></span><b>]</b></span>`;
-}
-
-function cssColorToHex(color: string) {
-  if (color.startsWith("#")) return color;
-  const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
-  if (!channels || channels.length < 3) return "#111111";
-  return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function cssBackgroundColor(color: string) {
-  return color === "transparent" || color === "rgba(0, 0, 0, 0)" ? "transparent" : cssColorToHex(color);
-}
-
-function closestElementFromNode(node: Node | null) {
-  return node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement ?? null;
-}
-
-function closestWithin<T extends Element>(node: Node | null, selector: string, editor: HTMLElement) {
-  const element = closestElementFromNode(node)?.closest<T>(selector) ?? null;
-  return element && editor.contains(element) ? element : null;
-}
-
-function normalizedLineHeight(style: CSSStyleDeclaration): TextLineHeight {
-  const fontSize = Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size;
-  const raw = Number.parseFloat(style.lineHeight);
-  if (!Number.isFinite(raw)) return "1.15";
-  const ratio = style.lineHeight.endsWith("px") ? raw / fontSize : raw;
-  return (["1", "1.15", "1.5", "1.8", "2"] as TextLineHeight[]).reduce((nearest, option) => Math.abs(Number(option) - ratio) < Math.abs(Number(nearest) - ratio) ? option : nearest, "1.15");
-}
-
-function normalizedBulletStyle(value: string): BulletStyle {
-  if (value === "none") return "none";
-  if (value === "circle" || value === "square") return value;
-  if (value.includes("◆")) return "diamond";
-  if (value.includes("➤")) return "arrow";
-  if (value.includes("✓")) return "check";
-  if (value.includes("–") || value.includes("-") || value === "none") return "dash";
-  return "disc";
-}
-
-function normalizedNumberingStyle(value: string): NumberingStyle {
-  if (value === "decimal-leading-zero" || value === "lower-alpha" || value === "upper-alpha" || value === "lower-roman" || value === "upper-roman" || value === "lower-greek" || value === "cjk-decimal") return value;
-  return "decimal";
-}
-
-function textFontFromFamily(family: string): TextFont {
-  const normalized = family.toLocaleLowerCase().replace(/["']/g, "");
-  return TEXT_FONTS.find((font) => normalized.includes(font.family.split(",")[0].replace(/["']/g, "").toLocaleLowerCase()))?.id ?? "times";
-}
-
-function textSettingsAtRange(editor: HTMLElement, range: Range | null): TextToolbarState {
-  const anchor = range?.startContainer ?? editor;
-  const element = anchor.nodeType === Node.ELEMENT_NODE ? anchor as Element : anchor.parentElement;
-  const style = window.getComputedStyle(element ?? editor);
-  const weight = Number(style.fontWeight);
-  const align: TextAlign = style.textAlign === "center" ? "center" : style.textAlign === "right" ? "right" : style.textAlign === "justify" ? "justify" : "left";
-  const list = closestWithin<HTMLUListElement>(anchor, "ul", editor);
-  const orderedList = closestWithin<HTMLOListElement>(anchor, "ol", editor);
-  return {
-    font: textFontFromFamily(style.fontFamily),
-    size: Math.max(8, Math.min(96, Math.round(Number.parseFloat(style.fontSize) || DEFAULT_TEXT.size))),
-    color: cssColorToHex(style.color),
-    bold: document.queryCommandState("bold") || weight >= 600 || style.fontWeight === "bold",
-    italic: document.queryCommandState("italic") || style.fontStyle === "italic",
-    underline: document.queryCommandState("underline") || style.textDecorationLine.includes("underline"),
-    align,
-    strike: document.queryCommandState("strikeThrough") || style.textDecorationLine.includes("line-through"),
-    subscript: document.queryCommandState("subscript") || style.verticalAlign === "sub",
-    superscript: document.queryCommandState("superscript") || style.verticalAlign === "super",
-    unordered: document.queryCommandState("insertUnorderedList"),
-    ordered: document.queryCommandState("insertOrderedList"),
-    backgroundColor: cssBackgroundColor(style.backgroundColor),
-    lineHeight: normalizedLineHeight(style),
-    bulletStyle: normalizedBulletStyle(list ? window.getComputedStyle(list).listStyleType : "disc"),
-    numberingStyle: normalizedNumberingStyle(orderedList ? window.getComputedStyle(orderedList).listStyleType : "decimal"),
-  };
-}
 
 const STICKER_PRESETS: { id: StickerPresetId; label: string; description: string; width: number; height: number; rotation: number }[] = [
   { id: "classic-yellow", label: "Sticky vàng", description: "Giấy note cổ điển, góc gấp", width: .30, height: .17, rotation: -1 },
@@ -402,11 +230,6 @@ function blobToDataUrl(blob: Blob) {
   });
 }
 
-function rangeBelongsToEditor(range: Range, editor: HTMLElement) {
-  const container = range.commonAncestorContainer;
-  return container === editor || editor.contains(container.nodeType === Node.ELEMENT_NODE ? container : container.parentNode);
-}
-
 export default function Home() {
   const noteState = useNoteStoreSnapshot();
   const previewPdfInputRef = useRef<HTMLInputElement>(null);
@@ -476,53 +299,12 @@ export default function Home() {
     } catch { return true; }
   });
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
-  const [textToolbar, setTextToolbar] = useState<TextToolbarState>({ ...DEFAULT_TEXT, strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
-  const [textInsertPopover, setTextInsertPopover] = useState<TextInsertPopover>(null);
-  const [textPopoverLeft, setTextPopoverLeft] = useState(12);
-  const [equationDraft, setEquationDraft] = useState("y = ax² + b");
-  const [equationTemplate, setEquationTemplate] = useState<EquationTemplate>("fraction");
-  const [equationParts, setEquationParts] = useState(() => [...equationTemplateById("fraction").defaults]);
-  const [tableRows, setTableRows] = useState(3);
-  const [tableColumns, setTableColumns] = useState(3);
-  const [tableBorder, setTableBorder] = useState<TableBorderSettings>({ style: "solid", width: 1, color: "#60737d" });
-  const richTextController = noteRichTextController;
-  const activeTextEditorRef = richTextController.activeEditorRef;
-  const savedTextRangeRef = richTextController.savedRangeRef;
-  const pendingFontSizeRef = useRef(new Map<string, number>());
-  const textCharacterToolbarRef = useRef<HTMLDivElement | null>(null);
-  const textParagraphToolbarRef = useRef<HTMLDivElement | null>(null);
   const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
   workspaceModeRef.current = workspaceMode;
   const localSavedAtRef = useRef(Date.now());
-
-  useEffect(() => {
-    if (notePanel !== "text") setTextInsertPopover(null);
-  }, [notePanel]);
-
-  const openTextPopover = useCallback((popover: Exclude<TextInsertPopover, null>, button: HTMLElement) => {
-    const pane = button.closest<HTMLElement>(".notes-pane");
-    if (pane) {
-      const paneRect = pane.getBoundingClientRect();
-      const buttonRect = button.getBoundingClientRect();
-      const popoverWidth = popover === "bullets" || popover === "tableLines" ? 276 : popover === "numbering" ? 322 : popover === "equation" ? 520 : 360;
-      setTextPopoverLeft(Math.max(8, Math.min(buttonRect.left - paneRect.left, paneRect.width - popoverWidth - 8)));
-    }
-    setTextInsertPopover((current) => current === popover ? null : popover);
-  }, []);
-
-  const scrollTextToolbar = useCallback((toolbar: HTMLDivElement | null, direction: -1 | 1) => {
-    toolbar?.scrollBy({ left: direction * Math.max(180, toolbar.clientWidth * .72), behavior: "smooth" });
-  }, []);
-
-  const scrollTextToolbarWithWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    const toolbar = event.currentTarget;
-    if (toolbar.scrollWidth <= toolbar.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    toolbar.scrollLeft += event.deltaY;
-    event.preventDefault();
-  }, []);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const activeNotebook = noteState.structure
@@ -559,288 +341,12 @@ export default function Home() {
   const activeWorkspaceHasLinkedNote = activeWorkspaceLinkedNotebookIds.length > 0;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const resolveExcerptSource = useCallback((excerpt: NoteExcerpt) => resolveDocumentSource(excerpt, noteState.documents, activeWorkspace.documents), [activeWorkspace.documents, noteState.documents]);
-
-
-  const activateTextEditor = useCallback((editorId: string, editor: HTMLElement, range: Range | null) => {
-    activeTextEditorRef.current = { id: editorId, editor };
-    savedTextRangeRef.current = range && rangeBelongsToEditor(range, editor) ? range.cloneRange() : null;
-    setTextToolbar(textSettingsAtRange(editor, range));
-    const table = closestWithin<HTMLTableElement>(range?.startContainer ?? null, "table", editor);
-    const cell = table?.querySelector<HTMLElement>("th,td");
-    if (cell) {
-      const style = window.getComputedStyle(cell);
-      const borderStyle = (["solid", "dashed", "dotted", "double"] as TableBorderStyle[]).includes(style.borderTopStyle as TableBorderStyle) ? style.borderTopStyle as TableBorderStyle : "solid";
-      setTableBorder({ style: borderStyle, width: Math.max(1, Math.min(6, Math.round(Number.parseFloat(style.borderTopWidth) || 1))), color: cssColorToHex(style.borderTopColor) });
-    }
-  }, []);
-
-  const normalizeTextEditorInput = useCallback((editorId: string, editor: HTMLElement) => {
-    const fontSize = pendingFontSizeRef.current.get(editorId);
-    if (!fontSize) return;
-    editor.querySelectorAll<HTMLElement>('font[size="7"]').forEach((font) => {
-      font.style.fontSize = `${fontSize}px`;
-      font.removeAttribute("size");
-    });
-    editor.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
-      if (element.style.fontSize === "xxx-large") element.style.fontSize = `${fontSize}px`;
-    });
-  }, []);
-
-  const restoreTextSelection = useCallback(() => {
-    const target = activeTextEditorRef.current;
-    if (!target?.editor.isConnected) return null;
-    const selection = window.getSelection();
-    if (!selection) return null;
-    let range = savedTextRangeRef.current;
-    if (!range || !rangeBelongsToEditor(range, target.editor)) {
-      range = document.createRange();
-      range.selectNodeContents(target.editor);
-      range.collapse(false);
-    }
-    target.editor.focus({ preventScroll: true });
-    selection.removeAllRanges();
-    selection.addRange(range);
-    return target;
-  }, []);
-
-  const finishTextCommand = useCallback((target: { id: string; editor: HTMLElement }, message: string) => {
-    target.editor.dispatchEvent(new Event("input", { bubbles: true }));
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
-    activateTextEditor(target.id, target.editor, range);
-    setToast(message);
-  }, [activateTextEditor]);
-
-  const applyTextCommand = useCallback((command: "font" | "size" | "color" | "background" | "bold" | "italic" | "underline" | "strike" | "subscript" | "superscript" | "left" | "center" | "right" | "justify" | "bullets" | "numbering" | "clear", value?: string | number) => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào nội dung hoặc bôi chọn chữ trước khi định dạng");
-      return;
-    }
-    richTextController.execCommand("styleWithCSS", false, "true");
-    if (command === "font") {
-      const font = TEXT_FONTS.find((option) => option.id === value) ?? TEXT_FONTS[0];
-      richTextController.execCommand("fontName", false, font.family);
-    } else if (command === "size") {
-      const size = Number(value);
-      pendingFontSizeRef.current.set(target.id, size);
-      richTextController.execCommand("fontSize", false, "7");
-      normalizeTextEditorInput(target.id, target.editor);
-    } else if (command === "color") {
-      richTextController.execCommand("foreColor", false, String(value));
-    } else if (command === "background") {
-      richTextController.execCommand("backColor", false, String(value));
-    } else {
-      const browserCommand = {
-        bold: "bold",
-        italic: "italic",
-        underline: "underline",
-        strike: "strikeThrough",
-        subscript: "subscript",
-        superscript: "superscript",
-        left: "justifyLeft",
-        center: "justifyCenter",
-        right: "justifyRight",
-        justify: "justifyFull",
-        bullets: "insertUnorderedList",
-        numbering: "insertOrderedList",
-        clear: "removeFormat",
-      }[command];
-      richTextController.execCommand(browserCommand, false);
-    }
-    finishTextCommand(target, "Đã định dạng phần chữ đang chọn");
-  }, [finishTextCommand, normalizeTextEditorInput, restoreTextSelection]);
-
-  const applyTextLineHeight = useCallback((lineHeight: TextLineHeight) => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào đoạn văn trước khi chỉnh giãn dòng");
-      return;
-    }
-    let selection = window.getSelection();
-    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    if (!range) return;
-    const blocks = Array.from(target.editor.querySelectorAll<HTMLElement>("div,p,li,td,th")).filter((element) => {
-      try { return range!.intersectsNode(element); } catch { return false; }
-    });
-    if (!blocks.length) {
-      richTextController.execCommand("formatBlock", false, "div");
-      selection = window.getSelection();
-      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const block = closestWithin<HTMLElement>(range?.startContainer ?? null, "div,p,li,td,th", target.editor);
-      if (block) blocks.push(block);
-    }
-    blocks.forEach((block) => { block.style.lineHeight = lineHeight; });
-    finishTextCommand(target, `Đã đặt giãn dòng ${lineHeight}`);
-  }, [finishTextCommand, restoreTextSelection]);
-
-  const applyBulletStyle = useCallback((bulletStyle: BulletStyle) => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào đoạn văn trước khi tạo danh sách");
-      return;
-    }
-    let selection = window.getSelection();
-    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    let lists = range ? [closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor)].filter(Boolean) as HTMLUListElement[] : [];
-    if (bulletStyle === "none" && lists.length) {
-      richTextController.execCommand("insertUnorderedList", false);
-      finishTextCommand(target, "Đã bỏ dấu đầu dòng");
-      setTextInsertPopover(null);
-      return;
-    }
-    if (bulletStyle === "none") {
-      setTextInsertPopover(null);
-      return;
-    }
-    if (!lists.length) {
-      richTextController.execCommand("insertUnorderedList", false);
-      selection = window.getSelection();
-      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const list = range ? closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor) : null;
-      if (list) lists = [list];
-    }
-    if (range) {
-      target.editor.querySelectorAll<HTMLUListElement>("ul").forEach((list) => {
-        try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* ignore detached nodes */ }
-      });
-    }
-    const listStyleType = {
-      disc: "disc",
-      circle: "circle",
-      square: "square",
-      diamond: '"◆  "',
-      arrow: '"➤  "',
-      check: '"✓  "',
-      dash: '"–  "',
-      none: "none",
-    }[bulletStyle];
-    lists.forEach((list) => { list.style.listStyleType = listStyleType; });
-    finishTextCommand(target, "Đã đổi kiểu dấu đầu dòng");
-    setTextInsertPopover(null);
-  }, [finishTextCommand, restoreTextSelection]);
-
-  const applyNumberingStyle = useCallback((numberingStyle: NumberingStyle) => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào đoạn văn trước khi tạo danh sách");
-      return;
-    }
-    let selection = window.getSelection();
-    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    let lists = range ? [closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor)].filter(Boolean) as HTMLOListElement[] : [];
-    if (!lists.length) {
-      richTextController.execCommand("insertOrderedList", false);
-      selection = window.getSelection();
-      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const list = range ? closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor) : null;
-      if (list) lists = [list];
-    }
-    if (range) {
-      target.editor.querySelectorAll<HTMLOListElement>("ol").forEach((list) => {
-        try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* ignore detached nodes */ }
-      });
-    }
-    lists.forEach((list) => { list.style.listStyleType = numberingStyle; });
-    finishTextCommand(target, "Đã đổi kiểu đánh số");
-    setTextInsertPopover(null);
-  }, [finishTextCommand, restoreTextSelection]);
-
-  const changeListLevel = useCallback((direction: "increase" | "decrease") => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào một mục trong danh sách trước");
-      return;
-    }
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const listItem = range ? closestWithin<HTMLLIElement>(range.startContainer, "li", target.editor) : null;
-    if (!listItem) {
-      setToast("Nút này chỉ dùng cho bullet hoặc numbering");
-      return;
-    }
-    richTextController.execCommand(direction === "increase" ? "indent" : "outdent", false);
-    finishTextCommand(target, direction === "increase" ? "Đã tăng một cấp danh sách" : "Đã giảm một cấp danh sách");
-  }, [finishTextCommand, restoreTextSelection]);
-
-  const insertTextAtSelection = useCallback((text: string, message = "Đã chèn ký hiệu") => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào vị trí cần chèn trước");
-      return;
-    }
-    richTextController.execCommand("insertText", false, text);
-    finishTextCommand(target, message);
-  }, [finishTextCommand, restoreTextSelection]);
-
-  const insertEquation = useCallback(() => {
-    const target = restoreTextSelection();
-    const parts = equationTemplate === "plain" ? [equationDraft] : equationParts;
-    if (!target || !parts.some((part) => part.trim())) {
-      setToast(target ? "Nhập công thức trước khi chèn" : "Bấm vào vị trí cần chèn công thức trước");
-      return;
-    }
-    richTextController.execCommand("insertHTML", false, `${equationMarkup(equationTemplate, parts)}&nbsp;`);
-    finishTextCommand(target, "Đã chèn công thức");
-    setTextInsertPopover(null);
-  }, [equationDraft, equationParts, equationTemplate, finishTextCommand, restoreTextSelection]);
-
-  const insertTable = useCallback(() => {
-    const target = restoreTextSelection();
-    if (!target) {
-      setToast("Bấm vào vị trí cần chèn bảng trước");
-      return;
-    }
-    const cellStyle = `border-style:${tableBorder.style};border-width:${tableBorder.width}px;border-color:${tableBorder.color};padding:6px;min-width:44px;vertical-align:top`;
-    const rows = Array.from({ length: tableRows }, () => `<tr>${Array.from({ length: tableColumns }, () => `<td style="${cellStyle}">&nbsp;</td>`).join("")}</tr>`).join("");
-    richTextController.execCommand("insertHTML", false, `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table><div><br></div>`);
-    finishTextCommand(target, `Đã chèn bảng ${tableRows} × ${tableColumns}`);
-    setTextInsertPopover(null);
-  }, [finishTextCommand, restoreTextSelection, tableBorder, tableColumns, tableRows]);
-
-  const updateTableBorder = useCallback((changes: Partial<TableBorderSettings>) => {
-    const next = { ...tableBorder, ...changes };
-    setTableBorder(next);
-    const target = restoreTextSelection();
-    if (!target) return;
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const table = closestWithin<HTMLTableElement>(range?.startContainer ?? null, "table", target.editor);
-    if (!table) {
-      setToast("Thiết lập đường kẻ sẽ dùng cho bảng mới");
-      return;
-    }
-    table.querySelectorAll<HTMLElement>("th,td").forEach((cell) => {
-      cell.style.borderStyle = next.style;
-      cell.style.borderWidth = `${next.width}px`;
-      cell.style.borderColor = next.color;
-    });
-    finishTextCommand(target, "Đã cập nhật đường kẻ bảng");
-  }, [finishTextCommand, restoreTextSelection, tableBorder]);
-
-  const applyTableLinePreset = useCallback((preset: (typeof LINE_PRESETS)[number]) => {
-    updateTableBorder({ style: preset.style, width: preset.width });
-    setTextInsertPopover(null);
-  }, [updateTableBorder]);
-
-  const focusTypeEditor = useCallback((editorId: string) => {
-    const existing = activeTextEditorRef.current;
-    if (existing?.id === editorId && existing.editor.isConnected) {
-      restoreTextSelection();
-      activateTextEditor(existing.id, existing.editor, savedTextRangeRef.current);
-      return;
-    }
-    const editor = Array.from(document.querySelectorAll<HTMLElement>("[data-rich-editor-id]")).find((candidate) => candidate.dataset.richEditorId === editorId);
-    if (!editor) return;
-    editor.focus({ preventScroll: true });
-    const range = document.createRange();
-    range.selectNodeContents(editor);
-    range.collapse(false);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    activateTextEditor(editorId, editor, range);
-  }, [activateTextEditor, restoreTextSelection]);
+  const noteEditor = useNoteEditorController({
+    editorScopeKey: `${activeWorkspace.id}:${activeNotebook?.id ?? "note-store-pending"}:${activeNote.id}`,
+    defaultText: activeNote.text,
+    notePanel,
+    notify: setToast,
+  });
   const activeReader = activeDocument?.reader ?? demoReader;
   const sourcePage = activeDocument?.reader.page ?? demoReader.page;
   const sourceZoom = activeReader.zoom;
@@ -1066,10 +572,6 @@ export default function Home() {
 
   useEffect(() => {
     setSelectedExcerptId(null);
-    activeTextEditorRef.current = null;
-    savedTextRangeRef.current = null;
-    setTextToolbar({ ...normalizeText(activeNote.text), strike: false, subscript: false, superscript: false, unordered: false, ordered: false, backgroundColor: "transparent", lineHeight: "1.8", bulletStyle: "disc", numberingStyle: "decimal" });
-    setTextInsertPopover(null);
   }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
 
   const updateActiveNote = (changes: NotePageContentPatch) => {
@@ -1103,7 +605,7 @@ export default function Home() {
       setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
       if (tool === "text") {
         const editorId = selectedExcerpt?.kind === "text" ? `excerpt:${selectedExcerpt.id}` : `body:${activeNote.id}`;
-        window.requestAnimationFrame(() => focusTypeEditor(editorId));
+        window.requestAnimationFrame(() => noteEditor.focusTypeEditor(editorId));
       }
     } else {
       setNotePanel(null);
@@ -1410,7 +912,7 @@ export default function Home() {
     }
     const appearance = { ...normalizeExcerptAppearance(selectedExcerpt.appearance), ...changes };
     editExcerpt(selectedExcerpt.id, { appearance });
-    if (closePopover) setTextInsertPopover(null);
+    if (closePopover) noteEditor.setTextInsertPopover(null);
     setToast("Đã cập nhật hộp chữ");
   };
 
@@ -1460,7 +962,7 @@ export default function Home() {
     setSelectedExcerptId(excerpt.id);
     setActiveTool("text");
     setNotePanel("text");
-    setTextInsertPopover(null);
+    noteEditor.setTextInsertPopover(null);
     setToast(`Đã chèn ${preset.label} — nhập chữ trực tiếp, dùng Chọn để kéo và đổi kích thước`);
   };
 
@@ -1657,7 +1159,7 @@ export default function Home() {
     const pagesHtml: string[] = [];
     for (const [index, page] of exportNotebook.pages.entries()) {
       const text = normalizeText(page.text);
-      const font = TEXT_FONTS.find((option) => option.id === text.font) ?? TEXT_FONTS[0];
+      const font = noteEditor.TEXT_FONTS.find((option) => option.id === text.font) ?? noteEditor.TEXT_FONTS[0];
       const firstAidStyle = page.paper.template === "first-aid" ? `${firstAidThemeInlineStyle(page.paper.color)};background:var(--fa-paper-bg);padding:12px` : "";
       const autoTextColor = page.paper.template === "first-aid" ? "var(--fa-ink,#24343c)" : "#24343c";
       const textStyle = `${firstAidStyle};font-family:${font.family};font-size:${text.size}px;color:${text.color === "auto" ? autoTextColor : text.color};font-weight:${text.bold ? 700 : 400};font-style:${text.italic ? "italic" : "normal"};text-decoration:${text.underline ? "underline" : "none"};text-align:${text.align}`;
@@ -2183,7 +1685,7 @@ export default function Home() {
     }
     if (mode === "reader") {
       setNotePanel(null);
-      setTextInsertPopover(null);
+      noteEditor.setTextInsertPopover(null);
     }
     setToast(mode === "split" ? "Đang dùng Reader và Note" : mode === "reader" ? "Đang chỉ xem Reader" : "Đang chỉ làm Note");
   };
@@ -2295,8 +1797,7 @@ export default function Home() {
   };
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
   const lineStep = activeNote.paper.template === "ruled-dense" ? 5 : 8;
-  const defaultTextFont = TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? TEXT_FONTS[0];
-  const selectedToolbarFont = TEXT_FONTS.find((font) => font.id === textToolbar.font) ?? TEXT_FONTS[0];
+  const defaultTextFont = noteEditor.TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? noteEditor.TEXT_FONTS[0];
   const paperStyle = {
     "--paper-ratio": `${paperWidth} / ${paperHeight}`,
     "--paper-max-width": `${basePaperMaxWidth}px`,
@@ -2317,7 +1818,7 @@ export default function Home() {
     "--text-align": activeNote.text.align,
   } as React.CSSProperties;
 
-  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, TEXT_FONTS, activeNote, activeTool, applyTextCommand, applyTextLineHeight, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo });
+  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, activeTool, chooseNoteTool, editor: noteEditor, exportNotebook, fitNoteToView, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tools, undo });
 
   return (
     <DriveControllerProvider controller={drive}>
@@ -2400,7 +1901,7 @@ export default function Home() {
 
         <SplitDivider onPointerDown={startResize} />
 
-        <NotePane toolbar={noteToolbar} stage={{ BORDER_COLORS, BULLET_STYLES, EQUATION_PRESETS, EQUATION_TEMPLATES, INK_COLORS, LINE_PRESETS, NUMBERING_STYLES, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, SYMBOL_GROUPS, TEXT_BACKGROUND_COLORS, TEXT_BOX_BACKGROUND_COLORS, TEXT_COLORS, activateContinuousSheet, activateTextEditor, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTextEditorRef, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, insertEquation, insertTable, insertTextAtSelection, moveExcerpt, normalizeTextEditorInput, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, savedTextRangeRef, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setEquationDraft, setEquationParts, setEquationTemplate, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setTableColumns, setTableRows, setTextInsertPopover, setToast, shapeKind, tableBorder, tableColumns, tableRows, textInsertPopover, textLayerStyle, textPopoverLeft, textToolbar, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance, updateTableBorder }} />
+        <NotePane toolbar={noteToolbar} stage={{ INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, editor: noteEditor, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, moveExcerpt, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setToast, shapeKind, textLayerStyle, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance }} />
         {showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
       </WorkspaceShell>
     </main>

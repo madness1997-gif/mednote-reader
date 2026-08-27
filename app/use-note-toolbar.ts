@@ -6,13 +6,10 @@ export type NoteToolbarInput = Omit<NoteToolbarScope, "canUndo" | "canRedo"> & {
 };
 
 const TOOLBAR_KEYS = [
-  "NOTE_ZOOM_PRESETS", "TEXT_FONTS", "activeNote", "activeTool", "applyTextCommand", "applyTextLineHeight",
-  "changeListLevel", "chooseNoteTool", "exportNotebook", "fitNoteToView", "inkHistoryVersion", "notePanel",
-  "noteSheetViewMode", "noteZoom", "noteZoomPercent", "openTextPopover", "redo", "scrollTextToolbar",
-  "scrollTextToolbarWithWheel", "selectedExcerpt", "selectedExcerptIndex", "selectedTextBoxAppearance",
-  "selectedToolbarFont", "setActiveTool", "setNotePanel", "setNoteSheetViewMode", "setNoteSidebarVisibility",
-  "setNoteViewZoom", "shiftExcerptLayer", "showNoteSidebar", "tableBorder", "textCharacterToolbarRef",
-  "textInsertPopover", "textParagraphToolbarRef", "textToolbar", "tools", "undo",
+  "NOTE_ZOOM_PRESETS", "activeNote", "activeTool", "chooseNoteTool", "editor", "exportNotebook", "fitNoteToView",
+  "inkHistoryVersion", "notePanel", "noteSheetViewMode", "noteZoom", "noteZoomPercent", "redo", "selectedExcerpt",
+  "selectedExcerptIndex", "selectedTextBoxAppearance", "setActiveTool", "setNotePanel", "setNoteSheetViewMode",
+  "setNoteSidebarVisibility", "setNoteViewZoom", "shiftExcerptLayer", "showNoteSidebar", "tools", "undo",
 ] as const satisfies readonly (keyof Omit<NoteToolbarScope, "canUndo" | "canRedo">)[];
 
 function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {

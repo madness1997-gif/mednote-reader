@@ -1,19 +1,17 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2, type LucideIcon } from "lucide-react";
-import type { Dispatch, RefObject, SetStateAction, WheelEvent } from "react";
-import type { ExcerptAppearance, NoteExcerpt, NotePage, TextFont } from "../note-runtime-adapter";
-import type { NotePanel, NoteSheetViewMode, TableBorderSettings, TextCommand, TextInsertPopover, TextLineHeight, TextToolbarState, Tool } from "./ui-contracts";
+import type { Dispatch, SetStateAction } from "react";
+import type { ExcerptAppearance, NoteExcerpt, NotePage } from "../note-runtime-adapter";
+import type { NoteEditorController } from "../use-note-editor-controller";
+import type { NotePanel, NoteSheetViewMode, TextLineHeight, Tool } from "./ui-contracts";
 
 export type NoteToolbarScope = {
   NOTE_ZOOM_PRESETS: number[];
-  TEXT_FONTS: { id: TextFont; label: string; family: string }[];
   activeNote: NotePage;
   activeTool: Tool;
-  applyTextCommand: (command: TextCommand, value?: string | number) => void;
-  applyTextLineHeight: (lineHeight: TextLineHeight) => void;
   canRedo: boolean;
   canUndo: boolean;
-  changeListLevel: (direction: "increase" | "decrease") => void;
   chooseNoteTool: (tool: Tool) => void;
+  editor: NoteEditorController;
   exportNotebook: () => void | Promise<unknown>;
   fitNoteToView: () => void;
   inkHistoryVersion: number;
@@ -21,14 +19,10 @@ export type NoteToolbarScope = {
   noteSheetViewMode: NoteSheetViewMode;
   noteZoom: number;
   noteZoomPercent: number;
-  openTextPopover: (popover: Exclude<TextInsertPopover, null>, button: HTMLElement) => void;
   redo: () => void;
-  scrollTextToolbar: (toolbar: HTMLDivElement | null, direction: -1 | 1) => void;
-  scrollTextToolbarWithWheel: (event: WheelEvent<HTMLDivElement>) => void;
   selectedExcerpt: NoteExcerpt | null;
   selectedExcerptIndex: number;
   selectedTextBoxAppearance: ExcerptAppearance | null;
-  selectedToolbarFont: { family: string };
   setActiveTool: Dispatch<SetStateAction<Tool>>;
   setNotePanel: Dispatch<SetStateAction<NotePanel>>;
   setNoteSheetViewMode: Dispatch<SetStateAction<NoteSheetViewMode>>;
@@ -36,17 +30,13 @@ export type NoteToolbarScope = {
   setNoteViewZoom: (zoom: number) => void;
   shiftExcerptLayer: (direction: "front" | "forward" | "backward" | "back") => void;
   showNoteSidebar: boolean;
-  tableBorder: TableBorderSettings;
-  textCharacterToolbarRef: RefObject<HTMLDivElement | null>;
-  textInsertPopover: TextInsertPopover;
-  textParagraphToolbarRef: RefObject<HTMLDivElement | null>;
-  textToolbar: TextToolbarState;
   tools: { id: Tool; label: string; icon: LucideIcon }[];
   undo: () => void;
 };
 
 export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
-  const { NOTE_ZOOM_PRESETS, TEXT_FONTS, activeNote, activeTool, applyTextCommand, applyTextLineHeight, canRedo, canUndo, changeListLevel, chooseNoteTool, exportNotebook, fitNoteToView, inkHistoryVersion, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, openTextPopover, redo, scrollTextToolbar, scrollTextToolbarWithWheel, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, selectedToolbarFont, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar, tools, undo } = scope;
+  const { NOTE_ZOOM_PRESETS, activeNote, activeTool, canRedo, canUndo, chooseNoteTool, editor, exportNotebook, fitNoteToView, inkHistoryVersion, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tools, undo } = scope;
+  const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
