@@ -1,41 +1,31 @@
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2, type LucideIcon } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import type { ExcerptAppearance, NoteExcerpt, NotePage } from "../note-runtime-adapter";
+import type { NotePage } from "../note-runtime-adapter";
+import type { NoteCanvasController } from "../use-note-canvas-controller";
 import type { NoteEditorController } from "../use-note-editor-controller";
-import type { NotePanel, NoteSheetViewMode, TextLineHeight, Tool } from "./ui-contracts";
+import type { NotePanel, NoteSheetViewMode, TextLineHeight } from "./ui-contracts";
 
 export type NoteToolbarScope = {
   NOTE_ZOOM_PRESETS: number[];
   activeNote: NotePage;
-  activeTool: Tool;
-  canRedo: boolean;
-  canUndo: boolean;
-  chooseNoteTool: (tool: Tool) => void;
+  canvas: NoteCanvasController;
   editor: NoteEditorController;
   exportNotebook: () => void | Promise<unknown>;
   fitNoteToView: () => void;
-  inkHistoryVersion: number;
   notePanel: NotePanel;
   noteSheetViewMode: NoteSheetViewMode;
   noteZoom: number;
   noteZoomPercent: number;
-  redo: () => void;
-  selectedExcerpt: NoteExcerpt | null;
-  selectedExcerptIndex: number;
-  selectedTextBoxAppearance: ExcerptAppearance | null;
-  setActiveTool: Dispatch<SetStateAction<Tool>>;
   setNotePanel: Dispatch<SetStateAction<NotePanel>>;
   setNoteSheetViewMode: Dispatch<SetStateAction<NoteSheetViewMode>>;
   setNoteSidebarVisibility: (visible: boolean) => void;
   setNoteViewZoom: (zoom: number) => void;
-  shiftExcerptLayer: (direction: "front" | "forward" | "backward" | "back") => void;
   showNoteSidebar: boolean;
-  tools: { id: Tool; label: string; icon: LucideIcon }[];
-  undo: () => void;
 };
 
 export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
-  const { NOTE_ZOOM_PRESETS, activeNote, activeTool, canRedo, canUndo, chooseNoteTool, editor, exportNotebook, fitNoteToView, inkHistoryVersion, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tools, undo } = scope;
+  const { NOTE_ZOOM_PRESETS, activeNote, canvas, editor, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, showNoteSidebar } = scope;
+  const { activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
   const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">

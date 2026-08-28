@@ -3,31 +3,25 @@
 import {
   Blend,
   BookOpen,
-  Brush,
   Copy,
   Crop,
   Eraser,
   Hand,
   Highlighter,
-  Lasso,
   Languages,
   MessageSquareText,
   MousePointer2,
   Move,
   NotebookTabs,
   PaintBucket,
-  Pencil,
-  PenLine,
   PenTool,
   RefreshCw,
-  ScanText,
   Signature,
   Shapes,
   Square,
   Stamp,
   Strikethrough,
   TextSelect,
-  TextCursorInput,
   Type,
   Underline,
   Volume2,
@@ -35,7 +29,7 @@ import {
 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PdfAnnotation, PdfCropResult, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
+import type { PdfAnnotation, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
 import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
 import { PdfNavigationControllerProvider, usePdfNavigationController } from "./pdf-navigation-controller";
 import {
@@ -60,9 +54,7 @@ import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
 import { projectLibrary } from "./library-projection";
 import { requestNoteDestination } from "./mednote-dialog";
-import { firstAidThemeInlineStyle, firstAidThemeVariables } from "./first-aid-theme";
-import { firstAidDocumentFromLegacy, firstAidTemplateTransition, normalizeFirstAidDocument } from "./first-aid-block-model";
-import { fitFirstAidImageLayout } from "./first-aid-image-placement";
+import { firstAidThemeInlineStyle } from "./first-aid-theme";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
@@ -72,31 +64,17 @@ import { NotePane } from "./ui/note-pane";
 import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
-import type {
-  FirstAidCropPlacement,
-  FirstAidCropResult,
-  FirstAidCropTarget,
-  NotePanel,
-  NoteSheetViewMode,
-  PdfHistory,
-  PdfPanel,
-  StickerPresetId,
-  Tool,
-} from "./ui/ui-contracts";
-import { NoteInkSession } from "./note-ink-session";
+import type { NotePanel, NoteSheetViewMode, PdfHistory, PdfPanel } from "./ui/ui-contracts";
+import { useNoteCanvasController } from "./use-note-canvas-controller";
 import { useNoteEditorController } from "./use-note-editor-controller";
 import { useNoteToolbar } from "./use-note-toolbar";
 import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered } from "./note-domain";
 import {
-  DEFAULT_CALLOUT_APPEARANCE, DEFAULT_TEXT_BOX_APPEARANCE,
-  createBlankPage, defaultExcerptLayout, escapeHtml,
-  normalizeExcerptAppearance, normalizeText,
+  createBlankPage, escapeHtml, normalizeText,
   notePageFromSheet, notePageToSheetContent, notebookFromStructure, plainTextToRichHtml,
-  type ExcerptAppearance, type ExcerptLayout, type NoteExcerpt,
-  type NotePage, type NotePageContentPatch, type PaperColor, type PaperSettings, type PaperSize,
-  type PaperTemplate, type PenStyle, type ShapeKind, type Stroke,
+  type NoteExcerpt, type NotePage, type NotePageContentPatch,
 } from "./note-runtime-adapter";
 import {
   DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createNoteRuntimeWorkspace,
@@ -116,64 +94,6 @@ const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
 const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
 const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
-
-const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }> = {
-  a4: { label: "A4", dimensions: "210 × 297 mm", width: 210, height: 297, maxWidth: 720 },
-  a5: { label: "A5", dimensions: "148 × 210 mm", width: 148, height: 210, maxWidth: 590 },
-  b5: { label: "B5", dimensions: "176 × 250 mm", width: 176, height: 250, maxWidth: 650 },
-  letter: { label: "Letter", dimensions: "216 × 279 mm", width: 216, height: 279, maxWidth: 740 },
-  square: { label: "Vuông", dimensions: "210 × 210 mm", width: 210, height: 210, maxWidth: 720 },
-};
-
-const PAPER_TEMPLATES: { id: PaperTemplate; label: string }[] = [
-  { id: "blank", label: "Trắng" },
-  { id: "ruled", label: "Kẻ ngang thưa" },
-  { id: "ruled-dense", label: "Kẻ ngang dày" },
-  { id: "grid", label: "Ô vuông" },
-  { id: "dotted", label: "Chấm" },
-  { id: "cornell", label: "Cornell" },
-  { id: "first-aid", label: "First Aid" },
-];
-
-const PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[] = [
-  { id: "white", label: "Trắng", swatch: "#ffffff" },
-  { id: "ivory", label: "Kem", swatch: "#fffaf0" },
-  { id: "yellow", label: "Vàng nhạt", swatch: "#fff8cf" },
-  { id: "mint", label: "Xanh bạc hà", swatch: "#eefaf3" },
-  { id: "blue", label: "Xanh nhạt", swatch: "#eef7fc" },
-  { id: "dark", label: "Tối", swatch: "#263139" },
-];
-
-const PEN_STYLES: { id: PenStyle; label: string; icon: typeof PenTool }[] = [
-  { id: "ballpoint", label: "Bút bi", icon: PenLine },
-  { id: "fountain", label: "Bút máy", icon: PenTool },
-  { id: "pencil", label: "Bút chì", icon: Pencil },
-  { id: "brush", label: "Bút cọ", icon: Brush },
-];
-
-const INK_COLORS = ["#2465a8", "#c94b50", "#111111", "#16836f", "#f6d96b"];
-const TEXT_BOX_BACKGROUND_COLORS = ["transparent", "#ffffff", "#fff2a8", "#d8f1dc", "#ccebf3", "#f7d5dd", "#e4d8f3"];
-
-const STICKER_PRESETS: { id: StickerPresetId; label: string; description: string; width: number; height: number; rotation: number }[] = [
-  { id: "classic-yellow", label: "Sticky vàng", description: "Giấy note cổ điển, góc gấp", width: .30, height: .17, rotation: -1 },
-  { id: "tape-pink", label: "Tape hồng", description: "Note pastel có băng dính phía trên", width: .31, height: .17, rotation: 1 },
-  { id: "pin-mint", label: "Ghim xanh", description: "Thẻ xanh bạc hà có ghim tròn", width: .29, height: .16, rotation: -.5 },
-  { id: "tab-blue", label: "Tab xanh", description: "Thẻ xanh có nhãn tab nổi", width: .31, height: .16, rotation: 0 },
-  { id: "clinical-card", label: "Clinical card", description: "Thẻ trắng viền teal cho ý chính", width: .33, height: .17, rotation: 0 },
-  { id: "high-yield", label: "High-yield", description: "Sticker vàng nhấn mạnh điểm cần nhớ", width: .32, height: .16, rotation: 0 },
-];
-
-const tools: { id: Tool; label: string; icon: typeof MousePointer2 }[] = [
-  { id: "pointer", label: "Chọn", icon: MousePointer2 },
-  { id: "pen", label: "Bút", icon: PenTool },
-  { id: "highlight", label: "Tô sáng", icon: Highlighter },
-  { id: "eraser", label: "Tẩy chính xác", icon: Eraser },
-  { id: "lasso", label: "Khoanh chọn", icon: Lasso },
-  { id: "shape", label: "Hình học", icon: Shapes },
-  { id: "text", label: "Nhập chữ", icon: TextCursorInput },
-  { id: "textbox", label: "Tạo hộp chữ", icon: ScanText },
-  { id: "callout", label: "Callout — hộp chú thích có mũi tên", icon: MessageSquareText },
-];
 
 const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof MousePointer2 }[] = [
   { id: "smart", label: "Thông minh — kéo trên chữ để chọn, kéo khoảng trắng để di chuyển; giữ Space để kéo trang", shortLabel: "Thông minh", icon: MousePointer2 },
@@ -206,21 +126,6 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function boundingPdfRect(rects: PdfRect[]): PdfRect | undefined {
-  if (!rects.length) return undefined;
-  return rects.reduce<PdfRect>((bounds, rect) => ({
-    x1: Math.min(bounds.x1, rect.x1, rect.x2),
-    y1: Math.min(bounds.y1, rect.y1, rect.y2),
-    x2: Math.max(bounds.x2, rect.x1, rect.x2),
-    y2: Math.max(bounds.y2, rect.y1, rect.y2),
-  }), {
-    x1: Math.min(rects[0].x1, rects[0].x2),
-    y1: Math.min(rects[0].y1, rects[0].y2),
-    x2: Math.max(rects[0].x1, rects[0].x2),
-    y2: Math.max(rects[0].y1, rects[0].y2),
-  });
-}
-
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -241,14 +146,7 @@ export default function Home() {
   const readerScrollPositionRef = useRef<{ top: number; left: number; anchorPage: number; anchorOffset: number } | null>(null);
   const pendingReaderScrollRestoreRef = useRef(false);
   const restoringReaderScrollRef = useRef(false);
-  const [activeTool, setActiveTool] = useState<Tool>("pointer");
-  const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
-  const [inkColor, setInkColor] = useState("#2465a8");
   const [pdfHighlightColor, setPdfHighlightColor] = useState("#f6d96b");
-  const [inkWidth, setInkWidth] = useState(2);
-  const [highlighterWidth, setHighlighterWidth] = useState(14);
-  const [penStyle, setPenStyle] = useState<PenStyle>("ballpoint");
-  const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
   const [pdfTool, setPdfTool] = useState<PdfTool>("smart");
   const [pdfTextDraft, setPdfTextDraft] = useState("Ghi chú");
@@ -256,8 +154,6 @@ export default function Home() {
   const [pdfSignatureDraft, setPdfSignatureDraft] = useState("Ký tên");
   const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
   const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
-  const [firstAidCropTarget, setFirstAidCropTarget] = useState<FirstAidCropTarget | null>(null);
-  const [firstAidCropResult, setFirstAidCropResult] = useState<FirstAidCropResult | null>(null);
   const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
   const dictionaryAbortRef = useRef<AbortController | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
@@ -271,8 +167,6 @@ export default function Home() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(NOTE_RUNTIME_WORKSPACE_ID);
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
-  const noteInkSession = useMemo(() => new NoteInkSession(60), []);
-  const [inkHistoryVersion, setInkHistoryVersion] = useState(0);
   const pdfReader = useMemo(() => new PdfReaderController({
     readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
   }), []);
@@ -325,9 +219,6 @@ export default function Home() {
   const continuousNotes = activePageSheets.map((sheet) => notePages.find((page) => page.id === sheet.id)
     || notePageFromSheet(sheet.id, activeLogicalPage?.title || "Page mới", noteState.pageSheetContents[sheet.id], !noteState.pageSheetContents[sheet.id]));
   const hasActiveNote = Boolean(noteState.structure?.active.activeSheetId);
-  const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
-  const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
-  const selectedTextBoxAppearance = selectedExcerpt?.kind === "text" ? normalizeExcerptAppearance(selectedExcerpt.appearance) : null;
   const activeDocument = activeWorkspace.documents.find((document) => document.id === activeWorkspace.activeDocumentId) ?? activeWorkspace.documents[0] ?? null;
   const onPdfPageRendered = useCallback(() => {
     if (activeDocument) pdfReader.notifyVisiblePageRendered(activeDocument.id);
@@ -341,12 +232,35 @@ export default function Home() {
   const activeWorkspaceHasLinkedNote = activeWorkspaceLinkedNotebookIds.length > 0;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const resolveExcerptSource = useCallback((excerpt: NoteExcerpt) => resolveDocumentSource(excerpt, noteState.documents, activeWorkspace.documents), [activeWorkspace.documents, noteState.documents]);
+  const updateActiveNote = (changes: NotePageContentPatch) => {
+    if (activeNoteHydrating || activeNote.id !== noteState.structure?.active.activeSheetId) {
+      setToast("Đang mở nội dung tờ note…");
+      return;
+    }
+    noteStore.updateActiveSheetContent(notePageToSheetContent({ ...activeNote, ...changes }));
+  };
+  const noteScopeKey = `${activeWorkspace.id}:${activeNotebook?.id ?? "note-store-pending"}:${activeNote.id}`;
   const noteEditor = useNoteEditorController({
-    editorScopeKey: `${activeWorkspace.id}:${activeNotebook?.id ?? "note-store-pending"}:${activeNote.id}`,
+    editorScopeKey: noteScopeKey,
     defaultText: activeNote.text,
     notePanel,
     notify: setToast,
   });
+  const noteCanvas = useNoteCanvasController({
+    activeDocument,
+    activeNote,
+    canvasScopeKey: noteScopeKey,
+    editor: noteEditor,
+    notePanel,
+    noteZoom,
+    notify: setToast,
+    pdfSelection,
+    setNotePanel,
+    setPdfSelection,
+    setPdfTool,
+    updateActiveNote,
+  });
+  const { addImageExcerpt, addTextExcerpt, cancelFirstAidCrop, inkColor, inkWidth, setInkColor, setInkWidth } = noteCanvas;
   const activeReader = activeDocument?.reader ?? demoReader;
   const sourcePage = activeDocument?.reader.page ?? demoReader.page;
   const sourceZoom = activeReader.zoom;
@@ -570,18 +484,6 @@ export default function Home() {
     };
   }, [activeNote.id, activeNoteHydrating]);
 
-  useEffect(() => {
-    setSelectedExcerptId(null);
-  }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
-
-  const updateActiveNote = (changes: NotePageContentPatch) => {
-    if (activeNoteHydrating || activeNote.id !== noteState.structure?.active.activeSheetId) {
-      setToast("Đang mở nội dung tờ note…");
-      return;
-    }
-    noteStore.updateActiveSheetContent(notePageToSheetContent({ ...activeNote, ...changes }));
-  };
-
   const activateContinuousSheet = async (sheetId: string) => {
     if (sheetId === activeNote.id) return;
     pendingNoteScrollRef.current = { sheetId, scrollTop: noteStageRef.current?.scrollTop ?? 0 };
@@ -594,27 +496,9 @@ export default function Home() {
     }
   };
 
-  const chooseNoteTool = (tool: Tool) => {
-    setActiveTool(tool);
-    if (tool !== "pointer" && tool !== "text") setSelectedExcerptId(null);
-    if (tool === "pen" || tool === "highlight") {
-      setNotePanel((panel) => panel === "ink" && activeTool === tool ? null : "ink");
-    } else if (tool === "shape") {
-      setNotePanel((panel) => panel === "shape" && activeTool === tool ? null : "shape");
-    } else if (tool === "text" || tool === "textbox" || tool === "callout") {
-      setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
-      if (tool === "text") {
-        const editorId = selectedExcerpt?.kind === "text" ? `excerpt:${selectedExcerpt.id}` : `body:${activeNote.id}`;
-        window.requestAnimationFrame(() => noteEditor.focusTypeEditor(editorId));
-      }
-    } else {
-      setNotePanel(null);
-    }
-  };
-
   const choosePdfTool = (tool: PdfTool) => {
     setPdfTool(tool);
-    if (tool !== "crop") setFirstAidCropTarget(null);
+    if (tool !== "crop") cancelFirstAidCrop();
     if (["pen", "highlight", "area-highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
       setPdfPanel((panel) => panel === "ink" && pdfTool === tool ? null : "ink");
     } else {
@@ -750,268 +634,10 @@ export default function Home() {
     setToast(exists ? `Đã bỏ đánh dấu trang ${sourcePage}` : `Đã đánh dấu trang ${sourcePage}`);
   };
 
-  const addTextExcerpt = (selection: PdfSelection | null = pdfSelection, textOverride?: string) => {
-    if (!selection || !activeDocument) return;
-    const excerpt: NoteExcerpt = {
-      id: uid("excerpt"),
-      kind: "text",
-      sourceKind: "pdf",
-      text: textOverride ?? selection.text,
-      richText: plainTextToRichHtml(textOverride ?? selection.text),
-      documentId: activeDocument.id,
-      documentName: activeDocument.name,
-      page: selection.page,
-      rect: boundingPdfRect(selection.rects),
-      createdAt: Date.now(),
-      layout: defaultExcerptLayout(activeNote.excerpts.length, "text"),
-      appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
-    };
-    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: selection.page });
-    setSelectedExcerptId(excerpt.id);
-    setActiveTool("pointer");
-    setNotePanel(null);
-    window.getSelection()?.removeAllRanges();
-    setPdfSelection(null);
-    setToast("Đã đưa đoạn trích sang note");
-  };
-
   const addTranslationExcerpt = () => {
     const translation = dictionaryLookup.result?.translation;
     if (!pdfSelection || !translation) return;
     addTextExcerpt(pdfSelection, `${pdfSelection.text}\n\nBản dịch đề xuất:\n${translation}`);
-  };
-
-  const addImageExcerpt = async (result: PdfCropResult) => {
-    if (!activeDocument) return;
-    if (firstAidCropTarget && firstAidCropTarget.noteId !== activeNote.id) {
-      setFirstAidCropTarget(null);
-      setPdfTool("smart");
-      setToast("Đã hủy Crop vì trang First Aid đích đã thay đổi");
-      return;
-    }
-    const assetId = uid("crop");
-    const cropTarget = firstAidCropTarget?.noteId === activeNote.id ? firstAidCropTarget : null;
-    try {
-      await localBinaryStorage.saveAsset(assetId, result.blob);
-      const fallbackWidth = Math.max(1, Math.abs(result.rect.x2 - result.rect.x1));
-      const fallbackHeight = Math.max(1, Math.abs(result.rect.y2 - result.rect.y1));
-      let aspectRatio = fallbackWidth / fallbackHeight;
-      try {
-        const bitmap = await createImageBitmap(result.blob);
-        aspectRatio = bitmap.width / Math.max(1, bitmap.height);
-        bitmap.close();
-      } catch { /* kích thước vùng PDF vẫn là dự phòng chính xác */ }
-      const paper = PAPER_SIZES[activeNote.paper.size];
-      const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
-      const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
-      const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
-      layout.aspectRatio = aspectRatio;
-      if (cropTarget) {
-        Object.assign(layout, fitFirstAidImageLayout(cropTarget.placement, aspectRatio, paperWidth, paperHeight));
-      } else {
-        layout.height = Math.min(.72, Math.max(.04, layout.width * (paperWidth / paperHeight) / aspectRatio));
-      }
-      const excerptId = uid("excerpt");
-      const excerpt: NoteExcerpt = {
-        id: excerptId,
-        kind: "image",
-        sourceKind: "pdf",
-        assetId,
-        documentId: activeDocument.id,
-        documentName: activeDocument.name,
-        page: result.page,
-        rect: result.rect,
-        createdAt: Date.now(),
-        layout,
-      };
-      updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt], citationPage: result.page });
-      setSelectedExcerptId(excerpt.id);
-      setActiveTool("pointer");
-      setNotePanel(null);
-      setPdfTool("smart");
-      if (cropTarget) {
-        setFirstAidCropResult({ token: uid("crop-result"), blockId: cropTarget.blockId, excerptId, imageName: `${activeDocument.name} · trang ${result.page}`, aspectRatio });
-        setFirstAidCropTarget(null);
-        setToast("Đã crop từ PDF — ảnh đã gắn vào block và trở thành đối tượng trên trang");
-      } else {
-        setToast("Đã cắt hình và đưa sang note");
-      }
-    } catch {
-      setFirstAidCropTarget(null);
-      setToast("Không thể lưu hình cắt trên thiết bị này");
-    }
-  };
-
-  const requestFirstAidPdfCrop = ({ blockId, placement }: { blockId: string; placement: FirstAidCropPlacement }) => {
-    if (!activeDocument) {
-      setToast("Thêm hoặc mở một PDF trước khi dùng Crop từ PDF");
-      return;
-    }
-    setFirstAidCropResult(null);
-    setFirstAidCropTarget({ noteId: activeNote.id, blockId, placement });
-    setPdfSelection(null);
-    setPdfTool("crop");
-    setToast("Kéo khoanh vùng cần cắt trên trang PDF; ảnh sẽ tự gắn vào block đang chọn");
-  };
-
-  const finishFirstAidPdfCrop = (token: string) => {
-    setFirstAidCropResult((current) => current?.token === token ? null : current);
-  };
-
-  const addFirstAidImage = async ({ blob, name, aspectRatio, placement }: { blob: Blob; name: string; aspectRatio: number; placement: FirstAidCropPlacement }) => {
-    const assetId = uid("note-image");
-    try {
-      await localBinaryStorage.saveAsset(assetId, blob);
-      const paper = PAPER_SIZES[activeNote.paper.size];
-      const paperWidth = activeNote.paper.orientation === "portrait" ? paper.width : paper.height;
-      const paperHeight = activeNote.paper.orientation === "portrait" ? paper.height : paper.width;
-      const layout = defaultExcerptLayout(activeNote.excerpts.length, "image");
-      layout.aspectRatio = Math.max(.01, aspectRatio);
-      Object.assign(layout, fitFirstAidImageLayout(placement, layout.aspectRatio, paperWidth, paperHeight));
-      const excerptId = uid("excerpt");
-      const excerpt: NoteExcerpt = {
-        id: excerptId,
-        kind: "image",
-        sourceKind: "manual",
-        assetId,
-        documentName: name,
-        createdAt: Date.now(),
-        layout,
-      };
-      updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
-      setSelectedExcerptId(excerpt.id);
-      setActiveTool("pointer");
-      setNotePanel(null);
-      setToast("Đã đưa ảnh lên trang — có thể kéo, đổi cỡ, xoay, chỉnh độ trong suốt và xếp lớp");
-      return { excerptId };
-    } catch {
-      setToast("Không thể lưu ảnh trên thiết bị này");
-      return null;
-    }
-  };
-
-  const deleteExcerpt = (excerptId: string) => {
-    updateActiveNote({ excerpts: activeNote.excerpts.filter((excerpt) => excerpt.id !== excerptId) });
-    if (selectedExcerptId === excerptId) setSelectedExcerptId(null);
-    setToast("Đã xóa trích dẫn khỏi note");
-  };
-
-  const moveExcerpt = (excerptId: string, layout: ExcerptLayout) => {
-    updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, layout } : excerpt) });
-    setToast("Đã lưu vị trí trích dẫn");
-  };
-
-  const editExcerpt = (excerptId: string, changes: Partial<NoteExcerpt>) => {
-    updateActiveNote({ excerpts: activeNote.excerpts.map((excerpt) => excerpt.id === excerptId ? { ...excerpt, ...changes } : excerpt) });
-  };
-
-  const updateSelectedTextBoxAppearance = (changes: Partial<ExcerptAppearance>, closePopover = false) => {
-    if (!selectedExcerpt || selectedExcerpt.kind !== "text") {
-      setToast("Chọn một hộp chữ trước khi chỉnh viền hoặc nền");
-      return;
-    }
-    const appearance = { ...normalizeExcerptAppearance(selectedExcerpt.appearance), ...changes };
-    editExcerpt(selectedExcerpt.id, { appearance });
-    if (closePopover) noteEditor.setTextInsertPopover(null);
-    setToast("Đã cập nhật hộp chữ");
-  };
-
-  const addTextBoxAt = (event: React.PointerEvent<HTMLElement>) => {
-    const host = event.currentTarget.querySelector<HTMLElement>(".typed-layer");
-    if (!host) return;
-    const rect = host.getBoundingClientRect();
-    const width = .24;
-    const height = .08;
-    const x = Math.min(1 - width, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const y = Math.min(1 - height, Math.max(.065, (event.clientY - rect.top) / rect.height));
-    const excerpt: NoteExcerpt = {
-      id: uid("textbox"),
-      kind: "text",
-      sourceKind: "manual",
-      text: "",
-      richText: "",
-      createdAt: Date.now(),
-      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1, autoFit: true },
-      appearance: { ...DEFAULT_TEXT_BOX_APPEARANCE },
-    };
-    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
-    setSelectedExcerptId(excerpt.id);
-    setActiveTool("text");
-    setNotePanel("text");
-    setToast("Đã tạo hộp chữ — nhập nội dung ngay");
-  };
-
-  const addSticker = (presetId: StickerPresetId) => {
-    const preset = STICKER_PRESETS.find((item) => item.id === presetId);
-    if (!preset) return;
-    const slot = activeNote.excerpts.length % 6;
-    const x = Math.min(1 - preset.width - .03, .13 + (slot % 3) * .045);
-    const y = Math.min(1 - preset.height - .04, .16 + (slot % 4) * .055);
-    const excerpt: NoteExcerpt = {
-      id: uid("sticker"),
-      kind: "text",
-      sourceKind: "manual",
-      text: "",
-      richText: "",
-      stickerStyle: preset.id,
-      createdAt: Date.now(),
-      layout: { x, y, width: preset.width, height: preset.height, contentScale: 1, rotation: preset.rotation, opacity: 1, autoFit: false },
-      appearance: { borderStyle: "solid", borderWidth: 0, borderColor: "transparent", backgroundColor: "transparent" },
-    };
-    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
-    setSelectedExcerptId(excerpt.id);
-    setActiveTool("text");
-    setNotePanel("text");
-    noteEditor.setTextInsertPopover(null);
-    setToast(`Đã chèn ${preset.label} — nhập chữ trực tiếp, dùng Chọn để kéo và đổi kích thước`);
-  };
-
-  const addCalloutAt = (event: React.PointerEvent<HTMLElement>) => {
-    const host = event.currentTarget.querySelector<HTMLElement>(".typed-layer");
-    if (!host) return;
-    const rect = host.getBoundingClientRect();
-    const anchorX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const anchorY = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-    const width = .38;
-    const height = .18;
-    const x = anchorX + width + .055 <= .98
-      ? anchorX + .055
-      : Math.max(.02, anchorX - width - .055);
-    const y = anchorY - height - .055 >= .06
-      ? anchorY - height - .055
-      : Math.min(1 - height - .02, anchorY + .055);
-    const excerpt: NoteExcerpt = {
-      id: uid("callout"),
-      kind: "text",
-      annotationKind: "callout",
-      callout: { anchorX, anchorY },
-      sourceKind: "manual",
-      text: "",
-      richText: "",
-      createdAt: Date.now(),
-      layout: { x, y, width, height, contentScale: 1, rotation: 0, opacity: 1 },
-      appearance: { ...DEFAULT_CALLOUT_APPEARANCE },
-    };
-    updateActiveNote({ excerpts: [...activeNote.excerpts, excerpt] });
-    setSelectedExcerptId(excerpt.id);
-    setActiveTool("text");
-    setNotePanel("text");
-    setToast("Đã tạo callout — nhập chú thích, dùng Chọn để kéo đầu mũi tên");
-  };
-
-  const shiftExcerptLayer = (direction: "front" | "forward" | "backward" | "back") => {
-    if (!selectedExcerpt || selectedExcerptIndex < 0) return;
-    const targetIndex = direction === "front"
-      ? activeNote.excerpts.length - 1
-      : direction === "back"
-        ? 0
-        : selectedExcerptIndex + (direction === "forward" ? 1 : -1);
-    if (targetIndex < 0 || targetIndex >= activeNote.excerpts.length) return;
-    const next = [...activeNote.excerpts];
-    const [item] = next.splice(selectedExcerptIndex, 1);
-    next.splice(targetIndex, 0, item);
-    updateActiveNote({ excerpts: next });
-    setToast(direction === "front" ? "Đã đưa đối tượng lên trên cùng" : direction === "back" ? "Đã đưa đối tượng xuống dưới cùng" : direction === "forward" ? "Đã đưa đối tượng lên một lớp" : "Đã đưa đối tượng xuống một lớp");
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
@@ -1481,7 +1107,7 @@ export default function Home() {
           setActiveWorkspaceId(noteRuntime.id);
         }
       }
-      setActiveTool("text");
+      noteCanvas.setActiveTool("text");
       workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
       setWorkspaceMode(workspaceModeRef.current);
       setToast(activeWorkspace.documents.length ? "Đã tạo Notebook cho tài liệu" : "Đã tạo sổ ghi chú mới");
@@ -1610,59 +1236,6 @@ export default function Home() {
     }
   };
 
-  const commitStrokes = (next: Stroke[], previous: Stroke[]) => {
-    if (!noteInkSession.commit(activeNote.id, next, previous)) return;
-    updateActiveNote({ strokes: next });
-    setInkHistoryVersion((value) => value + 1);
-  };
-
-  const undo = () => {
-    const previous = noteInkSession.undo(activeNote.id, activeNote.strokes);
-    if (!previous) return;
-    updateActiveNote({ strokes: previous });
-    setInkHistoryVersion((value) => value + 1);
-  };
-
-  const redo = () => {
-    const next = noteInkSession.redo(activeNote.id, activeNote.strokes);
-    if (!next) return;
-    updateActiveNote({ strokes: next });
-    setInkHistoryVersion((value) => value + 1);
-  };
-
-  const updatePaper = (changes: Partial<PaperSettings>) => {
-    updateActiveNote({ paper: { ...activeNote.paper, ...changes } });
-    setToast("Đã lưu mẫu giấy cho trang này");
-  };
-
-  const updatePaperTemplate = (template: PaperTemplate) => {
-  const currentTemplate = activeNote.paper.template;
-  const transition = firstAidTemplateTransition({
-    currentTemplate,
-    nextTemplate: template,
-    bodyHtml: activeNote.bodyHtml ?? "",
-    body: activeNote.body,
-    firstAid: activeNote.firstAid,
-  });
-
-  if (template !== "first-aid") {
-    updateActiveNote({
-      paper: { ...activeNote.paper, template },
-      ...transition,
-    });
-    setToast(currentTemplate === "first-aid" ? "Đã chuyển nội dung First Aid về văn bản thường" : "Đã lưu mẫu giấy cho trang này");
-    return;
-  }
-
-  updateActiveNote({
-    paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
-    text: { ...activeNote.text, font: "times", size: 12, align: "left" },
-    ...transition,
-  });
-  setActiveTool("text");
-  setToast("Đã áp dụng bố cục First Aid");
-};
-
   const changeWorkspaceMode = (mode: WorkspaceMode) => {
     if (mode !== "reader" && !hasActiveNote) {
       setToast(activeWorkspace.kind === "temporary"
@@ -1785,40 +1358,14 @@ export default function Home() {
       localStorage.removeItem(LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY);
     } catch { /* UI preference is non-critical. */ }
   };
-  const selectedPaperSize = PAPER_SIZES[activeNote.paper.size];
-  const paperWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.width : selectedPaperSize.height;
-  const paperHeight = activeNote.paper.orientation === "portrait" ? selectedPaperSize.height : selectedPaperSize.width;
-  const basePaperMaxWidth = activeNote.paper.orientation === "portrait" ? selectedPaperSize.maxWidth : Math.min(920, selectedPaperSize.maxWidth * 1.32);
   const noteZoomPercent = Math.round(noteZoom * 100);
   const setNoteViewZoom = (value: number) => setNoteZoom(Math.max(.5, Math.min(2, value)));
   const fitNoteToView = () => {
-    const available = (noteStageRef.current?.clientWidth ?? basePaperMaxWidth) - 72;
-    setNoteViewZoom(available / basePaperMaxWidth);
+    const available = (noteStageRef.current?.clientWidth ?? noteCanvas.basePaperMaxWidth) - 72;
+    setNoteViewZoom(available / noteCanvas.basePaperMaxWidth);
   };
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
-  const lineStep = activeNote.paper.template === "ruled-dense" ? 5 : 8;
-  const defaultTextFont = noteEditor.TEXT_FONTS.find((font) => font.id === activeNote.text.font) ?? noteEditor.TEXT_FONTS[0];
-  const paperStyle = {
-    "--paper-ratio": `${paperWidth} / ${paperHeight}`,
-    "--paper-max-width": `${basePaperMaxWidth}px`,
-    "--note-view-zoom": noteZoom,
-    "--paper-line-step": `${(lineStep / paperHeight) * 100}%`,
-    "--paper-cell-x": `${(8 / paperWidth) * 100}%`,
-    "--paper-cell-y": `${(8 / paperHeight) * 100}%`,
-    "--cornell-header": `${(40 / paperHeight) * 100}%`,
-    ...(activeNote.paper.template === "first-aid" ? firstAidThemeVariables(activeNote.paper.color) : {}),
-  } as React.CSSProperties;
-  const textLayerStyle = {
-    "--text-font": defaultTextFont.family,
-    "--text-size": `${activeNote.text.size}px`,
-    "--text-color": activeNote.text.color === "auto" ? "var(--paper-ink)" : activeNote.text.color,
-    "--text-weight": activeNote.text.bold ? 700 : 400,
-    "--text-style": activeNote.text.italic ? "italic" : "normal",
-    "--text-decoration": activeNote.text.underline ? "underline" : "none",
-    "--text-align": activeNote.text.align,
-  } as React.CSSProperties;
-
-  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, activeTool, chooseNoteTool, editor: noteEditor, exportNotebook, fitNoteToView, inkHistoryVersion, noteInkSession, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, shiftExcerptLayer, showNoteSidebar, tools, undo });
+  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, canvas: noteCanvas, editor: noteEditor, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, showNoteSidebar });
 
   return (
     <DriveControllerProvider controller={drive}>
@@ -1897,11 +1444,11 @@ export default function Home() {
       <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${pdfNavigation.railVisible ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfNavigation.railTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail />
 
-        <ReaderPane scope={{ INK_COLORS, PDF_TOOLS, activeDocument, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ INK_COLORS: noteCanvas.INK_COLORS, PDF_TOOLS, activeDocument, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
 
         <SplitDivider onPointerDown={startResize} />
 
-        <NotePane toolbar={noteToolbar} stage={{ INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, editor: noteEditor, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, moveExcerpt, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setToast, shapeKind, textLayerStyle, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance }} />
+        <NotePane toolbar={noteToolbar} stage={{ activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas: noteCanvas, continuousNotes, editor: noteEditor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, resolveExcerptSource }} />
         {showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
       </WorkspaceShell>
     </main>

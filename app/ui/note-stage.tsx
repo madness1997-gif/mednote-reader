@@ -1,5 +1,5 @@
-import { Check, Sigma, Table2, X, type LucideIcon } from "lucide-react";
-import type { CSSProperties, ComponentProps, Dispatch, PointerEvent, RefObject, SetStateAction } from "react";
+import { Check, Sigma, Table2, X } from "lucide-react";
+import type { RefObject } from "react";
 import { FirstAidBlockEditor } from "../first-aid-block-editor";
 import { createFirstAidDocument, regularTemplateRichText, stripFirstAidBlockMetadata } from "../first-aid-block-model";
 import type { Page } from "../note-domain";
@@ -7,90 +7,41 @@ import { NoteInkCanvas } from "../note-ink-canvas";
 import { NoteObjectLayer, type NoteObjectLayerProps } from "../note-object-layer";
 import {
   plainTextToRichHtml,
-  type ExcerptAppearance,
   type NotePage,
-  type NotePageContentPatch,
-  type PaperColor,
-  type PaperSettings,
   type PaperSize,
-  type PaperTemplate,
-  type PenStyle,
   type ShapeKind,
-  type Stroke,
 } from "../note-runtime-adapter";
 import type { NoteStoreSnapshot } from "../note-store";
 import PageTitleEditor from "../page-title-editor";
 import { RichTextEditor } from "../rich-text-editor";
+import type { NoteCanvasController } from "../use-note-canvas-controller";
 import type { NoteEditorController } from "../use-note-editor-controller";
 import type { NoteSheetPreviewProps } from "./note-sheet-preview";
 import { VirtualizedNoteSheetPreview } from "./virtualized-note-sheet-preview";
-import type { FirstAidCropResult, NotePanel, NoteSheetViewMode, StickerPresetId, Tool } from "./ui-contracts";
+import type { NotePanel, NoteSheetViewMode } from "./ui-contracts";
 
 export type NoteStageScope = {
-  INK_COLORS: string[];
-  PAPER_COLORS: { id: PaperColor; label: string; swatch: string }[];
-  PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width: number; height: number; maxWidth: number }>;
-  PAPER_TEMPLATES: { id: PaperTemplate; label: string }[];
-  PEN_STYLES: { id: PenStyle; label: string; icon: LucideIcon }[];
-  STICKER_PRESETS: { id: StickerPresetId; label: string; description: string }[];
-  TEXT_BOX_BACKGROUND_COLORS: string[];
   activateContinuousSheet: (sheetId: string) => void | Promise<unknown>;
   activeLogicalPage: Page | undefined;
   activeNote: NotePage;
   activeNoteHydrating: boolean;
   activeSheetIndex: number;
-  activeTool: Tool;
-  addCalloutAt: (event: PointerEvent<HTMLElement>) => void;
-  addFirstAidImage: ComponentProps<typeof FirstAidBlockEditor>["onInsertImage"];
-  addSticker: (presetId: StickerPresetId) => void;
-  addTextBoxAt: (event: PointerEvent<HTMLElement>) => void;
-  basePaperMaxWidth: number;
-  commitStrokes: (next: Stroke[], previous: Stroke[]) => void;
+  canvas: NoteCanvasController;
   continuousNotes: NotePage[];
-  deleteExcerpt: NoteObjectLayerProps["onDelete"];
-  editExcerpt: NoteObjectLayerProps["onEdit"];
   editor: NoteEditorController;
-  finishFirstAidPdfCrop: (token: string) => void;
-  firstAidCropResult: FirstAidCropResult | null;
   goToPage: (page: number) => void;
-  highlighterWidth: number;
-  inkColor: string;
-  inkWidth: number;
-  moveExcerpt: NoteObjectLayerProps["onMove"];
   notePanel: NotePanel;
   noteSheetViewMode: NoteSheetViewMode;
   noteStageRef: RefObject<HTMLDivElement | null>;
   noteState: NoteStoreSnapshot;
   noteZoom: number;
   openExcerptSource: NoteObjectLayerProps["onOpenSource"];
-  paperHeight: number;
-  paperStyle: CSSProperties;
-  paperWidth: number;
-  penStyle: PenStyle;
-  requestFirstAidPdfCrop: ComponentProps<typeof FirstAidBlockEditor>["onRequestPdfCrop"];
   resolveExcerptSource: NoteSheetPreviewProps["resolveSource"];
-  selectedExcerptId: string | null;
-  selectedPaperSize: { label: string; dimensions: string };
-  selectedTextBoxAppearance: ExcerptAppearance | null;
-  setActiveTool: Dispatch<SetStateAction<Tool>>;
-  setHighlighterWidth: Dispatch<SetStateAction<number>>;
-  setInkColor: Dispatch<SetStateAction<string>>;
-  setInkWidth: Dispatch<SetStateAction<number>>;
-  setNotePanel: Dispatch<SetStateAction<NotePanel>>;
-  setPenStyle: Dispatch<SetStateAction<PenStyle>>;
-  setSelectedExcerptId: Dispatch<SetStateAction<string | null>>;
-  setShapeKind: Dispatch<SetStateAction<ShapeKind>>;
-  setToast: Dispatch<SetStateAction<string>>;
-  shapeKind: ShapeKind;
-  textLayerStyle: CSSProperties;
-  updateActiveNote: (changes: NotePageContentPatch) => void;
-  updatePaper: (changes: Partial<PaperSettings>) => void;
-  updatePaperTemplate: (template: PaperTemplate) => void;
-  updateSelectedTextBoxAppearance: (changes: Partial<ExcerptAppearance>, closePopover?: boolean) => void;
 };
 
 export function NoteStage({ scope }: { scope: NoteStageScope }) {
-  const { INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, basePaperMaxWidth, commitStrokes, continuousNotes, deleteExcerpt, editExcerpt, editor, finishFirstAidPdfCrop, firstAidCropResult, goToPage, highlighterWidth, inkColor, inkWidth, moveExcerpt, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, resolveExcerptSource, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, setToast, shapeKind, textLayerStyle, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance } = scope;
+  const { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas, continuousNotes, editor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, resolveExcerptSource } = scope;
+  const { INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, basePaperMaxWidth, commitStrokes, deleteExcerpt, editExcerpt, finishFirstAidPdfCrop, firstAidCropResult, highlighterWidth, inkColor, inkWidth, moveExcerpt, notify, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, shapeKind, textLayerStyle, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance } = canvas;
   const { BORDER_COLORS, BULLET_STYLES, EQUATION_PRESETS, EQUATION_TEMPLATES, LINE_PRESETS, NUMBERING_STYLES, SYMBOL_GROUPS, TEXT_BACKGROUND_COLORS, TEXT_COLORS, activateTextEditor, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, clearActiveTextEditor, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, insertEquation, insertTable, insertTextAtSelection, normalizeTextEditorInput, selectEquationTemplate, setEquationDraft, setEquationParts, setTableColumns, setTableRows, setTextInsertPopover, tableBorder, tableColumns, tableRows, textInsertPopover, textPopoverLeft, textToolbar, updateTableBorder } = editor;
   return (<>{notePanel === "text" && textInsertPopover === "bullets" && (
             <div className="text-insert-popover list-library-popover bullet-library-popover" style={{ "--popover-left": `${textPopoverLeft}px` } as React.CSSProperties} role="dialog" aria-label="Thư viện dấu đầu dòng">
@@ -240,11 +191,11 @@ export function NoteStage({ scope }: { scope: NoteStageScope }) {
                       setNotePanel("text");
                     }
                   }}
-                  onError={(message) => setToast(message)}
+                  onError={notify}
                 />
                 {activeNote.paper.template === "first-aid" ? <FirstAidBlockEditor key={activeNote.id} document={activeNote.firstAid ?? createFirstAidDocument()} mode={activeTool === "text" || activeTool === "pointer" ? "edit" : "view"} onChange={(firstAid) => updateActiveNote({ firstAid })} onInsertImage={addFirstAidImage} onRemoveImage={deleteExcerpt} onRequestPdfCrop={requestFirstAidPdfCrop} pdfCropResult={firstAidCropResult} onPdfCropHandled={finishFirstAidPdfCrop} pageObjectIds={activeNote.excerpts.map((excerpt) => excerpt.id)} pageObjectLayouts={Object.fromEntries(activeNote.excerpts.map((excerpt) => [excerpt.id, { height: excerpt.layout?.height ?? 0 }]))} pageHeightCss={basePaperMaxWidth * (paperHeight / paperWidth)} onTextActivate={(editorId, editor, range) => { if (activeTool === "pointer") { setActiveTool("text"); setNotePanel("text"); } activateTextEditor(editorId, editor, range); }} onNormalizeTextInput={normalizeTextEditorInput} /> : <RichTextEditor key={`body:${activeNote.id}`} editorId={`body:${activeNote.id}`} className="note-editor" html={regularTemplateRichText(activeNote.bodyHtml ?? plainTextToRichHtml(activeNote.body), activeNote.body)} editable={activeTool === "text"} placeholder="Bắt đầu nhập nội dung tại đây…" ariaLabel="Nội dung ghi chú" onChange={(bodyHtml, body) => updateActiveNote({ bodyHtml: stripFirstAidBlockMetadata(bodyHtml), body, firstAid: undefined })} onActivate={activateTextEditor} onNormalizeInput={normalizeTextEditorInput} />}
                 <NoteObjectLayer excerpts={activeNote.excerpts} resolveSource={resolveExcerptSource} selectedId={selectedExcerptId} activeTool={activeTool} onSelect={setSelectedExcerptId} onMove={moveExcerpt} onEdit={editExcerpt} onTextActivate={activateTextEditor} onNormalizeTextInput={normalizeTextEditorInput} onOpenSource={openExcerptSource} onDelete={deleteExcerpt} />
-                {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); setToast(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
+                {activeNote.citationPage && !activeNote.excerpts.length && <button className="citation-chip" onClick={() => { goToPage(activeNote.citationPage!); notify(`Đã quay lại trang ${activeNote.citationPage}`); }}>Trang {activeNote.citationPage}</button>}
               </div>
               <NoteInkCanvas key={activeNote.id} tool={activeTool} color={inkColor} width={activeTool === "highlight" ? highlighterWidth : inkWidth} penStyle={penStyle} shape={shapeKind} strokes={activeNote.strokes} onCommit={commitStrokes} />
               {activeTool === "text" && <div className="mode-hint">Nhập chữ hoặc sửa đoạn trích</div>}
