@@ -3,13 +3,14 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Dispatch, SetStateAction } from "react";
 import type { LibraryDocument, WorkspaceItem } from "../document-runtime-adapter";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
+import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
 import type { ReaderInteractionController } from "../use-reader-interaction-controller";
 
 export type PdfToolbarScope = {
   activeDocument: LibraryDocument | null;
   activeWorkspace: WorkspaceItem;
   currentPdfDocument: PDFDocumentProxy | null;
-  deleteActiveDocument: () => void | Promise<unknown>;
+  documents: DocumentWorkspaceController;
   exportAnnotatedPdf: (mode: "download" | "print") => void | Promise<unknown>;
   goToPage: (page: number) => void;
   interaction: ReaderInteractionController;
@@ -21,7 +22,7 @@ export type PdfToolbarScope = {
 };
 
 export function PdfToolbar({ scope }: { scope: PdfToolbarScope }) {
-  const { activeDocument, activeWorkspace, currentPdfDocument, deleteActiveDocument, exportAnnotatedPdf, goToPage, interaction, setSourceZoom, sourcePage, sourceZoom, switchDocument, totalPages } = scope;
+  const { activeDocument, activeWorkspace, currentPdfDocument, documents, exportAnnotatedPdf, goToPage, interaction, setSourceZoom, sourcePage, sourceZoom, switchDocument, totalPages } = scope;
   const { PDF_TOOLS, bookmarks, choosePdfTool, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, toggleBookmark, undoPdf } = interaction;
   const navigation = useActivePdfNavigationController();
   return (<><div className="pane-toolbar pdf-toolbar two-row-toolbar" role="toolbar" aria-label="Công cụ PDF">
@@ -32,7 +33,7 @@ export function PdfToolbar({ scope }: { scope: PdfToolbarScope }) {
                   {activeWorkspace.documents.map((document) => <option key={document.id} value={document.id}>{document.name}</option>)}
                 </select>
               ) : <span className="current-document-label">{activeDocument?.name ?? "Tài liệu mẫu"}</span>}
-              {activeDocument && <button className="pdf-toolbar-button danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void deleteActiveDocument(); }}><Trash2 size={17} /></button>}
+              {activeDocument && <button className="pdf-toolbar-button danger-icon" aria-label="Xóa tài liệu" title="Xóa tài liệu" onClick={() => { void documents.deleteActiveDocument(); }}><Trash2 size={17} /></button>}
               <button className="pdf-toolbar-button" disabled={!activeDocument} onClick={() => { void exportAnnotatedPdf("download"); }} title="Xuất PDF có chú thích" aria-label="Xuất PDF có chú thích"><Download size={17} /><span>Xuất PDF</span></button>
               <button className="pdf-toolbar-button" disabled={!activeDocument} onClick={() => { void exportAnnotatedPdf("print"); }} title="In PDF có chú thích" aria-label="In PDF có chú thích"><Printer size={17} /></button>
               <span className="toolbar-divider" />

@@ -1,33 +1,28 @@
 import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { LibraryProjection } from "../library-projection";
+import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
 import { notebookIconStyle } from "./notebook-color-style";
 import "../library-panel.css";
 
 export type LibraryPanelProps = {
   activeDocumentContextId: string;
   activeNotebookId: string | null;
+  documents: DocumentWorkspaceController;
   libraryProjection: LibraryProjection;
   ready: boolean;
   onClose: () => void;
-  onDeleteDocument: (contextId: string) => void | Promise<unknown>;
-  onImportDocuments: () => void;
-  onOpenDocument: (contextId: string) => void | Promise<unknown>;
   onOpenNotebook: (notebookId: string) => void | Promise<unknown>;
-  onRenameDocument: (contextId: string, name: string) => Promise<void>;
 };
 
 export function LibraryPanel({
   activeDocumentContextId,
   activeNotebookId,
+  documents,
   libraryProjection,
   ready,
   onClose,
-  onDeleteDocument,
-  onImportDocuments,
-  onOpenDocument,
   onOpenNotebook,
-  onRenameDocument,
 }: LibraryPanelProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState("");
@@ -43,7 +38,7 @@ export function LibraryPanel({
     if (!renamingId || renamePending) return;
     setRenamePending(true);
     try {
-      await onRenameDocument(renamingId, renamingName);
+      await documents.renameLibraryDocument(renamingId, renamingName);
       setRenamingId(null);
       setRenamingName("");
     } catch {
@@ -61,7 +56,7 @@ export function LibraryPanel({
           <div><strong>Thư viện</strong><span>Tài liệu bên trái, ghi chú bên phải; liên kết giữa chúng vẫn được giữ nguyên</span></div>
           <button className="icon-button" onClick={onClose} aria-label="Đóng"><X size={19} /></button>
         </div>
-        <button className="library-import" disabled={!ready} onClick={onImportDocuments}>
+        <button className="library-import" disabled={!ready} onClick={documents.openLibraryPdfPicker}>
           <FolderOpen size={18} />
           <span><strong>Lưu PDF hoặc cụm PDF vào thư viện</strong><small>PDF được quản lý độc lập với cấu trúc Notebook / Section / Page</small></span>
         </button>
@@ -80,14 +75,14 @@ export function LibraryPanel({
                         <span><input autoFocus disabled={renamePending} value={renamingName} onChange={(event) => setRenamingName(event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Escape") cancelRename(); }} aria-label="Tên tài liệu mới" /><small>Enter để lưu · Esc để hủy</small></span>
                       </form>
                     ) : (
-                      <button className={`library-item ${isActive ? "active" : ""}`} onClick={() => { void onOpenDocument(item.id); }}>
+                      <button className={`library-item ${isActive ? "active" : ""}`} onClick={() => { void documents.openLibraryDocument(item.id); }}>
                         <span className="library-icon"><FileText size={19} /></span>
                         <span><strong>{item.name}</strong><small>{item.documentCount > 1 ? `${item.documentCount} tài liệu` : "1 tài liệu"} · {item.linkedNotebookIds.length ? `${item.linkedNotebookIds.length} Notebook liên kết` : "không liên kết Note"}</small></span>
                       </button>
                     )}
                     {isRenaming
                       ? <><button className="library-action library-save" disabled={renamePending} onClick={() => { void commitRename(); }} aria-label="Lưu tên mới" title="Lưu tên mới"><Check size={17} /></button><button className="library-action library-cancel" disabled={renamePending} onClick={cancelRename} aria-label="Hủy đổi tên" title="Hủy"><X size={17} /></button></>
-                      : <><button className="library-action library-rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void onDeleteDocument(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>}
+                      : <><button className="library-action library-rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void documents.deleteWorkspace(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>}
                   </div>
                 );
               }) : <div className="library-domain-empty">Chưa có PDF đã lưu. PDF tạm không xuất hiện ở đây.</div>}

@@ -10,9 +10,8 @@ import { resolveDocumentSource } from "./note-document-source";
 import type { PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
-import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
+import { documentLibrary } from "./document-library-controller";
 import { projectLibrary } from "./library-projection";
-import { requestNoteDestination } from "./mednote-dialog";
 import { firstAidThemeInlineStyle } from "./first-aid-theme";
 import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
@@ -26,6 +25,7 @@ import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
 import type { NotePanel, NoteSheetViewMode } from "./ui/ui-contracts";
 import { useNoteCanvasController } from "./use-note-canvas-controller";
+import { useDocumentWorkspaceController } from "./use-document-workspace-controller";
 import { useNoteEditorController } from "./use-note-editor-controller";
 import { useReaderInteractionController, type ReaderInteractionController } from "./use-reader-interaction-controller";
 import { useNoteToolbar } from "./use-note-toolbar";
@@ -66,8 +66,6 @@ function blobToDataUrl(blob: Blob) {
 
 export default function Home() {
   const noteState = useNoteStoreSnapshot();
-  const previewPdfInputRef = useRef<HTMLInputElement>(null);
-  const libraryPdfInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
@@ -139,10 +137,6 @@ export default function Home() {
   const libraryProjection = useMemo(() => noteState.structure
     ? projectLibrary(noteState.structure, noteState.documents)
     : { notes: [], documents: [] }, [noteState.documents, noteState.structure]);
-  const activeWorkspaceLinkedNotebookIds = activeWorkspace.kind === "temporary"
-    ? activeWorkspace.noteNotebookId ? [activeWorkspace.noteNotebookId] : []
-    : libraryProjection.documents.find((item) => item.id === activeWorkspace.id)?.linkedNotebookIds || [];
-  const activeWorkspaceHasLinkedNote = activeWorkspaceLinkedNotebookIds.length > 0;
   const currentPdfDocument = activeDocument?.id === loadedDocumentId ? pdfDocument : null;
   const resolveExcerptSource = useCallback((excerpt: NoteExcerpt) => resolveDocumentSource(excerpt, noteState.documents, activeWorkspace.documents), [activeWorkspace.documents, noteState.documents]);
   const updateActiveNote = (changes: NotePageContentPatch) => {
@@ -279,6 +273,31 @@ export default function Home() {
   });
   readerInteractionRef.current = readerInteraction;
   const { bookmarks, pdfAnnotations, removePdfAnnotation } = readerInteraction;
+  const documentWorkspace = useDocumentWorkspaceController({
+    activeDocument,
+    activeWorkspace,
+    activeWorkspaceIdRef,
+    activateTextTool: () => noteCanvas.setActiveTool("text"),
+    dropDocumentHistories: readerInteraction.dropDocumentHistories,
+    hasActiveNote,
+    libraryProjection,
+    localSavedAtRef,
+    noteZoom,
+    notify: setToast,
+    readerShare,
+    ready,
+    resolveExcerptSource,
+    setActiveWorkspaceId,
+    setLibraryOpen,
+    setNotePanel,
+    setSourceFocus,
+    setWorkspaceMode,
+    setWorkspaces,
+    sourcePage,
+    switchDocument,
+    workspacesRef,
+    workspaceModeRef,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -427,44 +446,6 @@ export default function Home() {
       pendingNoteScrollRef.current = null;
       setToast(error instanceof Error ? error.message : "Không thể mở tờ note");
     }
-  };
-
-  const openExcerptSource = (excerpt: NoteExcerpt) => {
-    const source = resolveExcerptSource(excerpt);
-    if (!source?.documentId || !source.page) return;
-    if (!source.available) {
-      setToast("Tài liệu nguồn không còn trong thư viện");
-      return;
-    }
-    const sourceWorkspace = workspaces.find((workspace) => workspace.documents.some((document) => document.id === source.documentId));
-    if (!sourceWorkspace) {
-      setToast("Tài liệu nguồn không còn trong thư viện");
-      return;
-    }
-    if (sourceWorkspace.id === activeWorkspace.id) {
-      switchDocument(source.documentId, source.page, source.rect);
-    } else {
-      const nextPage = source.page;
-      const nextWorkspaces = workspaces.map((workspace) => workspace.id === sourceWorkspace.id ? {
-        ...workspace,
-        activeDocumentId: source.documentId,
-        sourcePage: nextPage,
-        documents: workspace.documents.map((document) => document.id === source.documentId
-          ? { ...document, reader: { ...normalizeReader(document.reader), page: nextPage } }
-          : document),
-      } : workspace);
-      workspacesRef.current = nextWorkspaces;
-      activeWorkspaceIdRef.current = sourceWorkspace.id;
-      setWorkspaces(nextWorkspaces);
-      setActiveWorkspaceId(sourceWorkspace.id);
-      if (source.rect) {
-        setSourceFocus({ documentId: source.documentId, page: nextPage, rect: source.rect });
-        window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === source.documentId && focus.page === nextPage ? null : focus), 3600);
-      }
-    }
-    workspaceModeRef.current = "split";
-    setWorkspaceMode("split");
-    setToast(`Đã quay lại ${source.displayName} · trang ${source.page}`);
   };
 
   const hasMeaningfulLocalData = () => Boolean(noteStore.getSnapshot().structure?.sheets.length)
@@ -705,121 +686,6 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
-  const handlePdfFiles = async (selection: FileList | null, saveToLibrary: boolean) => {
-    const files = Array.from(selection ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
-    if (!files.length) {
-      setToast("Vui lòng chọn tệp PDF");
-      return;
-    }
-    if (!ready) {
-      setToast("Thư viện tài liệu đang khởi động");
-      return;
-    }
-    const name = files.length === 1
-      ? files[0].name.replace(/\.pdf$/i, "")
-      : `Bộ tài liệu · ${files[0].name.replace(/\.pdf$/i, "")} +${files.length - 1}`;
-    const noteStructure = noteStore.getSnapshot().structure;
-    const existing = saveToLibrary ? documentLibrary.findExistingPdfWorkspace(files, workspacesRef.current) : undefined;
-    const requestedDestination = existing ? { mode: "none" as const } : await requestNoteDestination({
-      documentLabel: name,
-      savedToLibrary: saveToLibrary,
-      notebooks: ordered(noteStructure?.notebooks || []).map((notebook) => ({
-        id: notebook.id,
-        title: notebook.title,
-        sections: ordered((noteStructure?.sections || []).filter((section) => section.notebookId === notebook.id)).map((section) => ({ id: section.id, title: section.title })),
-      })),
-    });
-    try {
-      const result = await documentLibrary.importPdfFiles({
-        files,
-        saveToLibrary,
-        workspaces: workspacesRef.current,
-        activeWorkspaceId: activeWorkspaceIdRef.current,
-        destination: requestedDestination || { mode: "none" },
-        readerShare,
-        workspaceMode: workspaceModeRef.current,
-        noteZoom,
-      });
-      workspacesRef.current = result.workspaces;
-      activeWorkspaceIdRef.current = result.activeWorkspaceId;
-      workspaceModeRef.current = result.workspaceMode;
-      localSavedAtRef.current = result.savedAt;
-      setWorkspaces(result.workspaces);
-      setActiveWorkspaceId(result.activeWorkspaceId);
-      setWorkspaceMode(result.workspaceMode);
-      setLibraryOpen(false);
-      if (result.message) setToast(result.message);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể mở PDF");
-    }
-  };
-
-  const saveTemporaryWorkspace = async () => {
-    if (activeWorkspace.kind !== "temporary") return;
-    try {
-      const result = await documentLibrary.saveTemporaryWorkspace({
-        workspaceId: activeWorkspace.id,
-        workspaces: workspacesRef.current,
-        activeWorkspaceId: activeWorkspaceIdRef.current,
-        hasActiveNote,
-        readerShare,
-        workspaceMode: workspaceModeRef.current,
-        noteZoom,
-      });
-      workspacesRef.current = result.workspaces;
-      activeWorkspaceIdRef.current = result.activeWorkspaceId;
-      workspaceModeRef.current = result.workspaceMode;
-      localSavedAtRef.current = result.savedAt;
-      setWorkspaces(result.workspaces);
-      setActiveWorkspaceId(result.activeWorkspaceId);
-      setWorkspaceMode(result.workspaceMode);
-      if (result.message) setToast(result.message);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể lưu PDF đang xem vào thư viện");
-    }
-  };
-
-  const addNotebook = async () => {
-    const existingNotebooks = noteState.structure?.notebooks || [];
-    const title = (
-      activeWorkspace.documents.length
-        ? `Ghi chú — ${activeWorkspace.name}`
-        : `Sổ ghi chú ${existingNotebooks.length + 1}`
-    );
-    const page = createBlankPage(activeWorkspace.documents.length ? sourcePage : 1);
-    try {
-      const result = await noteStore.createNotebook(title, notePageToSheetContent(page));
-      if (activeWorkspace.documents.length) {
-        const mutation = await documentLibrary.linkWorkspaceToNote({
-          workspaceId: activeWorkspace.id,
-          workspaces: workspacesRef.current,
-          activeWorkspaceId: activeWorkspaceIdRef.current,
-          notebookId: result.active.activeNotebookId,
-          target: { targetType: "page", targetId: result.active.activePageId },
-          readerShare,
-          workspaceMode: workspaceModeRef.current,
-          noteZoom,
-        });
-        workspacesRef.current = mutation.workspaces;
-        workspaceModeRef.current = mutation.workspaceMode;
-        localSavedAtRef.current = mutation.savedAt;
-        setWorkspaces(mutation.workspaces);
-      } else {
-        const noteRuntime = workspacesRef.current.find((workspace) => workspace.id === NOTE_RUNTIME_WORKSPACE_ID);
-        if (noteRuntime && activeWorkspaceIdRef.current !== noteRuntime.id) {
-          activeWorkspaceIdRef.current = noteRuntime.id;
-          setActiveWorkspaceId(noteRuntime.id);
-        }
-      }
-      noteCanvas.setActiveTool("text");
-      workspaceModeRef.current = activeWorkspace.documents.length ? "split" : "note";
-      setWorkspaceMode(workspaceModeRef.current);
-      setToast(activeWorkspace.documents.length ? "Đã tạo Notebook cho tài liệu" : "Đã tạo sổ ghi chú mới");
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể tạo Notebook");
-    }
-  };
-
   const openLibraryNotebook = async (notebookId: string) => {
     try {
       await noteStore.openNotebook(notebookId);
@@ -833,109 +699,6 @@ export default function Home() {
       setLibraryOpen(false);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể mở Notebook");
-    }
-  };
-
-  const openLibraryDocument = async (workspaceId: string) => {
-    const item = libraryProjection.documents.find((document) => document.id === workspaceId);
-    const workspace = workspacesRef.current.find((candidate) => candidate.id === workspaceId);
-    if (!item || !workspace) {
-      setToast("Document runtime chưa sẵn sàng");
-      return;
-    }
-    try {
-      const currentNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || null;
-      const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
-        ? currentNotebookId
-        : item.linkedNotebookIds[0] || null;
-      if (linkedNotebookId) await noteStore.openNotebook(linkedNotebookId);
-      activeWorkspaceIdRef.current = workspace.id;
-      setActiveWorkspaceId(workspace.id);
-      workspaceModeRef.current = "reader";
-      setWorkspaceMode("reader");
-      setLibraryOpen(false);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể mở tài liệu");
-    }
-  };
-
-  const applyDocumentMutation = (result: DocumentMutationResult) => {
-    workspacesRef.current = result.workspaces;
-    activeWorkspaceIdRef.current = result.activeWorkspaceId;
-    workspaceModeRef.current = result.workspaceMode;
-    localSavedAtRef.current = result.savedAt;
-    setWorkspaces(result.workspaces);
-    setActiveWorkspaceId(result.activeWorkspaceId);
-    setWorkspaceMode(result.workspaceMode);
-    if (result.removedDocumentIds?.length) {
-      readerInteraction.dropDocumentHistories(result.removedDocumentIds);
-    }
-    if (result.message) setToast(result.message);
-  };
-
-  const renameLibraryDocument = async (workspaceId: string, name: string) => {
-    try {
-      const result = await documentLibrary.renameWorkspace({
-        workspaceId,
-        name,
-        workspaces: workspacesRef.current,
-        activeWorkspaceId: activeWorkspaceIdRef.current,
-        readerShare,
-        workspaceMode: workspaceModeRef.current,
-        noteZoom,
-      });
-      applyDocumentMutation(result);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể đổi tên tài liệu");
-      throw error;
-    }
-  };
-
-  const deleteWorkspace = async (workspaceId: string) => {
-    const target = workspaces.find((workspace) => workspace.id === workspaceId);
-    if (!target) return;
-    const linkedNotebookCount = target.kind === "temporary"
-      ? target.noteNotebookId ? 1 : 0
-      : libraryProjection.documents.find((item) => item.id === target.id)?.linkedNotebookIds.length || 0;
-    const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
-    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebookCount ? `Các Notebook đang liên kết (${linkedNotebookCount}) vẫn được giữ nguyên trong Ghi chú.` : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
-    try {
-      const result = await documentLibrary.deleteWorkspace({
-        workspaceId,
-        workspaces: workspacesRef.current,
-        activeWorkspaceId: activeWorkspaceIdRef.current,
-        readerShare,
-        workspaceMode: workspaceModeRef.current,
-        noteZoom,
-      });
-      applyDocumentMutation(result);
-      setNotePanel(null);
-      setLibraryOpen(false);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể tháo liên kết tài liệu");
-    }
-  };
-
-  const deleteActiveDocument = async () => {
-    if (!activeDocument) return;
-    if (activeWorkspace.documents.length === 1) {
-      await deleteWorkspace(activeWorkspace.id);
-      return;
-    }
-    if (!window.confirm(`Xóa tài liệu “${activeDocument.name}” khỏi cụm? Các sổ note chung của cụm sẽ được giữ lại.`)) return;
-    try {
-      const result = await documentLibrary.deleteDocument({
-        workspaceId: activeWorkspace.id,
-        documentId: activeDocument.id,
-        workspaces: workspacesRef.current,
-        activeWorkspaceId: activeWorkspaceIdRef.current,
-        readerShare,
-        workspaceMode: workspaceModeRef.current,
-        noteZoom,
-      });
-      applyDocumentMutation(result);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Không thể xóa tài liệu khỏi cụm");
     }
   };
 
@@ -1006,9 +769,9 @@ export default function Home() {
     <DriveControllerProvider controller={drive}>
     <PdfNavigationControllerProvider controller={pdfNavigation}>
     <main className="app-shell">
-      <input ref={previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, false); event.currentTarget.value = ""; }} />
-      <input ref={libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => { void handlePdfFiles(event.target.files, true); event.currentTarget.value = ""; }} />
-      <AppTopBar scope={{ activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setLibraryOpen, toast, workspaceMode }} />
+      <input ref={documentWorkspace.previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handlePreviewPdfInputChange} />
+      <input ref={documentWorkspace.libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handleLibraryPdfInputChange} />
+      <AppTopBar scope={{ activeWorkspace, changeWorkspaceMode, documentName, documents: documentWorkspace, hasActiveNote, ready, setLibraryOpen, toast, workspaceMode }} />
 
       {drive.panelOpen && (
         <DrivePanel />
@@ -1018,14 +781,11 @@ export default function Home() {
         <LibraryPanel
           activeDocumentContextId={activeWorkspace.id}
           activeNotebookId={noteState.structure?.active.activeNotebookId || null}
+          documents={documentWorkspace}
           libraryProjection={libraryProjection}
           ready={ready}
           onClose={() => setLibraryOpen(false)}
-          onDeleteDocument={deleteWorkspace}
-          onImportDocuments={() => libraryPdfInputRef.current?.click()}
-          onOpenDocument={openLibraryDocument}
           onOpenNotebook={openLibraryNotebook}
-          onRenameDocument={renameLibraryDocument}
         />
       )}
 
@@ -1034,11 +794,11 @@ export default function Home() {
       <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${pdfNavigation.railVisible ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfNavigation.railTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail />
 
-        <ReaderPane scope={{ activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, libraryPdfInputRef, onPdfPageRendered, pdfStatus, pdfiumDocument, previewPdfInputRef, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, documents: documentWorkspace, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode, workspaceMode }} />
 
         <SplitDivider onPointerDown={startResize} />
 
-        <NotePane toolbar={noteToolbar} stage={{ activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas: noteCanvas, continuousNotes, editor: noteEditor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, resolveExcerptSource }} />
+        <NotePane toolbar={noteToolbar} stage={{ activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas: noteCanvas, continuousNotes, editor: noteEditor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource: documentWorkspace.openExcerptSource, resolveExcerptSource }} />
         {showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
       </WorkspaceShell>
     </main>

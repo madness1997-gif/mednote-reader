@@ -1,25 +1,23 @@
 import { BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw } from "lucide-react";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
 import { useActiveDriveController } from "../drive-controller";
+import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
 
 export type AppTopBarScope = {
   activeWorkspace: WorkspaceItem;
-  activeWorkspaceHasLinkedNote: boolean;
-  addNotebook: () => void | Promise<unknown>;
   changeWorkspaceMode: (mode: WorkspaceMode) => void;
   documentName: string;
+  documents: DocumentWorkspaceController;
   hasActiveNote: boolean;
-  previewPdfInputRef: RefObject<HTMLInputElement | null>;
   ready: boolean;
-  saveTemporaryWorkspace: () => void | Promise<unknown>;
   setLibraryOpen: Dispatch<SetStateAction<boolean>>;
   toast: string;
   workspaceMode: WorkspaceMode;
 };
 
 export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
-  const { activeWorkspace, activeWorkspaceHasLinkedNote, addNotebook, changeWorkspaceMode, documentName, hasActiveNote, previewPdfInputRef, ready, saveTemporaryWorkspace, setLibraryOpen, toast, workspaceMode } = scope;
+  const { activeWorkspace, changeWorkspaceMode, documentName, documents, hasActiveNote, ready, setLibraryOpen, toast, workspaceMode } = scope;
   const drive = useActiveDriveController();
   return (<><header className="topbar">
         <div className="brand-group">
@@ -43,9 +41,9 @@ export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
             {drive.status === "syncing" || drive.status === "connecting" ? <RefreshCw size={16} /> : drive.token ? <Cloud size={16} /> : <CloudOff size={16} />}
             <span>{drive.status === "syncing" ? "Đang đồng bộ" : drive.token ? "Drive" : "Kết nối Drive"}</span>
           </button>
-          {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
-          {activeWorkspace.documents.length > 0 && !activeWorkspaceHasLinkedNote && <button className="save-session-button" onClick={() => { void addNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}
-          <button className="primary-button" disabled={!ready} onClick={() => previewPdfInputRef.current?.click()}><FolderOpen size={16} /> Mở PDF</button>
+          {activeWorkspace.kind === "temporary" && <button className="save-session-button" onClick={() => { void documents.saveTemporaryWorkspace(); }}><Download size={15} /> Lưu vào thư viện</button>}
+          {activeWorkspace.documents.length > 0 && !documents.activeWorkspaceHasLinkedNote && <button className="save-session-button" onClick={() => { void documents.createLinkedNotebook(); }}><NotebookTabs size={15} /> Tạo note</button>}
+          <button className="primary-button" disabled={!ready} onClick={documents.openPreviewPdfPicker}><FolderOpen size={16} /> Mở PDF</button>
         </div>
       </header></>);
 }

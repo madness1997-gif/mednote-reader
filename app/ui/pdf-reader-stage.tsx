@@ -6,6 +6,7 @@ import type { PdfFitMode, PdfRect, PdfViewMode } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
 import type { PDFiumDocument } from "../pdfium-renderer";
+import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
 import type { ReaderInteractionController } from "../use-reader-interaction-controller";
 
 export type PdfReaderStageScope = {
@@ -13,14 +14,13 @@ export type PdfReaderStageScope = {
   activeWorkspace: WorkspaceItem;
   changeWorkspaceMode: (mode: WorkspaceMode) => void;
   currentPdfDocument: PDFDocumentProxy | null;
+  documents: DocumentWorkspaceController;
   documentStageRef: RefObject<HTMLDivElement | null>;
   fitMode: PdfFitMode;
   interaction: ReaderInteractionController;
-  libraryPdfInputRef: RefObject<HTMLInputElement | null>;
   onPdfPageRendered: (page: number) => void;
   pdfStatus: "idle" | "loading" | "error";
   pdfiumDocument: PDFiumDocument | null;
-  previewPdfInputRef: RefObject<HTMLInputElement | null>;
   ready: boolean;
   rotation: number;
   sourceFocus: { documentId: string; page: number; rect: PdfRect } | null;
@@ -66,7 +66,7 @@ function DemoDocument({ page }: { page: number }) {
 }
 
 export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
-  const { activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, documentStageRef, fitMode, interaction, libraryPdfInputRef, onPdfPageRendered, pdfStatus, pdfiumDocument, previewPdfInputRef, ready, rotation, sourceFocus, sourcePage, sourcePages, sourceZoom, updateReader, viewMode, workspaceMode } = scope;
+  const { activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, documents, documentStageRef, fitMode, interaction, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourcePage, sourcePages, sourceZoom, updateReader, viewMode, workspaceMode } = scope;
   const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = interaction;
   const { activeQuery: activeSearchQuery } = useActivePdfNavigationController();
   return (<>{pdfPanel === "view" && (
@@ -99,9 +99,9 @@ export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
                 {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={handleCrop} onBitmapReady={onPdfPageRendered} />)}
               </div>
             ) : activeDocument ? (
-              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={() => libraryPdfInputRef.current?.click()}>Chọn lại PDF</button>}</div>
+              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={documents.openLibraryPdfPicker}>Chọn lại PDF</button>}</div>
             ) : activeWorkspace.kind === "demo" ? <><div className="demo-reader-hint"><BookOpen size={16} /><span>Đây là tài liệu minh họa. Thêm một PDF để dùng chọn chữ, chú thích và cắt hình.</span></div><DemoDocument page={sourcePage} /></> : (
-              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Mở PDF để đọc tạm, hoặc lưu riêng vào thư viện khi cần.</span><button className="primary-button" disabled={!ready} onClick={() => previewPdfInputRef.current?.click()}>Mở PDF</button></div>
+              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Mở PDF để đọc tạm, hoặc lưu riêng vào thư viện khi cần.</span><button className="primary-button" disabled={!ready} onClick={documents.openPreviewPdfPicker}>Mở PDF</button></div>
             )}
           </div></>);
 }
