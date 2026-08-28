@@ -146,18 +146,18 @@ export type UseNoteCanvasControllerOptions = {
   activeDocument: LibraryDocument | null;
   activeNote: NotePage;
   canvasScopeKey: string;
+  clearPdfSelection: () => void;
   editor: NoteEditorController;
+  getPdfSelection: () => PdfSelection | null;
   notePanel: NotePanel;
   noteZoom: number;
   notify: (message: string) => void;
-  pdfSelection: PdfSelection | null;
   setNotePanel: Dispatch<SetStateAction<NotePanel>>;
-  setPdfSelection: Dispatch<SetStateAction<PdfSelection | null>>;
-  setPdfTool: Dispatch<SetStateAction<PdfTool>>;
+  setPdfTool: (tool: PdfTool) => void;
   updateActiveNote: (changes: NotePageContentPatch) => void;
 };
 
-export function useNoteCanvasController({ activeDocument, activeNote, canvasScopeKey, editor, notePanel, noteZoom, notify, pdfSelection, setNotePanel, setPdfSelection, setPdfTool, updateActiveNote }: UseNoteCanvasControllerOptions) {
+export function useNoteCanvasController({ activeDocument, activeNote, canvasScopeKey, clearPdfSelection, editor, getPdfSelection, notePanel, noteZoom, notify, setNotePanel, setPdfTool, updateActiveNote }: UseNoteCanvasControllerOptions) {
   const [activeTool, setActiveTool] = useState<Tool>("pointer");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [inkColor, setInkColor] = useState("#2465a8");
@@ -225,7 +225,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     setFirstAidCropResult(null);
   };
 
-  const addTextExcerpt = (selection: PdfSelection | null = pdfSelection, textOverride?: string) => {
+  const addTextExcerpt = (selection: PdfSelection | null = getPdfSelection(), textOverride?: string) => {
     if (!selection || !activeDocument) return;
     const text = textOverride ?? selection.text;
     const excerpt: NoteExcerpt = {
@@ -247,7 +247,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     setActiveTool("pointer");
     setNotePanel(null);
     window.getSelection()?.removeAllRanges();
-    setPdfSelection(null);
+    clearPdfSelection();
     notify("Đã đưa đoạn trích sang note");
   };
 
@@ -316,7 +316,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     }
     setFirstAidCropResult(null);
     setFirstAidCropTarget({ noteId: activeNote.id, blockId, placement });
-    setPdfSelection(null);
+    clearPdfSelection();
     setPdfTool("crop");
     notify("Kéo khoanh vùng cần cắt trên trang PDF; ảnh sẽ tự gắn vào block đang chọn");
   };

@@ -1,38 +1,28 @@
-import { Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, Download, Minus, PanelLeftOpen, Plus, Printer, Redo2, Settings2, Trash2, Undo2, type LucideIcon } from "lucide-react";
+import { Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, Download, Minus, PanelLeftOpen, Plus, Printer, Redo2, Settings2, Trash2, Undo2 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Dispatch, SetStateAction } from "react";
 import type { LibraryDocument, WorkspaceItem } from "../document-runtime-adapter";
-import type { PdfTool } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
-import type { PdfHistory, PdfPanel } from "./ui-contracts";
+import type { ReaderInteractionController } from "../use-reader-interaction-controller";
 
 export type PdfToolbarScope = {
-  PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: LucideIcon }[];
   activeDocument: LibraryDocument | null;
   activeWorkspace: WorkspaceItem;
-  bookmarks: number[];
-  choosePdfTool: (tool: PdfTool) => void;
   currentPdfDocument: PDFDocumentProxy | null;
   deleteActiveDocument: () => void | Promise<unknown>;
   exportAnnotatedPdf: (mode: "download" | "print") => void | Promise<unknown>;
   goToPage: (page: number) => void;
-  pdfHistory: PdfHistory;
-  pdfHistoryKey: string;
-  pdfPanel: PdfPanel;
-  pdfTool: PdfTool;
-  redoPdf: () => void;
-  setPdfPanel: Dispatch<SetStateAction<PdfPanel>>;
+  interaction: ReaderInteractionController;
   setSourceZoom: Dispatch<SetStateAction<number>>;
   sourcePage: number;
   sourceZoom: number;
   switchDocument: (documentId: string) => void;
-  toggleBookmark: () => void;
   totalPages: number;
-  undoPdf: () => void;
 };
 
 export function PdfToolbar({ scope }: { scope: PdfToolbarScope }) {
-  const { PDF_TOOLS, activeDocument, activeWorkspace, bookmarks, choosePdfTool, currentPdfDocument, deleteActiveDocument, exportAnnotatedPdf, goToPage, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, setSourceZoom, sourcePage, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf } = scope;
+  const { activeDocument, activeWorkspace, currentPdfDocument, deleteActiveDocument, exportAnnotatedPdf, goToPage, interaction, setSourceZoom, sourcePage, sourceZoom, switchDocument, totalPages } = scope;
+  const { PDF_TOOLS, bookmarks, choosePdfTool, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, toggleBookmark, undoPdf } = interaction;
   const navigation = useActivePdfNavigationController();
   return (<><div className="pane-toolbar pdf-toolbar two-row-toolbar" role="toolbar" aria-label="Công cụ PDF">
             <div className="toolbar-row toolbar-row-primary">

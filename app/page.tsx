@@ -1,53 +1,12 @@
 "use client";
 
-import {
-  Blend,
-  BookOpen,
-  Copy,
-  Crop,
-  Eraser,
-  Hand,
-  Highlighter,
-  Languages,
-  MessageSquareText,
-  MousePointer2,
-  Move,
-  NotebookTabs,
-  PaintBucket,
-  PenTool,
-  RefreshCw,
-  Signature,
-  Shapes,
-  Square,
-  Stamp,
-  Strikethrough,
-  TextSelect,
-  Type,
-  Underline,
-  Volume2,
-  X,
-} from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PdfAnnotation, PdfMarkupAnnotation, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
-import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
+import type { PdfRect } from "./pdf-domain";
+import { PdfReaderController } from "./pdf-reader-controller";
 import { PdfNavigationControllerProvider, usePdfNavigationController } from "./pdf-navigation-controller";
-import {
-  addPdfMarkup as addPdfMarkupCommand,
-  deletePdfAnnotation as deletePdfAnnotationCommand,
-  emptyPdfAnnotationHistory,
-  redoPdfAnnotations as redoPdfAnnotationCommand,
-  replacePdfPageAnnotations as replacePdfPageAnnotationCommand,
-  undoPdfAnnotations as undoPdfAnnotationCommand,
-  type PdfAnnotationHistory,
-} from "./pdf-annotation-session";
 import { DriveControllerProvider, useDriveController } from "./drive-controller";
 import { resolveDocumentSource } from "./note-document-source";
-import {
-  lookupEnglishVietnamese,
-  oxfordLookupUrl,
-  type EnglishVietnameseLookup,
-} from "./dictionary";
 import type { PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
@@ -60,13 +19,15 @@ import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
 import { PdfNavigationRail } from "./ui/pdf-navigation-rail";
 import { ReaderPane } from "./ui/pdf-reader-pane";
+import { PdfSelectionMenu } from "./ui/pdf-selection-menu";
 import { NotePane } from "./ui/note-pane";
 import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
-import type { NotePanel, NoteSheetViewMode, PdfHistory, PdfPanel } from "./ui/ui-contracts";
+import type { NotePanel, NoteSheetViewMode } from "./ui/ui-contracts";
 import { useNoteCanvasController } from "./use-note-canvas-controller";
 import { useNoteEditorController } from "./use-note-editor-controller";
+import { useReaderInteractionController, type ReaderInteractionController } from "./use-reader-interaction-controller";
 import { useNoteToolbar } from "./use-note-toolbar";
 import { useNoteZoomController } from "./note-zoom-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
@@ -82,49 +43,17 @@ import {
   type WorkspaceItem, type WorkspaceMode,
 } from "./document-runtime-adapter";
 
-type DictionaryLookupState = {
-  status: "idle" | "loading" | "ready" | "error";
-  sourceText: string;
-  result: EnglishVietnameseLookup | null;
-  error: string | null;
-};
-
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
 const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
 const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 
-const PDF_TOOLS: { id: PdfTool; label: string; shortLabel: string; icon: typeof MousePointer2 }[] = [
-  { id: "smart", label: "Thông minh — kéo trên chữ để chọn, kéo khoảng trắng để di chuyển; giữ Space để kéo trang", shortLabel: "Thông minh", icon: MousePointer2 },
-  { id: "pan", label: "Bàn tay — kéo trang", shortLabel: "Kéo", icon: Hand },
-  { id: "select", label: "Chọn và sao chép chữ", shortLabel: "Chọn chữ", icon: TextSelect },
-  { id: "highlight", label: "Tô sáng chữ", shortLabel: "Tô sáng", icon: Highlighter },
-  { id: "area-highlight", label: "Tô một vùng bất kỳ — dùng cho công thức, hình, bảng hoặc PDF scan", shortLabel: "Tô vùng", icon: PaintBucket },
-  { id: "underline", label: "Gạch chân chữ", shortLabel: "Gạch chân", icon: Underline },
-  { id: "strikeout", label: "Gạch ngang chữ", shortLabel: "Gạch ngang", icon: Strikethrough },
-  { id: "squiggly", label: "Gạch lượn sóng dưới chữ", shortLabel: "Lượn sóng", icon: Blend },
-  { id: "pen", label: "Viết trên PDF", shortLabel: "Bút", icon: PenTool },
-  { id: "eraser", label: "Tẩy mọi chú thích đã tạo trên PDF", shortLabel: "Tẩy", icon: Eraser },
-  { id: "crop", label: "Cắt hình hoặc bảng sang note", shortLabel: "Cắt", icon: Crop },
-  { id: "note", label: "Đặt ghi chú dán", shortLabel: "Ghi chú", icon: MessageSquareText },
-  { id: "text", label: "Chèn chữ trực tiếp lên PDF", shortLabel: "Chữ", icon: Type },
-  { id: "rectangle", label: "Vẽ hình chữ nhật", shortLabel: "Chữ nhật", icon: Square },
-  { id: "ellipse", label: "Vẽ hình elip", shortLabel: "Elip", icon: Shapes },
-  { id: "arrow", label: "Vẽ mũi tên", shortLabel: "Mũi tên", icon: Move },
-  { id: "stamp", label: "Đóng dấu lên PDF", shortLabel: "Đóng dấu", icon: Stamp },
-  { id: "signature", label: "Đặt chữ ký lên PDF", shortLabel: "Chữ ký", icon: Signature },
-];
-
 const noteStorePendingPage: NotePage = {
   ...createBlankPage(null),
   id: "note-store-pending",
   title: "Đang mở ghi chú",
 };
-
-function uid(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -142,20 +71,7 @@ export default function Home() {
   const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
-  const scrollFrameRef = useRef<number | null>(null);
-  const readerScrollPositionRef = useRef<{ top: number; left: number; anchorPage: number; anchorOffset: number } | null>(null);
-  const pendingReaderScrollRestoreRef = useRef(false);
-  const restoringReaderScrollRef = useRef(false);
-  const [pdfHighlightColor, setPdfHighlightColor] = useState("#f6d96b");
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
-  const [pdfTool, setPdfTool] = useState<PdfTool>("smart");
-  const [pdfTextDraft, setPdfTextDraft] = useState("Ghi chú");
-  const [pdfStampDraft, setPdfStampDraft] = useState("ĐÃ XEM");
-  const [pdfSignatureDraft, setPdfSignatureDraft] = useState("Ký tên");
-  const [pdfHistory, setPdfHistory] = useState<PdfHistory>({});
-  const [pdfSelection, setPdfSelection] = useState<PdfSelection | null>(null);
-  const [dictionaryLookup, setDictionaryLookup] = useState<DictionaryLookupState>({ status: "idle", sourceText: "", result: null, error: null });
-  const dictionaryAbortRef = useRef<AbortController | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
   const workspaceModeRef = useRef<WorkspaceMode>(workspaceMode);
   const lastWorkspacePaneRef = useRef<"reader" | "note">("reader");
@@ -170,8 +86,6 @@ export default function Home() {
   const pdfReader = useMemo(() => new PdfReaderController({
     readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
   }), []);
-  const pdfWheelAccumulatorRef = useRef(0);
-  const pdfWheelZoomingRef = useRef(false);
   const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string; lastModified: number } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pdfiumDocument, setPdfiumDocument] = useState<PDFiumDocument | null>(null);
@@ -193,7 +107,6 @@ export default function Home() {
     } catch { return true; }
   });
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
-  const [pdfPanel, setPdfPanel] = useState<PdfPanel>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
@@ -246,33 +159,27 @@ export default function Home() {
     notePanel,
     notify: setToast,
   });
+  const readerInteractionRef = useRef<ReaderInteractionController | null>(null);
   const noteCanvas = useNoteCanvasController({
     activeDocument,
     activeNote,
     canvasScopeKey: noteScopeKey,
+    clearPdfSelection: () => readerInteractionRef.current?.clearSelection(),
     editor: noteEditor,
+    getPdfSelection: () => readerInteractionRef.current?.pdfSelection ?? null,
     notePanel,
     noteZoom,
     notify: setToast,
-    pdfSelection,
     setNotePanel,
-    setPdfSelection,
-    setPdfTool,
+    setPdfTool: (tool) => readerInteractionRef.current?.setPdfTool(tool),
     updateActiveNote,
   });
-  const { addImageExcerpt, addTextExcerpt, cancelFirstAidCrop, inkColor, inkWidth, setInkColor, setInkWidth } = noteCanvas;
   const activeReader = activeDocument?.reader ?? demoReader;
   const sourcePage = activeDocument?.reader.page ?? demoReader.page;
   const sourceZoom = activeReader.zoom;
   const fitMode = activeReader.fitMode;
   const rotation = activeReader.rotation;
   const viewMode = activeReader.viewMode;
-  const bookmarks = activeReader.bookmarks;
-  const pdfAnnotations = activeReader.annotations;
-  const pdfAnnotationText = pdfTool === "stamp" ? pdfStampDraft : pdfTool === "signature" ? pdfSignatureDraft : pdfTextDraft;
-  const isPdfHighlightTool = pdfTool === "highlight" || pdfTool === "area-highlight";
-  const pdfPanelColor = isPdfHighlightTool ? pdfHighlightColor : inkColor;
-  const updatePdfPanelColor = (color: string) => isPdfHighlightTool ? setPdfHighlightColor(color) : setInkColor(color);
   const documentName = activeWorkspace.name;
   const totalPages = currentPdfDocument?.numPages ?? (activeDocument ? 1 : 482);
 
@@ -335,7 +242,7 @@ export default function Home() {
         ? { ...document, reader: { ...normalizeReader(document.reader), page: nextPage } }
         : document),
     }));
-    setPdfSelection(null);
+    readerInteractionRef.current?.clearSelection();
     if (rect) {
       setSourceFocus({ documentId, page: nextPage, rect });
       window.setTimeout(() => setSourceFocus((focus) => focus?.documentId === documentId && focus.page === nextPage ? null : focus), 3600);
@@ -346,6 +253,32 @@ export default function Home() {
     if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
     return Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1);
   }, [activeDocument, activeWorkspace.kind, currentPdfDocument, sourcePage]);
+
+  const readerInteraction = useReaderInteractionController({
+    activeDocument,
+    activeReader,
+    currentPdfDocument,
+    documentStageRef,
+    inkColor: noteCanvas.inkColor,
+    inkWidth: noteCanvas.inkWidth,
+    notify: setToast,
+    onAddTextExcerpt: (selection, textOverride) => noteCanvas.addTextExcerpt(selection, textOverride),
+    onCancelCrop: noteCanvas.cancelFirstAidCrop,
+    onCrop: noteCanvas.addImageExcerpt,
+    pdfReader,
+    setInkColor: noteCanvas.setInkColor,
+    setInkWidth: noteCanvas.setInkWidth,
+    setSourcePage,
+    setSourceZoom,
+    sourcePage,
+    sourceZoom,
+    updateReader,
+    viewMode,
+    workspaceMode,
+    workspaceModeRef,
+  });
+  readerInteractionRef.current = readerInteraction;
+  const { bookmarks, pdfAnnotations, removePdfAnnotation } = readerInteraction;
 
   useEffect(() => {
     let cancelled = false;
@@ -494,150 +427,6 @@ export default function Home() {
       pendingNoteScrollRef.current = null;
       setToast(error instanceof Error ? error.message : "Không thể mở tờ note");
     }
-  };
-
-  const choosePdfTool = (tool: PdfTool) => {
-    setPdfTool(tool);
-    if (tool !== "crop") cancelFirstAidCrop();
-    if (["pen", "highlight", "area-highlight", "underline", "strikeout", "squiggly", "note", "text", "rectangle", "ellipse", "arrow", "stamp", "signature"].includes(tool)) {
-      setPdfPanel((panel) => panel === "ink" && pdfTool === tool ? null : "ink");
-    } else {
-      setPdfPanel(null);
-    }
-  };
-
-  const pdfHistoryKey = activeDocument?.id ?? "demo";
-
-  const applyPdfAnnotationResult = (result: { annotations: PdfAnnotation[]; history: PdfAnnotationHistory }) => {
-    setPdfHistory((state) => ({ ...state, [pdfHistoryKey]: result.history }));
-    updateReader((reader) => ({ ...reader, annotations: result.annotations }));
-  };
-
-  const addPdfMarkup = (kind: PdfMarkupAnnotation["kind"], selection: PdfSelection | null = pdfSelection) => {
-    if (!selection || !activeDocument) return;
-    const color = kind === "highlight" || kind === "area-highlight" ? pdfHighlightColor : kind === "underline" || kind === "squiggly" ? inkColor : "#c94b50";
-    const annotation: PdfMarkupAnnotation = {
-      id: uid(`pdf-${kind}`),
-      kind,
-      page: selection.page,
-      color,
-      rects: selection.rects,
-      text: selection.text,
-      createdAt: Date.now(),
-    };
-    applyPdfAnnotationResult(addPdfMarkupCommand(pdfAnnotations, annotation, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
-    window.getSelection()?.removeAllRanges();
-    setPdfSelection(null);
-    setToast(kind === "highlight" ? "Đã tô sáng" : kind === "underline" ? "Đã gạch chân" : kind === "squiggly" ? "Đã gạch lượn sóng" : "Đã gạch ngang");
-  };
-
-  const copyPdfSelection = async () => {
-    if (!pdfSelection) return;
-    try {
-      await navigator.clipboard.writeText(pdfSelection.text);
-      setToast("Đã sao chép đoạn chọn");
-    } catch {
-      setToast("Trình duyệt không cho phép sao chép tự động");
-    }
-  };
-
-  const handlePdfSelection = (selection: PdfSelection | null) => {
-    if (!selection) {
-      setPdfSelection(null);
-      return;
-    }
-    if (pdfTool === "highlight" || pdfTool === "underline" || pdfTool === "strikeout" || pdfTool === "squiggly") {
-      addPdfMarkup(pdfTool, selection);
-      return;
-    }
-    setPdfSelection(selection);
-  };
-
-  useEffect(() => {
-    dictionaryAbortRef.current?.abort();
-    dictionaryAbortRef.current = null;
-    setDictionaryLookup({
-      status: "idle",
-      sourceText: pdfSelection?.text.replace(/\s+/g, " ").trim() ?? "",
-      result: null,
-      error: null,
-    });
-  }, [pdfSelection?.text]);
-
-  const requestDictionaryLookup = () => {
-    if (!pdfSelection?.text || dictionaryLookup.status === "loading") return;
-    const sourceText = pdfSelection.text.replace(/\s+/g, " ").trim();
-    dictionaryAbortRef.current?.abort();
-    const controller = new AbortController();
-    dictionaryAbortRef.current = controller;
-    setDictionaryLookup({ status: "loading", sourceText, result: null, error: null });
-    void lookupEnglishVietnamese(sourceText, controller.signal).then((result) => {
-      if (!controller.signal.aborted) setDictionaryLookup({ status: "ready", sourceText, result, error: null });
-    }).catch((error) => {
-      if (!controller.signal.aborted && (error as Error).name !== "AbortError") {
-        setDictionaryLookup({ status: "error", sourceText, result: null, error: error instanceof Error ? error.message : "Chưa thể tra từ điển." });
-      }
-    });
-  };
-
-  const playDictionaryAudio = () => {
-    const audioUrl = dictionaryLookup.result?.dictionary?.audioUrl;
-    if (!audioUrl) return;
-    void new Audio(audioUrl).play().catch(() => setToast("Trình duyệt chưa cho phép phát âm thanh"));
-  };
-
-  const copyTranslation = async () => {
-    const translation = dictionaryLookup.result?.translation;
-    if (!translation) return;
-    try {
-      await navigator.clipboard.writeText(translation);
-      setToast("Đã sao chép bản dịch đề xuất");
-    } catch {
-      setToast("Trình duyệt không cho phép sao chép tự động");
-    }
-  };
-
-  const openOxfordLookup = () => {
-    if (!pdfSelection) return;
-    window.open(oxfordLookupUrl(pdfSelection.text), "_blank", "noopener,noreferrer");
-  };
-
-  const commitPdfPageAnnotations = (page: number, nextPage: PdfAnnotation[], previousPage: PdfAnnotation[]) => {
-    applyPdfAnnotationResult(replacePdfPageAnnotationCommand(pdfAnnotations, page, nextPage, previousPage, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
-  };
-
-  const undoPdf = () => {
-    const result = undoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());
-    if (result.annotations === pdfAnnotations) return;
-    applyPdfAnnotationResult(result);
-    setToast("Đã hoàn tác chú thích PDF");
-  };
-
-  const redoPdf = () => {
-    const result = redoPdfAnnotationCommand(pdfAnnotations, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory());
-    if (result.annotations === pdfAnnotations) return;
-    applyPdfAnnotationResult(result);
-    setToast("Đã làm lại chú thích PDF");
-  };
-
-  const removePdfAnnotation = (annotationId: string) => {
-    applyPdfAnnotationResult(deletePdfAnnotationCommand(pdfAnnotations, annotationId, pdfHistory[pdfHistoryKey] ?? emptyPdfAnnotationHistory()));
-    setToast("Đã xóa chú thích PDF");
-  };
-
-  const toggleBookmark = () => {
-    const exists = bookmarks.includes(sourcePage);
-    updateReader((reader) => ({
-      ...reader,
-      bookmarks: exists ? reader.bookmarks.filter((page) => page !== sourcePage) : [...reader.bookmarks, sourcePage].sort((a, b) => a - b),
-    }));
-    setToast(exists ? `Đã bỏ đánh dấu trang ${sourcePage}` : `Đã đánh dấu trang ${sourcePage}`);
-  };
-
-  const addTranslationExcerpt = () => {
-    const translation = dictionaryLookup.result?.translation;
-    if (!pdfSelection || !translation) return;
-    addTextExcerpt(pdfSelection, `${pdfSelection.text}\n\nBản dịch đề xuất:\n${translation}`);
   };
 
   const openExcerptSource = (excerpt: NoteExcerpt) => {
@@ -814,93 +603,9 @@ export default function Home() {
     setToast("Đã xuất note kèm nguồn");
   };
 
-  const handlePdfWheelZoom = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!(event.ctrlKey || event.metaKey) || !currentPdfDocument) return;
-    event.preventDefault();
-    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, event.currentTarget.clientHeight) : 1;
-    pdfWheelAccumulatorRef.current += event.deltaY * multiplier;
-    if (Math.abs(pdfWheelAccumulatorRef.current) < 60 || pdfWheelZoomingRef.current) return;
-    const direction = pdfWheelAccumulatorRef.current > 0 ? -1 : 1;
-    pdfWheelAccumulatorRef.current -= Math.sign(pdfWheelAccumulatorRef.current) * 60;
-    const stage = event.currentTarget;
-    const oldZoom = sourceZoom;
-    const nextZoom = pdfReader.clampZoom(oldZoom + direction * .1);
-    if (nextZoom === oldZoom) return;
-    const stageRect = stage.getBoundingClientRect();
-    const localX = event.clientX - stageRect.left;
-    const localY = event.clientY - stageRect.top;
-    const contentX = stage.scrollLeft + localX;
-    const contentY = stage.scrollTop + localY;
-    const surface = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".pdf-page-surface, .document-paper");
-    const surfaceRect = surface?.getBoundingClientRect();
-    const surfaceX = surfaceRect ? (event.clientX - surfaceRect.left) / Math.max(1, surfaceRect.width) : 0;
-    const surfaceY = surfaceRect ? (event.clientY - surfaceRect.top) / Math.max(1, surfaceRect.height) : 0;
-    pdfWheelZoomingRef.current = true;
-    setSourceZoom(nextZoom);
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      if (surface?.isConnected) {
-        const nextRect = surface.getBoundingClientRect();
-        stage.scrollLeft += nextRect.left + nextRect.width * surfaceX - event.clientX;
-        stage.scrollTop += nextRect.top + nextRect.height * surfaceY - event.clientY;
-      } else {
-        const anchored = zoomAroundAnchor(oldZoom, nextZoom, { contentX, contentY, localX, localY });
-        stage.scrollLeft = anchored.left;
-        stage.scrollTop = anchored.top;
-      }
-      pdfWheelZoomingRef.current = false;
-    }));
-  };
-
-  const rememberReaderScrollPosition = (stage: HTMLElement) => {
-    const stageTop = stage.getBoundingClientRect().top;
-    const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
-    const anchor = pages.reduce<{ element: HTMLElement; distance: number } | null>((best, element) => {
-      const distance = Math.abs(element.getBoundingClientRect().top - stageTop);
-      return !best || distance < best.distance ? { element, distance } : best;
-    }, null)?.element;
-    readerScrollPositionRef.current = {
-      top: stage.scrollTop,
-      left: stage.scrollLeft,
-      anchorPage: Number(anchor?.dataset.pdfPage) || sourcePage,
-      anchorOffset: anchor ? anchor.getBoundingClientRect().top - stageTop : 0,
-    };
-  };
-
-  const handleReaderScroll = () => {
-    const stage = documentStageRef.current;
-    if (!stage) return;
-    // display:none can clamp a scroll container while Reader is hidden. Do not
-    // let that transient value overwrite the last position the user actually
-    // saw; it is restored when Reader becomes visible again.
-    if (workspaceModeRef.current !== "note" && !restoringReaderScrollRef.current) {
-      rememberReaderScrollPosition(stage);
-    }
-    if (viewMode !== "continuous") return;
-    if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      const stageTop = stage.getBoundingClientRect().top + 24;
-      const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
-      const nearest = pages.reduce<{ element: HTMLElement; distance: number } | null>((best, element) => {
-        const distance = Math.abs(element.getBoundingClientRect().top - stageTop);
-        return !best || distance < best.distance ? { element, distance } : best;
-      }, null);
-      const page = Number(nearest?.element.dataset.pdfPage);
-      if (page && page !== sourcePage) setSourcePage(page);
-    });
-  };
-
-  useEffect(() => {
-    setPdfSelection(null);
-    window.getSelection()?.removeAllRanges();
-  }, [activeDocument?.id, pdfTool, sourcePage]);
-
   useEffect(() => {
     setNotePanel(null);
   }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
-
-  useEffect(() => {
-    setPdfPanel(null);
-  }, [activeDocument?.id]);
 
   const workspacePaneForElement = (element: HTMLElement | null): "reader" | "note" | null => {
     if (element?.closest(".reader-pane, .pdf-thumbnails")) return "reader";
@@ -992,9 +697,8 @@ export default function Home() {
       if (!isTyping && event.key === "ArrowLeft" && viewMode === "single") goToPage(sourcePage - 1);
       if (!isTyping && event.key === "ArrowRight" && viewMode === "single") goToPage(sourcePage + 1);
       if (event.key === "Escape") {
-        setPdfSelection(null);
+        readerInteraction.clearSelection();
         setWorkspaceMode("split");
-        window.getSelection()?.removeAllRanges();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1164,8 +868,7 @@ export default function Home() {
     setActiveWorkspaceId(result.activeWorkspaceId);
     setWorkspaceMode(result.workspaceMode);
     if (result.removedDocumentIds?.length) {
-      const removed = new Set(result.removedDocumentIds);
-      setPdfHistory((history) => Object.fromEntries(Object.entries(history).filter(([documentId]) => !removed.has(documentId))));
+      readerInteraction.dropDocumentHistories(result.removedDocumentIds);
     }
     if (result.message) setToast(result.message);
   };
@@ -1243,19 +946,8 @@ export default function Home() {
         : "PDF này chưa có note. Chọn “Tạo note” khi bạn muốn ghi chú.");
       return;
     }
-    const stage = documentStageRef.current;
-    if (stage && workspaceModeRef.current !== "note") {
-      rememberReaderScrollPosition(stage);
-    }
-    if (mode === "note" && workspaceModeRef.current !== "note") {
-      pendingReaderScrollRestoreRef.current = true;
-    }
+    readerInteraction.prepareWorkspaceModeChange(mode);
     setWorkspaceMode(mode);
-    if (mode === "note") {
-      setPdfSelection(null);
-      setPdfPanel(null);
-      window.getSelection()?.removeAllRanges();
-    }
     if (mode === "reader") {
       setNotePanel(null);
       noteEditor.setTextInsertPopover(null);
@@ -1270,63 +962,6 @@ export default function Home() {
     pendingWorkspaceFocusRef.current = null;
     const frame = window.requestAnimationFrame(() => focusWorkspacePane(pendingPane));
     return () => window.cancelAnimationFrame(frame);
-  }, [workspaceMode]);
-
-  useEffect(() => {
-    if (workspaceMode !== "reader" || !pendingReaderScrollRestoreRef.current) return;
-    const stage = documentStageRef.current;
-    const saved = readerScrollPositionRef.current;
-    if (!stage || !saved) return;
-    pendingReaderScrollRestoreRef.current = false;
-    restoringReaderScrollRef.current = true;
-
-    // Lazy PDF pages may settle their measured heights shortly after Reader is
-    // shown again. Restore once immediately and after those layout passes so a
-    // mode round-trip returns to the same coordinates instead of a nearby page.
-    let cancelled = false;
-    let restoreFrame: number | null = null;
-    const restore = () => {
-      if (cancelled) return;
-      stage.scrollLeft = saved.left;
-      const anchor = stage.querySelector<HTMLElement>(`[data-pdf-page="${saved.anchorPage}"]`);
-      if (anchor) {
-        const currentOffset = anchor.getBoundingClientRect().top - stage.getBoundingClientRect().top;
-        stage.scrollTop += currentOffset - saved.anchorOffset;
-      } else {
-        stage.scrollTop = saved.top;
-      }
-    };
-    const queueRestore = () => {
-      if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
-      restoreFrame = window.requestAnimationFrame(() => {
-        restoreFrame = null;
-        restore();
-      });
-    };
-    const finish = () => {
-      if (cancelled) return;
-      cancelled = true;
-      observer.disconnect();
-      if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
-      window.clearTimeout(timeout);
-      stage.removeEventListener("wheel", finish);
-      stage.removeEventListener("pointerdown", finish);
-      stage.removeEventListener("touchstart", finish);
-      window.removeEventListener("keydown", finish);
-      restoringReaderScrollRef.current = false;
-    };
-    const observer = new ResizeObserver(queueRestore);
-    observer.observe(stage.querySelector<HTMLElement>(".continuous-pages") ?? stage);
-    restore();
-    queueRestore();
-    const timeout = window.setTimeout(finish, 3000);
-    stage.addEventListener("wheel", finish, { passive: true });
-    stage.addEventListener("pointerdown", finish);
-    stage.addEventListener("touchstart", finish, { passive: true });
-    window.addEventListener("keydown", finish);
-    return () => {
-      finish();
-    };
   }, [workspaceMode]);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1394,57 +1029,12 @@ export default function Home() {
         />
       )}
 
-      {pdfSelection && (
-        <div className={`pdf-selection-menu placement-${pdfSelection.menuPlacement} ${dictionaryLookup.status === "idle" ? "compact" : "translation-open"}`} style={{ left: pdfSelection.menuX, top: pdfSelection.menuY, maxHeight: pdfSelection.menuMaxHeight }} role="dialog" aria-label="Tra từ và thao tác với đoạn chữ đã chọn">
-          <div className="pdf-selection-actions" role="toolbar" aria-label="Thao tác với đoạn chữ">
-            <button onClick={() => { void copyPdfSelection(); }} aria-label="Sao chép" title="Sao chép"><Copy size={14} /> Chép</button>
-            <button onClick={requestDictionaryLookup} disabled={dictionaryLookup.status === "loading"} aria-label="Dịch Anh sang Việt" title="Dịch Anh sang Việt"><Languages size={14} /> Dịch</button>
-            <button onClick={() => addPdfMarkup("highlight")} aria-label="Tô sáng" title="Tô sáng"><Highlighter size={14} /> Tô</button>
-            <button onClick={() => addPdfMarkup("underline")} aria-label="Gạch chân" title="Gạch chân"><Underline size={14} /> Chân</button>
-            <button onClick={() => addPdfMarkup("strikeout")} aria-label="Gạch ngang" title="Gạch ngang"><Strikethrough size={14} /> Ngang</button>
-            <button onClick={() => addPdfMarkup("squiggly")} aria-label="Gạch lượn sóng" title="Gạch lượn sóng"><Blend size={14} /> Lượn</button>
-            <button className="send-note" onClick={() => addTextExcerpt()} aria-label="Đưa sang note" title="Đưa sang note"><NotebookTabs size={14} /> Note</button>
-            <button onClick={openOxfordLookup} aria-label="Tra Oxford" title="Tra Oxford"><BookOpen size={14} /> Oxford</button>
-            <button className="close-selection" onClick={() => { setPdfSelection(null); window.getSelection()?.removeAllRanges(); }} aria-label="Đóng"><X size={14} /></button>
-          </div>
-          {dictionaryLookup.status !== "idle" && <section className="selection-dictionary" aria-live="polite">
-            <header><span><Languages size={15} /><b>Anh → Việt</b></span></header>
-            <p className="dictionary-source-text">{dictionaryLookup.sourceText || pdfSelection.text}</p>
-            {dictionaryLookup.status === "loading" && <div className="dictionary-loading"><RefreshCw size={14} /> Đang tìm nghĩa và đề xuất bản dịch…</div>}
-            {dictionaryLookup.status === "error" && <p className="dictionary-error">{dictionaryLookup.error}</p>}
-            {dictionaryLookup.status === "ready" && dictionaryLookup.result && (
-              <>
-                {dictionaryLookup.result.dictionary && (
-                  <div className="dictionary-headword">
-                    <span><strong>{dictionaryLookup.result.dictionary.word}</strong>{dictionaryLookup.result.dictionary.phonetic && <em>{dictionaryLookup.result.dictionary.phonetic}</em>}</span>
-                    {dictionaryLookup.result.dictionary.audioUrl && <button onClick={playDictionaryAudio} aria-label="Nghe phát âm" title="Nghe phát âm"><Volume2 size={15} /></button>}
-                  </div>
-                )}
-                {dictionaryLookup.result.translation ? (
-                  <div className="translation-suggestion">
-                    <small>Gợi ý dịch</small>
-                    <strong>{dictionaryLookup.result.translation}</strong>
-                    {dictionaryLookup.result.alternatives.length > 0 && <p>Khác: {dictionaryLookup.result.alternatives.join(" · ")}</p>}
-                    <div><button onClick={() => { void copyTranslation(); }} aria-label="Sao chép bản dịch" title="Sao chép bản dịch"><Copy size={13} /> Chép</button><button className="send-translation" onClick={addTranslationExcerpt} aria-label="Đưa bản dịch sang note" title="Đưa bản dịch sang note"><NotebookTabs size={13} /> Note</button></div>
-                  </div>
-                ) : <p className="dictionary-error">{dictionaryLookup.result.translationError ?? "Chưa tìm thấy gợi ý dịch phù hợp."}</p>}
-                {dictionaryLookup.result.dictionary?.meanings.length ? (
-                  <details className="english-definitions">
-                    <summary>Nghĩa tiếng Anh</summary>
-                    {dictionaryLookup.result.dictionary.meanings.map((meaning, index) => <div key={`${meaning.partOfSpeech}-${index}`}><b>{meaning.partOfSpeech}</b><span>{meaning.definitions.join("; ")}</span></div>)}
-                  </details>
-                ) : null}
-              </>
-            )}
-            <footer>Nghĩa mở: Wiktionary (CC BY-SA) · gợi ý dịch online: MyMemory. Oxford mở ở trang chính thức.</footer>
-          </section>}
-        </div>
-      )}
+      <PdfSelectionMenu controller={readerInteraction} />
 
       <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${pdfNavigation.railVisible ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfNavigation.railTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail />
 
-        <ReaderPane scope={{ INK_COLORS: noteCanvas.INK_COLORS, PDF_TOOLS, activeDocument, activeWorkspace, addImageExcerpt, bookmarks, changeWorkspaceMode, choosePdfTool, commitPdfPageAnnotations, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, libraryPdfInputRef, onPdfPageRendered, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfHistory, pdfHistoryKey, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfStatus, pdfTextDraft, pdfTool, pdfiumDocument, previewPdfInputRef, ready, redoPdf, rotation, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, toggleBookmark, totalPages, undoPdf, updatePdfPanelColor, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, deleteActiveDocument, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, libraryPdfInputRef, onPdfPageRendered, pdfStatus, pdfiumDocument, previewPdfInputRef, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode, workspaceMode }} />
 
         <SplitDivider onPointerDown={startResize} />
 
