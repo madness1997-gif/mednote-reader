@@ -44,9 +44,11 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
   await page.getByRole('button', { name: 'Cuộn liên tục' }).click();
 
   const stage = page.locator('.document-stage');
+  const pageInput = page.getByRole('textbox', { name: 'Số trang' });
+  await pageInput.fill('6');
+  await pageInput.press('Enter');
   const targetPage = stage.locator('[data-pdf-page="6"]');
   await expect(targetPage).toBeAttached();
-  await targetPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(1_000);
   const before = await stage.evaluate((element) => {
     const stageRect = element.getBoundingClientRect();

@@ -1,5 +1,6 @@
 import type { PDFiumPageRender } from "@hyzyla/pdfium";
 import pdfiumWasmUrl from "@hyzyla/pdfium/pdfium.wasm?url";
+import { resolvePdfiumWasmLocation } from "./pdfium-wasm-location";
 
 export type PDFiumPage = {
   render: (options?: { width?: number; height?: number }) => Promise<PDFiumPageRender>;
@@ -23,12 +24,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 }
 
 function pdfiumWasmLocation() {
-  if (typeof window !== "undefined" && window.mednoteDesktop?.isDesktop) {
-    const resolvedUrl = String(pdfiumWasmUrl);
-    const filename = resolvedUrl.substring(resolvedUrl.lastIndexOf("/") + 1) || "pdfium.wasm";
-    return `mednote-assets://app/assets/${filename}`;
-  }
-  return pdfiumWasmUrl;
+  const browser = typeof window !== "undefined" ? window : undefined;
+  return resolvePdfiumWasmLocation(
+    String(pdfiumWasmUrl),
+    browser?.location.href,
+    Boolean(browser?.mednoteDesktop?.isDesktop),
+  );
 }
 
 async function loadDesktopDocument(data: Uint8Array): Promise<PDFiumDocument> {

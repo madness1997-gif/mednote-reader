@@ -30,6 +30,7 @@ import { useNoteEditorController } from "./use-note-editor-controller";
 import { useReaderInteractionController, type ReaderInteractionController } from "./use-reader-interaction-controller";
 import { NOTE_ZOOM_PRESETS, useNoteZoomController } from "./note-zoom-controller";
 import { useWorkspaceLayoutController } from "./use-workspace-layout-controller";
+import type { VirtualizedPdfPagesHandle } from "./virtualized-pdf-pages";
 import {
   NotePaneControllersProvider,
   ReaderPaneControllersProvider,
@@ -69,6 +70,7 @@ function blobToDataUrl(blob: Blob) {
 export default function Home() {
   const noteState = useNoteStoreSnapshot();
   const documentStageRef = useRef<HTMLDivElement>(null);
+  const continuousPdfPagesRef = useRef<VirtualizedPdfPagesHandle>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
   const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
@@ -217,7 +219,7 @@ export default function Home() {
     setSourcePage(next);
     if (viewMode === "continuous") {
       window.requestAnimationFrame(() => {
-        documentStageRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${next}"]`)?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+        continuousPdfPagesRef.current?.scrollToPage(next, smooth);
       });
     }
   };
@@ -241,16 +243,18 @@ export default function Home() {
     }
   };
 
-  const sourcePages = useMemo(() => {
-    if (!currentPdfDocument) return activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : [];
-    return Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1);
-  }, [activeDocument, activeWorkspace.kind, currentPdfDocument, sourcePage]);
+  const loadedSourcePages = useMemo(() => currentPdfDocument
+    ? Array.from({ length: currentPdfDocument.numPages }, (_, index) => index + 1)
+    : null, [currentPdfDocument]);
+  const sourcePages = loadedSourcePages ?? (activeDocument ? [sourcePage] : activeWorkspace.kind === "demo" ? DEMO_PAGES : []);
 
   const readerInteraction = useReaderInteractionController({
     activeDocument,
     activeReader,
     currentPdfDocument,
     documentStageRef,
+    getContinuousScrollAnchor: (inset) => continuousPdfPagesRef.current?.getScrollAnchor(inset) ?? null,
+    pinContinuousScrollAnchor: () => continuousPdfPagesRef.current?.pinScrollAnchor(),
     inkColor: noteCanvas.inkColor,
     inkWidth: noteCanvas.inkWidth,
     notify: setToast,
@@ -648,7 +652,7 @@ export default function Home() {
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
   const readerPaneViewModel: ReaderPaneViewModel = {
     toolbar: { exportAnnotatedPdf, setSourceZoom, sourceZoom, totalPages },
-    stage: { documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
+    stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
   };
   const notePaneViewModel: NotePaneViewModel = {
     toolbar: { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets: NOTE_ZOOM_PRESETS },

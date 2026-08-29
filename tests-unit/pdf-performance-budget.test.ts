@@ -3,6 +3,7 @@ import test from "node:test";
 import { PdfCanvasBudgetManager } from "../app/pdf-canvas-budget";
 import { PdfReaderController } from "../app/pdf-reader-controller";
 import { PdfWorkScheduler } from "../app/pdf-work-scheduler";
+import { nearestPdfVirtualPageIndex, pdfPageVirtualMetrics, pdfPageVirtualRange } from "../app/pdf-page-virtualizer";
 import { pdfThumbnailVirtualRange } from "../app/virtualized-thumbnails";
 
 test("canvas budget evicts the least recently used unpinned page", () => {
@@ -56,6 +57,27 @@ test("2,000–3,000-page PDFs keep thumbnail and canvas work bounded", () => {
   assert.ok(snapshot.entries.length <= budgetBytes / pageBytes);
   assert.ok(snapshot.entries.some((entry) => entry.key === "book:1500" && entry.pinned));
   assert.ok(evictions >= 2_975, "Thousands of off-screen canvases must be released instead of retained");
+});
+
+test("2,000–3,000-page continuous PDFs mount only a bounded page window", () => {
+  for (const pageCount of [2_000, 2_500, 3_000]) {
+    const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
+    const metrics = pdfPageVirtualMetrics(pages, new Map(), 780);
+    for (const viewportTop of [0, metrics.totalHeight / 2, Math.max(0, metrics.totalHeight - 900)]) {
+      const range = pdfPageVirtualRange(metrics, viewportTop, 900);
+      assert.ok(range.end - range.start <= 7, `${pageCount} pages must not create an unbounded continuous DOM`);
+      assert.ok(range.start >= 0);
+      assert.ok(range.end <= pageCount);
+    }
+  }
+});
+
+test("continuous PDF metrics retain exact offsets after measured page heights change", () => {
+  const pages = [1, 2, 3, 4];
+  const metrics = pdfPageVirtualMetrics(pages, new Map([[2, 1_000]]), 780, 22);
+  assert.deepEqual(metrics.offsets, [0, 802, 1_824, 2_626]);
+  assert.equal(metrics.totalHeight, 3_406);
+  assert.equal(nearestPdfVirtualPageIndex(metrics, 1_810), 2);
 });
 
 test("opening a 2,500-page PDF does not eagerly request pages or initialize PDFium", async () => {

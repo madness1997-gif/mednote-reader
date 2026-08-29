@@ -427,7 +427,7 @@ function PdfObjectLayer({ viewport, annotations }: { viewport: PageViewport; ann
   );
 }
 
-type PdfPageViewProps = {
+export type PdfPageViewProps = {
   document: PDFDocumentProxy;
   pdfiumDocument?: PDFiumDocument | null;
   page: number;
@@ -1137,7 +1137,10 @@ export function PdfPageView({
   );
 }
 
-type LazyPdfPageViewProps = PdfPageViewProps & { estimatedHeight?: number };
+type LazyPdfPageViewProps = PdfPageViewProps & {
+  estimatedHeight?: number;
+  onHeightChange?: (page: number, height: number) => void;
+};
 
 function pdfCanvasBytes(host: HTMLElement) {
   return Array.from(host.querySelectorAll<HTMLCanvasElement>("canvas"))
@@ -1148,15 +1151,18 @@ function releasePdfCanvases(host: HTMLElement) {
   host.querySelectorAll<HTMLCanvasElement>("canvas").forEach(releaseCanvas);
 }
 
-export function LazyPdfPageView(props: LazyPdfPageViewProps) {
+export function LazyPdfPageView({ estimatedHeight, onHeightChange, ...props }: LazyPdfPageViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const nearbyRef = useRef(false);
   const hotRef = useRef(false);
   const [proximity, setProximity] = useState<"cold" | "nearby" | "visible">("cold");
   const [cacheAllowed, setCacheAllowed] = useState(true);
-  const [measuredHeight, setMeasuredHeight] = useState(props.estimatedHeight ?? 780);
+  const [measuredHeight, setMeasuredHeight] = useState(estimatedHeight ?? 780);
+  const onHeightChangeRef = useRef(onHeightChange);
   const cacheKeyRef = useRef(`pdf-page-${props.page}-${Math.random().toString(16).slice(2)}`);
   const cacheKey = cacheKeyRef.current;
+
+  onHeightChangeRef.current = onHeightChange;
 
   const updateProximity = useCallback(() => {
     const next = hotRef.current ? "visible" : nearbyRef.current ? "nearby" : "cold";
@@ -1232,12 +1238,21 @@ export function LazyPdfPageView(props: LazyPdfPageViewProps) {
     const host = hostRef.current;
     const pageElement = host?.querySelector(".pdf-page-host");
     if (proximity === "cold" || !cacheAllowed || !pageElement) return;
-    const update = () => setMeasuredHeight(Math.max(260, pageElement.getBoundingClientRect().height));
+    const update = () => {
+      const height = Math.max(260, pageElement.getBoundingClientRect().height);
+      setMeasuredHeight((current) => Math.abs(current - height) > 1 ? height : current);
+      onHeightChangeRef.current?.(props.page, height);
+    };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(pageElement);
     return () => observer.disconnect();
   }, [cacheAllowed, proximity]);
+
+  useEffect(() => {
+    if (proximity !== "cold" || estimatedHeight === undefined) return;
+    setMeasuredHeight((current) => Math.abs(current - estimatedHeight) > 1 ? estimatedHeight : current);
+  }, [estimatedHeight, proximity]);
 
   const mounted = proximity !== "cold" && cacheAllowed;
 

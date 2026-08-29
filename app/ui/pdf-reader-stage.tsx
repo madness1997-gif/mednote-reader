@@ -1,13 +1,15 @@
 import { BookOpen, FileText, FolderOpen, Maximize2, RotateCw, Rows3, Square, X } from "lucide-react";
-import type { RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import type { ReaderState } from "../document-runtime-adapter";
 import type { PdfFitMode, PdfRect, PdfViewMode } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
-import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
+import { PdfPageView } from "../pdf-reader";
 import type { PDFiumDocument } from "../pdfium-renderer";
+import { VirtualizedPdfPages, type VirtualizedPdfPagesHandle } from "../virtualized-pdf-pages";
 import { useReaderPaneControllers } from "../workspace-controllers-context";
 
 export type PdfReaderStageViewModel = {
+  continuousPagesRef: RefObject<VirtualizedPdfPagesHandle | null>;
   documentStageRef: RefObject<HTMLDivElement | null>;
   fitMode: PdfFitMode;
   onPdfPageRendered: (page: number) => void;
@@ -55,10 +57,17 @@ function DemoDocument({ page }: { page: number }) {
 }
 
 export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewModel }) {
-  const { documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode } = viewModel;
+  const { continuousPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode } = viewModel;
   const { documents, layout, readerInteraction } = useReaderPaneControllers();
   const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = readerInteraction;
   const { activeDocument, activeQuery: activeSearchQuery, activeWorkspace, currentDocument: currentPdfDocument, sourcePage, sourcePages } = useActivePdfNavigationController();
+  useEffect(() => {
+    const stage = documentStageRef.current;
+    if (!stage) return;
+    const onWheel = (event: WheelEvent) => handlePdfWheelZoom(event);
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", onWheel);
+  }, [documentStageRef, handlePdfWheelZoom]);
   return (<>{pdfPanel === "view" && (
             <div className="floating-tool-panel pdf-view-panel" role="dialog" aria-label="Tùy chọn hiển thị PDF">
               <div className="tool-panel-heading"><div><strong>Hiển thị PDF</strong><span>Thu phóng và bố cục trang</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>
@@ -83,11 +92,32 @@ export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewMod
               {(pdfTool === "pen" || ["rectangle", "ellipse", "arrow"].includes(pdfTool)) && <div className="panel-setting"><label>Độ dày</label><div className="width-options">{[1, 2, 3, 5].map((width) => <button key={width} className={inkWidth === width ? "selected" : ""} onClick={() => setInkWidth(width)}><i style={{ height: width }} />{width}</button>)}</div></div>}
               {["note", "text", "stamp", "signature"].includes(pdfTool) && <p className="pdf-placement-help">Bấm nhiều vị trí để đặt lại cùng nội dung. Dùng công cụ Tẩy hoặc danh sách Chú thích để xóa.</p>}
             </div>
-          )}<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll} onWheel={handlePdfWheelZoom}>
+          )}<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
             {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={handleCrop} onBitmapReady={onPdfPageRendered} /> : currentPdfDocument ? (
-              <div className="continuous-pages">
-                {sourcePages.map((page) => <LazyPdfPageView key={`${activeDocument?.id}-${page}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={page} zoom={sourceZoom} fitMode="width" rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === page ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(page, next, previous)} onCrop={handleCrop} onBitmapReady={onPdfPageRendered} />)}
-              </div>
+              <VirtualizedPdfPages
+                key={`${activeDocument?.id}-${rotation}`}
+                ref={continuousPagesRef}
+                documentKey={activeDocument?.id ?? "pdf"}
+                initialPage={sourcePage}
+                pages={sourcePages}
+                rootRef={documentStageRef}
+                document={currentPdfDocument}
+                pdfiumDocument={pdfiumDocument}
+                zoom={sourceZoom}
+                rotation={rotation}
+                tool={pdfTool}
+                inkColor={inkColor}
+                highlightColor={pdfHighlightColor}
+                inkWidth={inkWidth}
+                annotationText={pdfAnnotationText}
+                annotations={pdfAnnotations}
+                searchQuery={activeSearchQuery}
+                sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id ? { page: sourceFocus.page, rect: sourceFocus.rect } : null}
+                onSelection={handlePdfSelection}
+                onAnnotationCommit={commitPdfPageAnnotations}
+                onCrop={handleCrop}
+                onBitmapReady={onPdfPageRendered}
+              />
             ) : activeDocument ? (
               <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={documents.openLibraryPdfPicker}>Chọn lại PDF</button>}</div>
             ) : activeWorkspace.kind === "demo" ? <><div className="demo-reader-hint"><BookOpen size={16} /><span>Đây là tài liệu minh họa. Thêm một PDF để dùng chọn chữ, chú thích và cắt hình.</span></div><DemoDocument page={sourcePage} /></> : (

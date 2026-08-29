@@ -20,7 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import {
   addPdfMarkup as addPdfMarkupCommand,
   deletePdfAnnotation as deletePdfAnnotationCommand,
@@ -91,6 +91,7 @@ export type UseReaderInteractionControllerOptions = {
   activeReader: ReaderState;
   currentPdfDocument: PDFDocumentProxy | null;
   documentStageRef: RefObject<HTMLDivElement | null>;
+  getContinuousScrollAnchor: (inset?: number) => { page: number; offset: number } | null;
   inkColor: string;
   inkWidth: number;
   notify: (message: string) => void;
@@ -98,6 +99,7 @@ export type UseReaderInteractionControllerOptions = {
   onCancelCrop: () => void;
   onCrop: (result: PdfCropResult) => void | Promise<void>;
   pdfReader: PdfReaderController;
+  pinContinuousScrollAnchor: () => void;
   setInkColor: Dispatch<SetStateAction<string>>;
   setInkWidth: Dispatch<SetStateAction<number>>;
   setSourcePage: (page: number) => void;
@@ -115,6 +117,7 @@ export function useReaderInteractionController({
   activeReader,
   currentPdfDocument,
   documentStageRef,
+  getContinuousScrollAnchor,
   inkColor,
   inkWidth,
   notify,
@@ -122,6 +125,7 @@ export function useReaderInteractionController({
   onCancelCrop,
   onCrop,
   pdfReader,
+  pinContinuousScrollAnchor,
   setInkColor,
   setInkWidth,
   setSourcePage,
@@ -305,18 +309,19 @@ export function useReaderInteractionController({
     setPdfHistory((history) => Object.fromEntries(Object.entries(history).filter(([documentId]) => !removed.has(documentId))));
   };
 
-  const handlePdfWheelZoom = (event: WheelEvent<HTMLDivElement>) => {
+  const handlePdfWheelZoom = (event: WheelEvent) => {
     if (!(event.ctrlKey || event.metaKey) || !currentPdfDocument) return;
     event.preventDefault();
-    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, event.currentTarget.clientHeight) : 1;
+    const stage = event.currentTarget as HTMLDivElement;
+    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, stage.clientHeight) : 1;
     wheelAccumulatorRef.current += event.deltaY * multiplier;
     if (Math.abs(wheelAccumulatorRef.current) < 60 || wheelZoomingRef.current) return;
     const direction = wheelAccumulatorRef.current > 0 ? -1 : 1;
     wheelAccumulatorRef.current -= Math.sign(wheelAccumulatorRef.current) * 60;
-    const stage = event.currentTarget;
     const oldZoom = sourceZoom;
     const nextZoom = pdfReader.clampZoom(oldZoom + direction * .1);
     if (nextZoom === oldZoom) return;
+    if (viewMode === "continuous") pinContinuousScrollAnchor();
     const stageRect = stage.getBoundingClientRect();
     const localX = event.clientX - stageRect.left;
     const localY = event.clientY - stageRect.top;
@@ -343,15 +348,18 @@ export function useReaderInteractionController({
   };
 
   const rememberReaderScrollPosition = (stage: HTMLElement) => {
+    const virtualAnchor = viewMode === "continuous" ? getContinuousScrollAnchor() : null;
     const stageTop = stage.getBoundingClientRect().top;
     const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
-    const anchorPage = nearestPdfPage(pages.map((element) => ({ page: Number(element.dataset.pdfPage), top: element.getBoundingClientRect().top })), stageTop) ?? sourcePage;
+    const anchorPage = virtualAnchor?.page
+      ?? nearestPdfPage(pages.map((element) => ({ page: Number(element.dataset.pdfPage), top: element.getBoundingClientRect().top })), stageTop)
+      ?? sourcePage;
     const anchor = pages.find((element) => Number(element.dataset.pdfPage) === anchorPage);
     scrollPositionRef.current = {
       top: stage.scrollTop,
       left: stage.scrollLeft,
       anchorPage,
-      anchorOffset: anchor ? anchor.getBoundingClientRect().top - stageTop : 0,
+      anchorOffset: virtualAnchor?.offset ?? (anchor ? anchor.getBoundingClientRect().top - stageTop : 0),
     };
   };
 
@@ -362,6 +370,11 @@ export function useReaderInteractionController({
     if (viewMode !== "continuous") return;
     if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
     scrollFrameRef.current = window.requestAnimationFrame(() => {
+      const virtualPage = getContinuousScrollAnchor(24)?.page;
+      if (virtualPage) {
+        if (virtualPage !== sourcePage) setSourcePage(virtualPage);
+        return;
+      }
       const stageTop = stage.getBoundingClientRect().top + 24;
       const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
       const page = nearestPdfPage(pages.map((element) => ({ page: Number(element.dataset.pdfPage), top: element.getBoundingClientRect().top })), stageTop);
