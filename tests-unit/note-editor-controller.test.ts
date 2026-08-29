@@ -28,12 +28,14 @@ test("table composer produces the requested grid and border settings", () => {
 
 test("page composes one note editor controller instead of owning editor DOM logic", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const context = await readFile(new URL("../app/workspace-controllers-context.tsx", import.meta.url), "utf8");
   const stage = await readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8");
   const toolbar = await readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8");
 
   assert.match(page, /const noteEditor = useNoteEditorController/);
-  assert.match(page, /editor: noteEditor/);
+  assert.match(page, /noteEditor,/);
   assert.doesNotMatch(page, /document\.execCommand|savedTextRangeRef|activeTextEditorRef|noteRichTextController|textSettingsAtRange/);
-  assert.match(stage, /editor: NoteEditorController/);
-  assert.match(toolbar, /editor: NoteEditorController/);
+  assert.match(context, /noteEditor: NoteEditorController/);
+  assert.match(stage, /noteEditor: editor/);
+  assert.match(toolbar, /noteEditor: editor/);
 });

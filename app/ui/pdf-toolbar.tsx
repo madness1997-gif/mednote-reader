@@ -1,30 +1,21 @@
 import { Bookmark, BookmarkCheck, ChevronDown, ChevronLeft, ChevronRight, Download, Minus, PanelLeftOpen, Plus, Printer, Redo2, Settings2, Trash2, Undo2 } from "lucide-react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Dispatch, SetStateAction } from "react";
-import type { LibraryDocument, WorkspaceItem } from "../document-runtime-adapter";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
-import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
-import type { ReaderInteractionController } from "../use-reader-interaction-controller";
+import { useReaderPaneControllers } from "../workspace-controllers-context";
 
-export type PdfToolbarScope = {
-  activeDocument: LibraryDocument | null;
-  activeWorkspace: WorkspaceItem;
-  currentPdfDocument: PDFDocumentProxy | null;
-  documents: DocumentWorkspaceController;
+export type PdfToolbarViewModel = {
   exportAnnotatedPdf: (mode: "download" | "print") => void | Promise<unknown>;
-  goToPage: (page: number) => void;
-  interaction: ReaderInteractionController;
   setSourceZoom: Dispatch<SetStateAction<number>>;
-  sourcePage: number;
   sourceZoom: number;
-  switchDocument: (documentId: string) => void;
   totalPages: number;
 };
 
-export function PdfToolbar({ scope }: { scope: PdfToolbarScope }) {
-  const { activeDocument, activeWorkspace, currentPdfDocument, documents, exportAnnotatedPdf, goToPage, interaction, setSourceZoom, sourcePage, sourceZoom, switchDocument, totalPages } = scope;
-  const { PDF_TOOLS, bookmarks, choosePdfTool, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, toggleBookmark, undoPdf } = interaction;
+export function PdfToolbar({ viewModel }: { viewModel: PdfToolbarViewModel }) {
+  const { exportAnnotatedPdf, setSourceZoom, sourceZoom, totalPages } = viewModel;
+  const { documents, readerInteraction } = useReaderPaneControllers();
+  const { PDF_TOOLS, bookmarks, choosePdfTool, pdfHistory, pdfHistoryKey, pdfPanel, pdfTool, redoPdf, setPdfPanel, toggleBookmark, undoPdf } = readerInteraction;
   const navigation = useActivePdfNavigationController();
+  const { activeDocument, activeWorkspace, currentDocument: currentPdfDocument, goToPage, sourcePage, switchDocument } = navigation;
   return (<><div className="pane-toolbar pdf-toolbar two-row-toolbar" role="toolbar" aria-label="Công cụ PDF">
             <div className="toolbar-row toolbar-row-primary">
               {!navigation.railVisible && <button className="pdf-toolbar-button" aria-label="Hiện bảng điều hướng" title="Hiện bảng điều hướng" onClick={navigation.showRail}><PanelLeftOpen size={17} /></button>}

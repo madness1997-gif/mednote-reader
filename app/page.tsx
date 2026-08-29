@@ -17,9 +17,9 @@ import { AppTopBar } from "./ui/app-top-bar";
 import { DrivePanel } from "./ui/drive-panel";
 import { LibraryPanel } from "./ui/library-panel";
 import { PdfNavigationRail } from "./ui/pdf-navigation-rail";
-import { ReaderPane } from "./ui/pdf-reader-pane";
+import { ReaderPane, type ReaderPaneViewModel } from "./ui/pdf-reader-pane";
 import { PdfSelectionMenu } from "./ui/pdf-selection-menu";
-import { NotePane } from "./ui/note-pane";
+import { NotePane, type NotePaneViewModel } from "./ui/note-pane";
 import { NoteNavigationHost } from "./ui/note-navigation-host";
 import { SplitDivider } from "./ui/split-divider";
 import { WorkspaceShell } from "./ui/workspace-shell";
@@ -28,9 +28,14 @@ import { useNoteCanvasController } from "./use-note-canvas-controller";
 import { useDocumentWorkspaceController } from "./use-document-workspace-controller";
 import { useNoteEditorController } from "./use-note-editor-controller";
 import { useReaderInteractionController, type ReaderInteractionController } from "./use-reader-interaction-controller";
-import { useNoteToolbar } from "./use-note-toolbar";
-import { useNoteZoomController } from "./note-zoom-controller";
+import { NOTE_ZOOM_PRESETS, useNoteZoomController } from "./note-zoom-controller";
 import { useWorkspaceLayoutController } from "./use-workspace-layout-controller";
+import {
+  NotePaneControllersProvider,
+  ReaderPaneControllersProvider,
+  type NotePaneControllers,
+  type ReaderPaneControllers,
+} from "./workspace-controllers-context";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered } from "./note-domain";
 import {
@@ -46,8 +51,6 @@ import {
 
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
-const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
-
 const noteStorePendingPage: NotePage = {
   ...createBlankPage(null),
   id: "note-store-pending",
@@ -643,7 +646,25 @@ export default function Home() {
     setNoteViewZoom(available / noteCanvas.basePaperMaxWidth);
   };
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
-  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, canvas: noteCanvas, editor: noteEditor, exportNotebook, fitNoteToView, layout: workspaceLayout, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom });
+  const readerPaneViewModel: ReaderPaneViewModel = {
+    toolbar: { exportAnnotatedPdf, setSourceZoom, sourceZoom, totalPages },
+    stage: { documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
+  };
+  const notePaneViewModel: NotePaneViewModel = {
+    toolbar: { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets: NOTE_ZOOM_PRESETS },
+    stage: { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, continuousNotes, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, resolveExcerptSource },
+  };
+  const readerPaneControllers = {
+    documents: documentWorkspace,
+    layout: workspaceLayout,
+    readerInteraction,
+  } satisfies ReaderPaneControllers;
+  const notePaneControllers = {
+    documents: documentWorkspace,
+    layout: workspaceLayout,
+    noteCanvas,
+    noteEditor,
+  } satisfies NotePaneControllers;
 
   return (
     <DriveControllerProvider controller={drive}>
@@ -674,11 +695,15 @@ export default function Home() {
       <WorkspaceShell layout={workspaceLayout} pdfRailVisible={pdfNavigation.railVisible} pdfRailTab={pdfNavigation.railTab} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail />
 
-        <ReaderPane scope={{ activeDocument, activeWorkspace, currentPdfDocument, documents: documentWorkspace, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, layout: workspaceLayout, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode }} />
+        <ReaderPaneControllersProvider controllers={readerPaneControllers}>
+          <ReaderPane viewModel={readerPaneViewModel} />
+        </ReaderPaneControllersProvider>
 
         <SplitDivider layout={workspaceLayout} />
 
-        <NotePane toolbar={noteToolbar} stage={{ activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas: noteCanvas, continuousNotes, editor: noteEditor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource: documentWorkspace.openExcerptSource, resolveExcerptSource }} />
+        <NotePaneControllersProvider controllers={notePaneControllers}>
+          <NotePane viewModel={notePaneViewModel} />
+        </NotePaneControllersProvider>
         {workspaceLayout.showNoteSidebar && <NoteNavigationHost layout={workspaceLayout} />}
       </WorkspaceShell>
     </main>

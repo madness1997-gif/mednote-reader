@@ -1,32 +1,21 @@
 import { BookOpen, FileText, FolderOpen, Maximize2, RotateCw, Rows3, Square, X } from "lucide-react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RefObject } from "react";
-import type { LibraryDocument, ReaderState, WorkspaceItem } from "../document-runtime-adapter";
+import type { ReaderState } from "../document-runtime-adapter";
 import type { PdfFitMode, PdfRect, PdfViewMode } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
 import type { PDFiumDocument } from "../pdfium-renderer";
-import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
-import type { ReaderInteractionController } from "../use-reader-interaction-controller";
-import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
+import { useReaderPaneControllers } from "../workspace-controllers-context";
 
-export type PdfReaderStageScope = {
-  activeDocument: LibraryDocument | null;
-  activeWorkspace: WorkspaceItem;
-  currentPdfDocument: PDFDocumentProxy | null;
-  documents: DocumentWorkspaceController;
+export type PdfReaderStageViewModel = {
   documentStageRef: RefObject<HTMLDivElement | null>;
   fitMode: PdfFitMode;
-  interaction: ReaderInteractionController;
-  layout: WorkspaceLayoutController;
   onPdfPageRendered: (page: number) => void;
   pdfStatus: "idle" | "loading" | "error";
   pdfiumDocument: PDFiumDocument | null;
   ready: boolean;
   rotation: number;
   sourceFocus: { documentId: string; page: number; rect: PdfRect } | null;
-  sourcePage: number;
-  sourcePages: number[];
   sourceZoom: number;
   updateReader: (updater: (reader: ReaderState) => ReaderState) => void;
   viewMode: PdfViewMode;
@@ -65,10 +54,11 @@ function DemoDocument({ page }: { page: number }) {
   );
 }
 
-export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
-  const { activeDocument, activeWorkspace, currentPdfDocument, documents, documentStageRef, fitMode, interaction, layout, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourcePage, sourcePages, sourceZoom, updateReader, viewMode } = scope;
-  const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = interaction;
-  const { activeQuery: activeSearchQuery } = useActivePdfNavigationController();
+export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewModel }) {
+  const { documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode } = viewModel;
+  const { documents, layout, readerInteraction } = useReaderPaneControllers();
+  const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = readerInteraction;
+  const { activeDocument, activeQuery: activeSearchQuery, activeWorkspace, currentDocument: currentPdfDocument, sourcePage, sourcePages } = useActivePdfNavigationController();
   return (<>{pdfPanel === "view" && (
             <div className="floating-tool-panel pdf-view-panel" role="dialog" aria-label="Tùy chọn hiển thị PDF">
               <div className="tool-panel-heading"><div><strong>Hiển thị PDF</strong><span>Thu phóng và bố cục trang</span></div><button className="icon-button compact" onClick={() => setPdfPanel(null)} aria-label="Đóng"><X size={17} /></button></div>

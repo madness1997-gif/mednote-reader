@@ -59,15 +59,16 @@ test("paper geometry swaps dimensions without leaking layout math into page", ()
 });
 
 test("page composes one canvas controller and UI consumes that boundary", async () => {
-  const [page, controller, stage, toolbar] = await Promise.all([
+  const [page, controller, context, stage, toolbar] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/use-note-canvas-controller.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspace-controllers-context.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/note-stage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /const noteCanvas = useNoteCanvasController/);
-  assert.match(page, /canvas: noteCanvas/);
+  assert.match(page, /noteCanvas,/);
   for (const forbidden of [
     "const addImageExcerpt", "const addFirstAidImage", "const addSticker", "const addCalloutAt",
     "const commitStrokes", "const updatePaperTemplate", "new NoteInkSession", "firstAidTemplateTransition",
@@ -77,6 +78,7 @@ test("page composes one canvas controller and UI consumes that boundary", async 
   assert.match(controller, /new NoteInkSession/);
   assert.match(controller, /firstAidTemplateTransition/);
   assert.match(controller, /annotationKind: "callout"/);
-  assert.match(stage, /canvas: NoteCanvasController/);
-  assert.match(toolbar, /canvas: NoteCanvasController/);
+  assert.match(context, /noteCanvas: NoteCanvasController/);
+  assert.match(stage, /noteCanvas: canvas/);
+  assert.match(toolbar, /noteCanvas: canvas/);
 });

@@ -17,9 +17,10 @@ test("reader scroll restoration selects the page nearest its viewport anchor", (
 });
 
 test("page composes one reader interaction controller and reader UI consumes that boundary", async () => {
-  const [page, controller, stage, toolbar, selectionMenu, noteCanvas] = await Promise.all([
+  const [page, controller, context, stage, toolbar, selectionMenu, noteCanvas] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/use-reader-interaction-controller.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspace-controllers-context.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/pdf-reader-stage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/pdf-toolbar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/pdf-selection-menu.tsx", import.meta.url), "utf8"),
@@ -27,7 +28,7 @@ test("page composes one reader interaction controller and reader UI consumes tha
   ]);
 
   assert.match(page, /const readerInteraction = useReaderInteractionController/);
-  assert.match(page, /interaction: readerInteraction/);
+  assert.match(page, /readerInteraction,/);
   assert.match(page, /<PdfSelectionMenu controller=\{readerInteraction\}/);
   for (const forbidden of [
     "const handlePdfSelection", "const addPdfMarkup", "lookupEnglishVietnamese",
@@ -40,9 +41,10 @@ test("page composes one reader interaction controller and reader UI consumes tha
   assert.match(controller, /zoomAroundAnchor/);
   assert.match(controller, /new ResizeObserver/);
   assert.match(controller, /handleCrop: onCrop/);
-  assert.match(stage, /interaction: ReaderInteractionController/);
+  assert.match(context, /readerInteraction: ReaderInteractionController/);
+  assert.match(stage, /useReaderPaneControllers/);
   assert.match(stage, /onCrop=\{handleCrop\}/);
-  assert.match(toolbar, /interaction: ReaderInteractionController/);
+  assert.match(toolbar, /useReaderPaneControllers/);
   assert.match(selectionMenu, /controller: ReaderInteractionController/);
   assert.match(noteCanvas, /getPdfSelection/);
   assert.match(noteCanvas, /setPdfTool\("crop"\)/);

@@ -1,19 +1,14 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { NotePage } from "../note-runtime-adapter";
-import type { NoteCanvasController } from "../use-note-canvas-controller";
-import type { NoteEditorController } from "../use-note-editor-controller";
-import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
+import { useNotePaneControllers } from "../workspace-controllers-context";
 import type { NotePanel, NoteSheetViewMode, TextLineHeight } from "./ui-contracts";
 
-export type NoteToolbarScope = {
-  NOTE_ZOOM_PRESETS: number[];
+export type NoteToolbarViewModel = {
+  zoomPresets: readonly number[];
   activeNote: NotePage;
-  canvas: NoteCanvasController;
-  editor: NoteEditorController;
   exportNotebook: () => void | Promise<unknown>;
   fitNoteToView: () => void;
-  layout: WorkspaceLayoutController;
   notePanel: NotePanel;
   noteSheetViewMode: NoteSheetViewMode;
   noteZoom: number;
@@ -23,8 +18,9 @@ export type NoteToolbarScope = {
   setNoteViewZoom: (zoom: number) => void;
 };
 
-export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
-  const { NOTE_ZOOM_PRESETS, activeNote, canvas, editor, exportNotebook, fitNoteToView, layout, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom } = scope;
+export function NoteToolbar({ viewModel }: { viewModel: NoteToolbarViewModel }) {
+  const { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets } = viewModel;
+  const { layout, noteCanvas: canvas, noteEditor: editor } = useNotePaneControllers();
   const { activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
   const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
@@ -40,8 +36,8 @@ export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
               <div className="note-view-control" aria-label="Tỷ lệ xem trang note">
                 <button onClick={() => setNoteViewZoom(noteZoom - .1)} disabled={noteZoom <= .5} aria-label="Thu nhỏ trang note" title="Thu nhỏ trang note"><Minus size={14} /></button>
                 <select value={noteZoomPercent} onChange={(event) => setNoteViewZoom(Number(event.target.value) / 100)} aria-label="Chọn tỷ lệ xem trang note" title="Tỷ lệ xem trang note">
-                  {!NOTE_ZOOM_PRESETS.includes(noteZoomPercent) && <option value={noteZoomPercent}>{noteZoomPercent}%</option>}
-                  {NOTE_ZOOM_PRESETS.map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
+                  {!zoomPresets.includes(noteZoomPercent) && <option value={noteZoomPercent}>{noteZoomPercent}%</option>}
+                  {zoomPresets.map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
                 </select>
                 <button onClick={() => setNoteViewZoom(noteZoom + .1)} disabled={noteZoom >= 2} aria-label="Phóng to trang note" title="Phóng to trang note"><Plus size={14} /></button>
                 <button onClick={fitNoteToView} aria-label="Vừa chiều rộng khung note" title="Vừa chiều rộng khung note"><Maximize2 size={14} /></button>

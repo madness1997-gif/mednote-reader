@@ -4,7 +4,7 @@ import { FirstAidBlockEditor } from "../first-aid-block-editor";
 import { createFirstAidDocument, regularTemplateRichText, stripFirstAidBlockMetadata } from "../first-aid-block-model";
 import type { Page } from "../note-domain";
 import { NoteInkCanvas } from "../note-ink-canvas";
-import { NoteObjectLayer, type NoteObjectLayerProps } from "../note-object-layer";
+import { NoteObjectLayer } from "../note-object-layer";
 import {
   plainTextToRichHtml,
   type NotePage,
@@ -13,34 +13,33 @@ import {
 } from "../note-runtime-adapter";
 import type { NoteStoreSnapshot } from "../note-store";
 import PageTitleEditor from "../page-title-editor";
+import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { RichTextEditor } from "../rich-text-editor";
-import type { NoteCanvasController } from "../use-note-canvas-controller";
-import type { NoteEditorController } from "../use-note-editor-controller";
+import { useNotePaneControllers } from "../workspace-controllers-context";
 import type { NoteSheetPreviewProps } from "./note-sheet-preview";
 import { VirtualizedNoteSheetPreview } from "./virtualized-note-sheet-preview";
 import type { NotePanel, NoteSheetViewMode } from "./ui-contracts";
 
-export type NoteStageScope = {
+export type NoteStageViewModel = {
   activateContinuousSheet: (sheetId: string) => void | Promise<unknown>;
   activeLogicalPage: Page | undefined;
   activeNote: NotePage;
   activeNoteHydrating: boolean;
   activeSheetIndex: number;
-  canvas: NoteCanvasController;
   continuousNotes: NotePage[];
-  editor: NoteEditorController;
-  goToPage: (page: number) => void;
   notePanel: NotePanel;
   noteSheetViewMode: NoteSheetViewMode;
   noteStageRef: RefObject<HTMLDivElement | null>;
   noteState: NoteStoreSnapshot;
   noteZoom: number;
-  openExcerptSource: NoteObjectLayerProps["onOpenSource"];
   resolveExcerptSource: NoteSheetPreviewProps["resolveSource"];
 };
 
-export function NoteStage({ scope }: { scope: NoteStageScope }) {
-  const { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas, continuousNotes, editor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource, resolveExcerptSource } = scope;
+export function NoteStage({ viewModel }: { viewModel: NoteStageViewModel }) {
+  const { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, continuousNotes, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, resolveExcerptSource } = viewModel;
+  const { documents, noteCanvas: canvas, noteEditor: editor } = useNotePaneControllers();
+  const { goToPage } = useActivePdfNavigationController();
+  const openExcerptSource = documents.openExcerptSource;
   const { INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, activeTool, addCalloutAt, addFirstAidImage, addSticker, addTextBoxAt, basePaperMaxWidth, commitStrokes, deleteExcerpt, editExcerpt, finishFirstAidPdfCrop, firstAidCropResult, highlighterWidth, inkColor, inkWidth, moveExcerpt, notify, paperHeight, paperStyle, paperWidth, penStyle, requestFirstAidPdfCrop, selectedExcerptId, selectedPaperSize, selectedTextBoxAppearance, setActiveTool, setHighlighterWidth, setInkColor, setInkWidth, setNotePanel, setPenStyle, setSelectedExcerptId, setShapeKind, shapeKind, textLayerStyle, updateActiveNote, updatePaper, updatePaperTemplate, updateSelectedTextBoxAppearance } = canvas;
   const { BORDER_COLORS, BULLET_STYLES, EQUATION_PRESETS, EQUATION_TEMPLATES, LINE_PRESETS, NUMBERING_STYLES, SYMBOL_GROUPS, TEXT_BACKGROUND_COLORS, TEXT_COLORS, activateTextEditor, applyBulletStyle, applyNumberingStyle, applyTableLinePreset, applyTextCommand, clearActiveTextEditor, equationDraft, equationMarkup, equationParts, equationTemplate, equationTemplateById, insertEquation, insertTable, insertTextAtSelection, normalizeTextEditorInput, selectEquationTemplate, setEquationDraft, setEquationParts, setTableColumns, setTableRows, setTextInsertPopover, tableBorder, tableColumns, tableRows, textInsertPopover, textPopoverLeft, textToolbar, updateTableBorder } = editor;
   return (<>{notePanel === "text" && textInsertPopover === "bullets" && (

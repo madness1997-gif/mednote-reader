@@ -10,9 +10,10 @@ test("divider math maps the pointer into the reader share and clamps both edges"
 });
 
 test("page composes one workspace layout controller and layout UI consumes that boundary", async () => {
-  const [page, controller, topBar, readerStage, noteToolbar, navigation, divider, shell] = await Promise.all([
+  const [page, controller, context, topBar, readerStage, noteToolbar, navigation, divider, shell] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/use-workspace-layout-controller.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspace-controllers-context.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/app-top-bar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/pdf-reader-stage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/note-toolbar.tsx", import.meta.url), "utf8"),
@@ -42,7 +43,10 @@ test("page composes one workspace layout controller and layout UI consumes that 
   assert.match(controller, /pointercancel/);
   assert.match(controller, /focusWorkspacePane/);
 
-  for (const consumer of [topBar, readerStage, noteToolbar, navigation, divider, shell]) {
+  assert.match(context, /layout: WorkspaceLayoutController/);
+  assert.match(readerStage, /useReaderPaneControllers/);
+  assert.match(noteToolbar, /useNotePaneControllers/);
+  for (const consumer of [topBar, navigation, divider, shell]) {
     assert.match(consumer, /WorkspaceLayoutController/);
   }
 });

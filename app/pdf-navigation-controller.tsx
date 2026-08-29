@@ -48,6 +48,7 @@ export type PdfNavigationController = {
   openSearch: () => void;
   performSearch: () => Promise<void>;
   goToPage: (page: number) => void;
+  switchDocument: (documentId: string) => void;
   openSearchResult: (result: SearchResult) => void;
   removeBookmark: (page: number) => void;
   removeAnnotation: (annotationId: string) => void;
@@ -213,6 +214,7 @@ export function usePdfNavigationController(integration: PdfNavigationIntegration
     openSearch,
     performSearch,
     goToPage,
+    switchDocument: (documentId) => integrationRef.current.switchDocument(documentId),
     openSearchResult,
     removeBookmark,
     removeAnnotation: integration.removeAnnotation,
