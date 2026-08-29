@@ -3,9 +3,9 @@ import type { NoteToolbarScope } from "./ui/note-toolbar";
 export type NoteToolbarInput = NoteToolbarScope;
 
 const TOOLBAR_KEYS = [
-  "NOTE_ZOOM_PRESETS", "activeNote", "canvas", "editor", "exportNotebook", "fitNoteToView", "notePanel",
+  "NOTE_ZOOM_PRESETS", "activeNote", "canvas", "editor", "exportNotebook", "fitNoteToView", "layout", "notePanel",
   "noteSheetViewMode", "noteZoom", "noteZoomPercent", "setNotePanel", "setNoteSheetViewMode",
-  "setNoteSidebarVisibility", "setNoteViewZoom", "showNoteSidebar",
+  "setNoteViewZoom",
 ] as const satisfies readonly (keyof NoteToolbarScope)[];
 
 function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {

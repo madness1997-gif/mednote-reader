@@ -1,23 +1,24 @@
 import { BookOpen, FileText, FolderOpen, Maximize2, RotateCw, Rows3, Square, X } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RefObject } from "react";
-import type { LibraryDocument, ReaderState, WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
+import type { LibraryDocument, ReaderState, WorkspaceItem } from "../document-runtime-adapter";
 import type { PdfFitMode, PdfRect, PdfViewMode } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { LazyPdfPageView, PdfPageView } from "../pdf-reader";
 import type { PDFiumDocument } from "../pdfium-renderer";
 import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
 import type { ReaderInteractionController } from "../use-reader-interaction-controller";
+import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
 
 export type PdfReaderStageScope = {
   activeDocument: LibraryDocument | null;
   activeWorkspace: WorkspaceItem;
-  changeWorkspaceMode: (mode: WorkspaceMode) => void;
   currentPdfDocument: PDFDocumentProxy | null;
   documents: DocumentWorkspaceController;
   documentStageRef: RefObject<HTMLDivElement | null>;
   fitMode: PdfFitMode;
   interaction: ReaderInteractionController;
+  layout: WorkspaceLayoutController;
   onPdfPageRendered: (page: number) => void;
   pdfStatus: "idle" | "loading" | "error";
   pdfiumDocument: PDFiumDocument | null;
@@ -29,7 +30,6 @@ export type PdfReaderStageScope = {
   sourceZoom: number;
   updateReader: (updater: (reader: ReaderState) => ReaderState) => void;
   viewMode: PdfViewMode;
-  workspaceMode: WorkspaceMode;
 };
 
 function DemoDocument({ page }: { page: number }) {
@@ -66,7 +66,7 @@ function DemoDocument({ page }: { page: number }) {
 }
 
 export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
-  const { activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, documents, documentStageRef, fitMode, interaction, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourcePage, sourcePages, sourceZoom, updateReader, viewMode, workspaceMode } = scope;
+  const { activeDocument, activeWorkspace, currentPdfDocument, documents, documentStageRef, fitMode, interaction, layout, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourcePage, sourcePages, sourceZoom, updateReader, viewMode } = scope;
   const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = interaction;
   const { activeQuery: activeSearchQuery } = useActivePdfNavigationController();
   return (<>{pdfPanel === "view" && (
@@ -77,7 +77,7 @@ export function PdfReaderStage({ scope }: { scope: PdfReaderStageScope }) {
                 <button className={fitMode === "page" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, fitMode: "page", zoom: 1 }))}><Square size={18} /><span>Vừa toàn trang</span></button>
                 <button onClick={() => updateReader((reader) => ({ ...reader, rotation: (reader.rotation + 90) % 360 }))}><RotateCw size={18} /><span>Xoay 90°</span></button>
                 <button className={viewMode === "continuous" ? "selected" : ""} onClick={() => updateReader((reader) => ({ ...reader, viewMode: reader.viewMode === "single" ? "continuous" : "single", fitMode: reader.viewMode === "single" ? "width" : "page", zoom: 1 }))}>{viewMode === "single" ? <Rows3 size={18} /> : <Square size={18} />}<span>{viewMode === "single" ? "Cuộn liên tục" : "Từng trang"}</span></button>
-                <button className={workspaceMode === "reader" ? "selected" : ""} onClick={() => changeWorkspaceMode(workspaceMode === "reader" ? "split" : "reader")}><Maximize2 size={18} /><span>{workspaceMode === "reader" ? "Trở lại cả hai" : "Chỉ Reader"}</span></button>
+                <button className={layout.workspaceMode === "reader" ? "selected" : ""} onClick={() => layout.changeWorkspaceMode(layout.workspaceMode === "reader" ? "split" : "reader")}><Maximize2 size={18} /><span>{layout.workspaceMode === "reader" ? "Trở lại cả hai" : "Chỉ Reader"}</span></button>
               </div>
             </div>
           )}{pdfPanel === "ink" && (

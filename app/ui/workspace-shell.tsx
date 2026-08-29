@@ -1,9 +1,11 @@
-import type { CSSProperties, ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
+import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
+import type { PdfRailTab } from "./ui-contracts";
 
 export type WorkspaceShellProps = {
-  className: string;
-  workspaceRef: RefObject<HTMLElement | null>;
-  style: CSSProperties;
+  layout: WorkspaceLayoutController;
+  pdfRailVisible: boolean;
+  pdfRailTab: PdfRailTab;
   pdfRail: ReactNode;
   reader: ReactNode;
   divider: ReactNode;
@@ -12,6 +14,6 @@ export type WorkspaceShellProps = {
   children?: ReactNode;
 };
 
-export function WorkspaceShell({ className, workspaceRef, style, pdfRail, reader, divider, note, noteNavigation, children }: WorkspaceShellProps) {
-  return <section className={className} ref={workspaceRef} style={style}>{pdfRail}{reader}{divider}{note}{noteNavigation}{children}</section>;
+export function WorkspaceShell({ layout, pdfRailVisible, pdfRailTab, pdfRail, reader, divider, note, noteNavigation, children }: WorkspaceShellProps) {
+  return <section className={layout.getWorkspaceClassName(pdfRailVisible, pdfRailTab)} ref={layout.workspaceRef} style={layout.workspaceStyle}>{pdfRail}{reader}{divider}{note}{noteNavigation}{children}</section>;
 }

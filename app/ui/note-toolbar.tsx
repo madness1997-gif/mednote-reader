@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { NotePage } from "../note-runtime-adapter";
 import type { NoteCanvasController } from "../use-note-canvas-controller";
 import type { NoteEditorController } from "../use-note-editor-controller";
+import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
 import type { NotePanel, NoteSheetViewMode, TextLineHeight } from "./ui-contracts";
 
 export type NoteToolbarScope = {
@@ -12,19 +13,18 @@ export type NoteToolbarScope = {
   editor: NoteEditorController;
   exportNotebook: () => void | Promise<unknown>;
   fitNoteToView: () => void;
+  layout: WorkspaceLayoutController;
   notePanel: NotePanel;
   noteSheetViewMode: NoteSheetViewMode;
   noteZoom: number;
   noteZoomPercent: number;
   setNotePanel: Dispatch<SetStateAction<NotePanel>>;
   setNoteSheetViewMode: Dispatch<SetStateAction<NoteSheetViewMode>>;
-  setNoteSidebarVisibility: (visible: boolean) => void;
   setNoteViewZoom: (zoom: number) => void;
-  showNoteSidebar: boolean;
 };
 
 export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
-  const { NOTE_ZOOM_PRESETS, activeNote, canvas, editor, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, showNoteSidebar } = scope;
+  const { NOTE_ZOOM_PRESETS, activeNote, canvas, editor, exportNotebook, fitNoteToView, layout, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom } = scope;
   const { activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
   const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
@@ -51,7 +51,7 @@ export function NoteToolbar({ scope }: { scope: NoteToolbarScope }) {
                 <button className="icon-button compact" aria-label="Làm lại" onClick={redo} disabled={!canRedo} data-ink-history-version={inkHistoryVersion}><Redo2 size={19} /></button>
               </div>
               <button className={`paper-button ${notePanel === "paper" ? "active" : ""}`} onClick={() => setNotePanel((panel) => panel === "paper" ? null : "paper")} aria-expanded={notePanel === "paper"}><NotebookTabs size={17} /><span>Giấy</span><ChevronDown size={11} /></button>
-              {!showNoteSidebar && <button className="note-sidebar-show-button" onClick={() => setNoteSidebarVisibility(true)} aria-label="Hiện thanh điều hướng Note" title="Hiện thanh điều hướng Note"><PanelRightOpen size={16} /><span>Điều hướng Note</span></button>}
+              {!layout.showNoteSidebar && <button className="note-sidebar-show-button" onClick={() => layout.setNoteSidebarVisibility(true)} aria-label="Hiện thanh điều hướng Note" title="Hiện thanh điều hướng Note"><PanelRightOpen size={16} /><span>Điều hướng Note</span></button>}
             </div>
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster note-tool-cluster">

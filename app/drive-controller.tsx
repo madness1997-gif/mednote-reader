@@ -352,6 +352,10 @@ export function useDriveController(integration: DriveControllerIntegration): Dri
   }, []);
 
   useEffect(() => {
+    if (!IS_DESKTOP_APP && !GOOGLE_CLIENT_ID) {
+      setPreparingAuthorization(false);
+      return;
+    }
     void prepareAuthorization();
   }, [prepareAuthorization]);
 

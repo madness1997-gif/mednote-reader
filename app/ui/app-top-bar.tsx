@@ -1,23 +1,22 @@
 import { BookOpen, ChevronDown, Cloud, CloudOff, Columns2, Download, FolderOpen, Menu, NotebookTabs, RefreshCw } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import type { WorkspaceItem, WorkspaceMode } from "../document-runtime-adapter";
+import type { WorkspaceItem } from "../document-runtime-adapter";
 import { useActiveDriveController } from "../drive-controller";
 import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
+import type { WorkspaceLayoutController } from "../use-workspace-layout-controller";
 
 export type AppTopBarScope = {
   activeWorkspace: WorkspaceItem;
-  changeWorkspaceMode: (mode: WorkspaceMode) => void;
   documentName: string;
   documents: DocumentWorkspaceController;
-  hasActiveNote: boolean;
+  layout: WorkspaceLayoutController;
   ready: boolean;
   setLibraryOpen: Dispatch<SetStateAction<boolean>>;
   toast: string;
-  workspaceMode: WorkspaceMode;
 };
 
 export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
-  const { activeWorkspace, changeWorkspaceMode, documentName, documents, hasActiveNote, ready, setLibraryOpen, toast, workspaceMode } = scope;
+  const { activeWorkspace, documentName, documents, layout, ready, setLibraryOpen, toast } = scope;
   const drive = useActiveDriveController();
   return (<><header className="topbar">
         <div className="brand-group">
@@ -27,9 +26,9 @@ export function AppTopBar({ scope }: { scope: AppTopBarScope }) {
         </div>
         <div className="top-actions">
           <nav className="workspace-mode-switcher" aria-label="Chế độ không gian làm việc">
-            <button className={workspaceMode === "split" ? "active" : ""} onClick={() => changeWorkspaceMode("split")} disabled={!hasActiveNote} title={!hasActiveNote ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
-            <button className={workspaceMode === "reader" ? "active" : ""} onClick={() => changeWorkspaceMode("reader")} title="Chỉ hiện Reader · F6 chuyển Reader/Note" aria-pressed={workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
-            <button className={workspaceMode === "note" ? "active" : ""} onClick={() => changeWorkspaceMode("note")} disabled={!hasActiveNote} title={!hasActiveNote ? "Chưa có note" : "Chỉ hiện Note · F6 chuyển Reader/Note"} aria-pressed={workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
+            <button className={layout.workspaceMode === "split" ? "active" : ""} onClick={() => layout.changeWorkspaceMode("split")} disabled={!layout.canShowNote} title={!layout.canShowNote ? "Tạo note trước để dùng chế độ Cả hai" : "Hiện Reader và Note"} aria-pressed={layout.workspaceMode === "split"}><Columns2 size={16} /><span>Cả hai</span></button>
+            <button className={layout.workspaceMode === "reader" ? "active" : ""} onClick={() => layout.changeWorkspaceMode("reader")} title="Chỉ hiện Reader · F6 chuyển Reader/Note" aria-pressed={layout.workspaceMode === "reader"}><BookOpen size={16} /><span>Reader</span></button>
+            <button className={layout.workspaceMode === "note" ? "active" : ""} onClick={() => layout.changeWorkspaceMode("note")} disabled={!layout.canShowNote} title={!layout.canShowNote ? "Chưa có note" : "Chỉ hiện Note · F6 chuyển Reader/Note"} aria-pressed={layout.workspaceMode === "note"}><NotebookTabs size={16} /><span>Note</span></button>
           </nav>
           <span className="autosave-status"><i />{toast}</span>
           <button

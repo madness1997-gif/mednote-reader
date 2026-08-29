@@ -30,6 +30,7 @@ import { useNoteEditorController } from "./use-note-editor-controller";
 import { useReaderInteractionController, type ReaderInteractionController } from "./use-reader-interaction-controller";
 import { useNoteToolbar } from "./use-note-toolbar";
 import { useNoteZoomController } from "./note-zoom-controller";
+import { useWorkspaceLayoutController } from "./use-workspace-layout-controller";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
 import { ordered } from "./note-domain";
 import {
@@ -40,13 +41,11 @@ import {
 import {
   DEFAULT_READER, NOTE_RUNTIME_WORKSPACE_ID, createNoteRuntimeWorkspace,
   normalizeReader, type ReaderState,
-  type WorkspaceItem, type WorkspaceMode,
+  type WorkspaceItem,
 } from "./document-runtime-adapter";
 
 const DEMO_PAGES = [123, 124, 125, 126, 127, 128];
 const NOTE_SHEET_VIEW_KEY = "mednote-note-sheet-view-v1";
-const NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-hidden";
-const LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY = "mednote-note-sidebar-v6-hidden";
 const NOTE_ZOOM_PRESETS = [50, 60, 70, 75, 80, 85, 90, 100, 110, 120, 125, 130, 140, 150, 175, 200];
 
 const noteStorePendingPage: NotePage = {
@@ -66,16 +65,9 @@ function blobToDataUrl(blob: Blob) {
 
 export default function Home() {
   const noteState = useNoteStoreSnapshot();
-  const workspaceRef = useRef<HTMLElement>(null);
   const documentStageRef = useRef<HTMLDivElement>(null);
   const noteStageRef = useRef<HTMLDivElement>(null);
   const [demoReader, setDemoReader] = useState<ReaderState>({ ...DEFAULT_READER, page: 126 });
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("split");
-  const workspaceModeRef = useRef<WorkspaceMode>(workspaceMode);
-  const lastWorkspacePaneRef = useRef<"reader" | "note">("reader");
-  const lastReaderFocusRef = useRef<HTMLElement | null>(null);
-  const lastNoteFocusRef = useRef<HTMLElement | null>(null);
-  const pendingWorkspaceFocusRef = useRef<"reader" | "note" | null>(null);
   const [sourceFocus, setSourceFocus] = useState<{ documentId: string; page: number; rect: PdfRect } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(() => [createNoteRuntimeWorkspace()]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(NOTE_RUNTIME_WORKSPACE_ID);
@@ -89,7 +81,6 @@ export default function Home() {
   const [pdfiumDocument, setPdfiumDocument] = useState<PDFiumDocument | null>(null);
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
-  const [readerShare, setReaderShare] = useState(50);
   const [noteZoom, setNoteZoom] = useState(1);
   const [noteSheetViewMode, setNoteSheetViewMode] = useState<NoteSheetViewMode>(() => {
     try { return localStorage.getItem(NOTE_SHEET_VIEW_KEY) === "continuous" ? "continuous" : "single"; } catch { return "single"; }
@@ -98,17 +89,10 @@ export default function Home() {
   const [toast, setToast] = useState("Đã tự lưu");
   const [ready, setReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [showNoteSidebar, setShowNoteSidebar] = useState(() => {
-    try {
-      const preference = localStorage.getItem(NOTE_SIDEBAR_PREFERENCE_KEY);
-      return (preference ?? localStorage.getItem(LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY)) !== "1";
-    } catch { return true; }
-  });
   const [notePanel, setNotePanel] = useState<NotePanel>(null);
 
   workspacesRef.current = workspaces;
   activeWorkspaceIdRef.current = activeWorkspaceId;
-  workspaceModeRef.current = workspaceMode;
   const localSavedAtRef = useRef(Date.now());
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
@@ -154,6 +138,17 @@ export default function Home() {
     notify: setToast,
   });
   const readerInteractionRef = useRef<ReaderInteractionController | null>(null);
+  const workspaceLayout = useWorkspaceLayoutController({
+    activeWorkspaceKind: activeWorkspace.kind,
+    hasActiveNote,
+    notify: setToast,
+    onEnterReader: () => {
+      setNotePanel(null);
+      noteEditor.setTextInsertPopover(null);
+    },
+    onPrepareWorkspaceModeChange: (mode) => readerInteractionRef.current?.prepareWorkspaceModeChange(mode),
+  });
+  const { readerShare, workspaceMode, workspaceModeRef } = workspaceLayout;
   const noteCanvas = useNoteCanvasController({
     activeDocument,
     activeNote,
@@ -291,7 +286,7 @@ export default function Home() {
     setLibraryOpen,
     setNotePanel,
     setSourceFocus,
-    setWorkspaceMode,
+    setWorkspaceMode: workspaceLayout.setWorkspaceMode,
     setWorkspaces,
     sourcePage,
     switchDocument,
@@ -305,8 +300,7 @@ export default function Home() {
       documentLibrary.activate();
       setWorkspaces(result.workspaces);
       setActiveWorkspaceId(result.activeWorkspaceId);
-      setReaderShare(result.readerShare);
-      setWorkspaceMode(result.workspaceMode);
+      workspaceLayout.restoreLayout(result);
       setNoteZoom(result.noteZoom);
       localSavedAtRef.current = result.savedAt;
       if (result.warnings?.length) setToast(result.warnings.join(" "));
@@ -471,11 +465,9 @@ export default function Home() {
     applyRestore: ({ snapshot }) => {
       workspacesRef.current = snapshot.workspaces;
       activeWorkspaceIdRef.current = snapshot.activeWorkspaceId;
-      workspaceModeRef.current = snapshot.workspaceMode;
       setWorkspaces(snapshot.workspaces);
       setActiveWorkspaceId(snapshot.activeWorkspaceId);
-      setReaderShare(snapshot.readerShare);
-      setWorkspaceMode(snapshot.workspaceMode);
+      workspaceLayout.restoreLayout(snapshot);
       setNoteZoom(snapshot.noteZoom);
     },
     hasMeaningfulLocalData,
@@ -588,70 +580,13 @@ export default function Home() {
     setNotePanel(null);
   }, [activeNote.id, activeNotebook?.id, activeWorkspace.id]);
 
-  const workspacePaneForElement = (element: HTMLElement | null): "reader" | "note" | null => {
-    if (element?.closest(".reader-pane, .pdf-thumbnails")) return "reader";
-    if (element?.closest(".notes-pane, .note-navigation-host")) return "note";
-    return null;
-  };
-
-  const focusWorkspacePane = (pane: "reader" | "note") => {
-    const paneElement = workspaceRef.current?.querySelector<HTMLElement>(pane === "reader" ? ".reader-pane" : ".notes-pane");
-    if (!paneElement || paneElement.getClientRects().length === 0) return;
-    const remembered = pane === "reader" ? lastReaderFocusRef.current : lastNoteFocusRef.current;
-    const target = remembered?.isConnected && paneElement.contains(remembered) && remembered.getClientRects().length > 0
-      ? remembered
-      : paneElement;
-    target.focus({ preventScroll: true });
-    lastWorkspacePaneRef.current = pane;
-  };
-
-  useEffect(() => {
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    const rememberPane = (event: Event) => {
-      const element = event.target instanceof HTMLElement ? event.target : null;
-      const pane = workspacePaneForElement(element);
-      if (!pane) return;
-      lastWorkspacePaneRef.current = pane;
-      if (event.type === "focusin" && element) {
-        if (pane === "reader") lastReaderFocusRef.current = element;
-        else lastNoteFocusRef.current = element;
-      }
-    };
-    workspace.addEventListener("focusin", rememberPane);
-    workspace.addEventListener("pointerdown", rememberPane, true);
-    return () => {
-      workspace.removeEventListener("focusin", rememberPane);
-      workspace.removeEventListener("pointerdown", rememberPane, true);
-    };
-  }, []);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = target?.matches("input, textarea, select, [contenteditable='true']");
-      if (event.key === "F6" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.preventDefault();
-        const mode = workspaceModeRef.current;
-        if (mode === "split") {
-          const currentPane = workspacePaneForElement(target) ?? lastWorkspacePaneRef.current;
-          const nextPane = currentPane === "reader" ? "note" : "reader";
-          focusWorkspacePane(nextPane);
-          setToast(nextPane === "reader" ? "Đã chuyển sang Reader (F6)" : "Đã chuyển sang Note (F6)");
-          return;
-        }
-        const nextPane = mode === "reader" ? "note" : "reader";
-        if (nextPane === "note" && !hasActiveNote) {
-          changeWorkspaceMode("note");
-          return;
-        }
-        pendingWorkspaceFocusRef.current = nextPane;
-        changeWorkspaceMode(nextPane);
-        return;
-      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
         event.preventDefault();
-        setWorkspaceMode("reader");
+        workspaceLayout.setWorkspaceMode("reader");
         pdfNavigation.openSearch();
         return;
       }
@@ -679,7 +614,7 @@ export default function Home() {
       if (!isTyping && event.key === "ArrowRight" && viewMode === "single") goToPage(sourcePage + 1);
       if (event.key === "Escape") {
         readerInteraction.clearSelection();
-        setWorkspaceMode("split");
+        workspaceLayout.setWorkspaceMode("split");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -694,68 +629,13 @@ export default function Home() {
         activeWorkspaceIdRef.current = noteRuntime.id;
         setActiveWorkspaceId(noteRuntime.id);
       }
-      workspaceModeRef.current = "note";
-      setWorkspaceMode("note");
+      workspaceLayout.setWorkspaceMode("note");
       setLibraryOpen(false);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Không thể mở Notebook");
     }
   };
 
-  const changeWorkspaceMode = (mode: WorkspaceMode) => {
-    if (mode !== "reader" && !hasActiveNote) {
-      setToast(activeWorkspace.kind === "temporary"
-        ? "PDF đang mở tạm. Chọn “Tạo note” để ghi chú mà không cần lưu PDF."
-        : "PDF này chưa có note. Chọn “Tạo note” khi bạn muốn ghi chú.");
-      return;
-    }
-    readerInteraction.prepareWorkspaceModeChange(mode);
-    setWorkspaceMode(mode);
-    if (mode === "reader") {
-      setNotePanel(null);
-      noteEditor.setTextInsertPopover(null);
-    }
-    setToast(mode === "split" ? "Đang dùng Reader và Note" : mode === "reader" ? "Đang chỉ xem Reader" : "Đang chỉ làm Note");
-  };
-
-  useEffect(() => {
-    const pendingPane = pendingWorkspaceFocusRef.current;
-    if (!pendingPane) return;
-    if ((pendingPane === "reader" && workspaceMode !== "reader") || (pendingPane === "note" && workspaceMode !== "note")) return;
-    pendingWorkspaceFocusRef.current = null;
-    const frame = window.requestAnimationFrame(() => focusWorkspacePane(pendingPane));
-    return () => window.cancelAnimationFrame(frame);
-  }, [workspaceMode]);
-
-  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const move = (moveEvent: PointerEvent) => {
-      const rect = workspaceRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const usable = rect.width - 236;
-      const readerWidth = moveEvent.clientX - rect.left - 108;
-      const nextShare = Math.min(65, Math.max(35, (readerWidth / usable) * 100));
-      setReaderShare(nextShare);
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  const gridStyle = {
-    "--reader-share": `${readerShare}fr`,
-    "--notes-share": `${100 - readerShare}fr`,
-  } as React.CSSProperties;
-  const setNoteSidebarVisibility = (visible: boolean) => {
-    setShowNoteSidebar(visible);
-    try {
-      localStorage.setItem(NOTE_SIDEBAR_PREFERENCE_KEY, visible ? "0" : "1");
-      localStorage.removeItem(LEGACY_NOTE_SIDEBAR_PREFERENCE_KEY);
-    } catch { /* UI preference is non-critical. */ }
-  };
   const noteZoomPercent = Math.round(noteZoom * 100);
   const setNoteViewZoom = (value: number) => setNoteZoom(Math.max(.5, Math.min(2, value)));
   const fitNoteToView = () => {
@@ -763,7 +643,7 @@ export default function Home() {
     setNoteViewZoom(available / noteCanvas.basePaperMaxWidth);
   };
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
-  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, canvas: noteCanvas, editor: noteEditor, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteSidebarVisibility, setNoteViewZoom, showNoteSidebar });
+  const noteToolbar = useNoteToolbar({ NOTE_ZOOM_PRESETS, activeNote, canvas: noteCanvas, editor: noteEditor, exportNotebook, fitNoteToView, layout: workspaceLayout, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom });
 
   return (
     <DriveControllerProvider controller={drive}>
@@ -771,7 +651,7 @@ export default function Home() {
     <main className="app-shell">
       <input ref={documentWorkspace.previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handlePreviewPdfInputChange} />
       <input ref={documentWorkspace.libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handleLibraryPdfInputChange} />
-      <AppTopBar scope={{ activeWorkspace, changeWorkspaceMode, documentName, documents: documentWorkspace, hasActiveNote, ready, setLibraryOpen, toast, workspaceMode }} />
+      <AppTopBar scope={{ activeWorkspace, documentName, documents: documentWorkspace, layout: workspaceLayout, ready, setLibraryOpen, toast }} />
 
       {drive.panelOpen && (
         <DrivePanel />
@@ -791,15 +671,15 @@ export default function Home() {
 
       <PdfSelectionMenu controller={readerInteraction} />
 
-      <WorkspaceShell className={`workspace workspace-mode-${workspaceMode} ${pdfNavigation.railVisible ? "" : "pdf-rail-collapsed"} ${showNoteSidebar ? "" : "note-sidebar-collapsed"} ${pdfNavigation.railTab === "pages" ? "" : "pdf-rail-wide"}`} workspaceRef={workspaceRef} style={gridStyle} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
+      <WorkspaceShell layout={workspaceLayout} pdfRailVisible={pdfNavigation.railVisible} pdfRailTab={pdfNavigation.railTab} pdfRail={null} reader={null} divider={null} note={null} noteNavigation={null}>
         <PdfNavigationRail />
 
-        <ReaderPane scope={{ activeDocument, activeWorkspace, changeWorkspaceMode, currentPdfDocument, documents: documentWorkspace, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode, workspaceMode }} />
+        <ReaderPane scope={{ activeDocument, activeWorkspace, currentPdfDocument, documents: documentWorkspace, documentStageRef, exportAnnotatedPdf, fitMode, goToPage, interaction: readerInteraction, layout: workspaceLayout, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, setSourceZoom, sourceFocus, sourcePage, sourcePages, sourceZoom, switchDocument, totalPages, updateReader, viewMode }} />
 
-        <SplitDivider onPointerDown={startResize} />
+        <SplitDivider layout={workspaceLayout} />
 
         <NotePane toolbar={noteToolbar} stage={{ activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, canvas: noteCanvas, continuousNotes, editor: noteEditor, goToPage, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, openExcerptSource: documentWorkspace.openExcerptSource, resolveExcerptSource }} />
-        {showNoteSidebar && <NoteNavigationHost setNoteSidebarVisibility={setNoteSidebarVisibility} />}
+        {workspaceLayout.showNoteSidebar && <NoteNavigationHost layout={workspaceLayout} />}
       </WorkspaceShell>
     </main>
     </PdfNavigationControllerProvider>
