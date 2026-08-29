@@ -28,7 +28,8 @@ test("page composes one reader interaction controller and reader UI consumes tha
   ]);
 
   assert.match(page, /const readerInteraction = useReaderInteractionController/);
-  assert.match(page, /readerInteraction,/);
+  assert.match(page, /const contextReaderInteraction = useLiveController\(readerInteraction\)/);
+  assert.match(page, /readerInteraction: contextReaderInteraction/);
   assert.match(page, /<PdfSelectionMenu controller=\{readerInteraction\}/);
   for (const forbidden of [
     "const handlePdfSelection", "const addPdfMarkup", "lookupEnglishVietnamese",

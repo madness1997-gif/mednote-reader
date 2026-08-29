@@ -62,7 +62,8 @@ test("Drive UI consumes a stateful controller instead of page scope props", asyn
     source("app/ui/drive-panel.tsx"),
   ]);
   assert.match(page, /useDriveController/);
-  assert.match(page, /DriveControllerProvider controller=\{drive\}/);
+  assert.match(page, /const contextDrive = useLiveController\(drive\)/);
+  assert.match(page, /DriveControllerProvider controller=\{contextDrive\}/);
   assert.doesNotMatch(page, /driveStatus|driveToken|setDrivePanelOpen/);
   assert.match(controller, /useState<DriveStatus>/);
   assert.match(controller, /driveSyncService\.resume/);
@@ -84,7 +85,8 @@ test("PDF navigation owns rail and search behavior instead of receiving a page s
     source("app/ui/pdf-reader-stage.tsx"),
   ]);
   assert.match(page, /usePdfNavigationController/);
-  assert.match(page, /PdfNavigationControllerProvider controller=\{pdfNavigation\}/);
+  assert.match(page, /const contextPdfNavigation = useLiveController\(pdfNavigation\)/);
+  assert.match(page, /PdfNavigationControllerProvider controller=\{contextPdfNavigation\}/);
   assert.doesNotMatch(page, /pdfSearchAbortRef|setSearchResults|setPdfRailTab|setShowPdfRail/);
   assert.match(controller, /const \[railTab, setRailTab\] = useState/);
   assert.match(controller, /const \[searchResults, setSearchResults\] = useState/);

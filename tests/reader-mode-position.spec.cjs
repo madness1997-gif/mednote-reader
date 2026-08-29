@@ -103,3 +103,48 @@ test('F6 moves focus between Reader and Note while both panes stay visible', asy
   await expect.poll(() => readerPane.evaluate((pane) => pane.contains(document.activeElement))).toBe(true);
   await expect(workspace).toHaveClass(/workspace-mode-split/);
 });
+
+test('Reader and Both modes keep a zoomed continuous PDF reachable after pane resize', async ({ page }) => {
+  const pdf = await PDFDocument.create();
+  pdf.addPage([595, 842]);
+  const bytes = Buffer.from(await pdf.save());
+
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+  await waitForAppReady(page);
+  await page.locator('input[data-pdf-input="preview"]').setInputFiles({
+    name: 'reader-layout.pdf', mimeType: 'application/pdf', buffer: bytes,
+  });
+  const dialog = page.locator('.mednote-note-destination');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('button[type="submit"]').click();
+  await expect(page.getByText('Đã mở 1 trang')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Hiển thị' }).click();
+  await page.getByRole('button', { name: 'Cuộn liên tục' }).click();
+  const modeSwitcher = page.locator('.workspace-mode-switcher');
+  const stage = page.locator('.document-stage');
+  await modeSwitcher.getByRole('button', { name: 'Reader' }).click();
+  await page.getByRole('button', { name: 'Phóng to' }).click();
+  await page.getByRole('button', { name: 'Phóng to' }).click();
+
+  const expectReachablePage = async () => {
+    await expect.poll(() => stage.evaluate((element) => {
+      const surface = element.querySelector('.pdf-page-surface');
+      if (!surface) return false;
+      const stageRect = element.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      return surfaceRect.left >= stageRect.left
+        && surfaceRect.left < stageRect.right - 100
+        && element.scrollWidth > element.clientWidth + 50;
+    })).toBe(true);
+    await stage.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    await expect.poll(() => stage.evaluate((element) => element.scrollLeft)).toBeGreaterThan(50);
+    await stage.evaluate((element) => { element.scrollLeft = 0; });
+  };
+
+  await expectReachablePage();
+  await modeSwitcher.getByRole('button', { name: 'Cả hai' }).click();
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
+  await expectReachablePage();
+});

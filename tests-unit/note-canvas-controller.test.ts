@@ -68,7 +68,8 @@ test("page composes one canvas controller and UI consumes that boundary", async 
   ]);
 
   assert.match(page, /const noteCanvas = useNoteCanvasController/);
-  assert.match(page, /noteCanvas,/);
+  assert.match(page, /const contextNoteCanvas = useLiveController\(noteCanvas\)/);
+  assert.match(page, /noteCanvas: contextNoteCanvas/);
   for (const forbidden of [
     "const addImageExcerpt", "const addFirstAidImage", "const addSticker", "const addCalloutAt",
     "const commitStrokes", "const updatePaperTemplate", "new NoteInkSession", "firstAidTemplateTransition",

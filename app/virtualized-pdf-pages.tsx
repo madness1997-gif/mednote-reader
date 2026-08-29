@@ -83,6 +83,7 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
   }, [rootRef]);
 
   const getScrollAnchor = useCallback((inset = 0): PdfContinuousScrollAnchor | null => {
+    if (pinnedAnchorRef.current) return pinnedAnchorRef.current;
     const stage = rootRef.current;
     const host = hostRef.current;
     const currentMetrics = metricsRef.current;
@@ -228,7 +229,7 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
       className="continuous-pages"
       data-pdf-virtualized="true"
       data-pdf-total-pages={pages.length}
-      style={{ height: metrics.totalHeight }}
+      style={{ height: metrics.totalHeight, ...(zoom > 1 ? { width: `${zoom * 100}%` } : {}) }}
     >
       {pages.slice(range.start, range.end).map((page, visibleIndex) => {
         const index = range.start + visibleIndex;

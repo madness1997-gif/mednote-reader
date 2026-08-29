@@ -337,11 +337,11 @@ export function useReaderInteractionController({
       if (surface?.isConnected) {
         const nextRect = surface.getBoundingClientRect();
         stage.scrollLeft += nextRect.left + nextRect.width * surfaceX - event.clientX;
-        stage.scrollTop += nextRect.top + nextRect.height * surfaceY - event.clientY;
+        if (viewMode !== "continuous") stage.scrollTop += nextRect.top + nextRect.height * surfaceY - event.clientY;
       } else {
         const anchored = zoomAroundAnchor(oldZoom, nextZoom, { contentX, contentY, localX, localY });
         stage.scrollLeft = anchored.left;
-        stage.scrollTop = anchored.top;
+        if (viewMode !== "continuous") stage.scrollTop = anchored.top;
       }
       wheelZoomingRef.current = false;
     }));

@@ -9,6 +9,7 @@ import { DriveControllerProvider, useDriveController } from "./drive-controller"
 import { resolveDocumentSource } from "./note-document-source";
 import type { PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
+import { useLiveController } from "./live-controller";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
 import { documentLibrary } from "./document-library-controller";
 import { projectLibrary } from "./library-projection";
@@ -650,6 +651,13 @@ export default function Home() {
     setNoteViewZoom(available / noteCanvas.basePaperMaxWidth);
   };
   useNoteZoomController(noteStageRef, noteZoom, setNoteViewZoom, fitNoteToView);
+  const contextDrive = useLiveController(drive);
+  const contextPdfNavigation = useLiveController(pdfNavigation);
+  const contextDocuments = useLiveController(documentWorkspace);
+  const contextLayout = useLiveController(workspaceLayout);
+  const contextNoteCanvas = useLiveController(noteCanvas);
+  const contextNoteEditor = useLiveController(noteEditor);
+  const contextReaderInteraction = useLiveController(readerInteraction);
   const readerPaneViewModel: ReaderPaneViewModel = {
     toolbar: { exportAnnotatedPdf, setSourceZoom, sourceZoom, totalPages },
     stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
@@ -658,21 +666,21 @@ export default function Home() {
     toolbar: { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets: NOTE_ZOOM_PRESETS },
     stage: { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, continuousNotes, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, resolveExcerptSource },
   };
-  const readerPaneControllers = {
-    documents: documentWorkspace,
-    layout: workspaceLayout,
-    readerInteraction,
-  } satisfies ReaderPaneControllers;
-  const notePaneControllers = {
-    documents: documentWorkspace,
-    layout: workspaceLayout,
-    noteCanvas,
-    noteEditor,
-  } satisfies NotePaneControllers;
+  const readerPaneControllers = useMemo<ReaderPaneControllers>(() => ({
+    documents: contextDocuments,
+    layout: contextLayout,
+    readerInteraction: contextReaderInteraction,
+  }), [contextDocuments, contextLayout, contextReaderInteraction]);
+  const notePaneControllers = useMemo<NotePaneControllers>(() => ({
+    documents: contextDocuments,
+    layout: contextLayout,
+    noteCanvas: contextNoteCanvas,
+    noteEditor: contextNoteEditor,
+  }), [contextDocuments, contextLayout, contextNoteCanvas, contextNoteEditor]);
 
   return (
-    <DriveControllerProvider controller={drive}>
-    <PdfNavigationControllerProvider controller={pdfNavigation}>
+    <DriveControllerProvider controller={contextDrive}>
+    <PdfNavigationControllerProvider controller={contextPdfNavigation}>
     <main className="app-shell">
       <input ref={documentWorkspace.previewPdfInputRef} data-pdf-input="preview" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handlePreviewPdfInputChange} />
       <input ref={documentWorkspace.libraryPdfInputRef} data-pdf-input="library" className="hidden-input" type="file" accept="application/pdf,.pdf" multiple onChange={documentWorkspace.handleLibraryPdfInputChange} />

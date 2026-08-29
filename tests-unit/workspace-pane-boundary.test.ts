@@ -16,6 +16,12 @@ test("ReaderPane and NotePane consume controllers through context and accept onl
 
   assert.match(page, /<ReaderPaneControllersProvider controllers=\{readerPaneControllers\}>/);
   assert.match(page, /<NotePaneControllersProvider controllers=\{notePaneControllers\}>/);
+  assert.match(page, /useLiveController\(documentWorkspace\)/);
+  assert.match(page, /useLiveController\(workspaceLayout\)/);
+  assert.match(page, /useMemo<ReaderPaneControllers>/);
+  assert.match(page, /useMemo<NotePaneControllers>/);
+  assert.match(page, /<DriveControllerProvider controller=\{contextDrive\}>/);
+  assert.match(page, /<PdfNavigationControllerProvider controller=\{contextPdfNavigation\}>/);
   assert.match(page, /<ReaderPane viewModel=\{readerPaneViewModel\}/);
   assert.match(page, /<NotePane viewModel=\{notePaneViewModel\}/);
   assert.doesNotMatch(page, /<ReaderPane scope=|<NotePane toolbar=/);
