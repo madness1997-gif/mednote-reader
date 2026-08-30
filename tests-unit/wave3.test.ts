@@ -133,13 +133,16 @@ test("desktop lifecycle flushes the renderer store before acknowledging close", 
   assert.equal(flushes, 1);
   assert.deepEqual(completions, [["close-1", true]]);
 
-  const [main, preload, lifecycle] = await Promise.all([
+  const [main, preload, lifecycle, closeLifecycle] = await Promise.all([
     readFile(new URL("../electron/main.cjs", import.meta.url), "utf8"),
     readFile(new URL("../electron/preload.cjs", import.meta.url), "utf8"),
     readFile(new URL("../app/desktop-lifecycle.ts", import.meta.url), "utf8"),
+    readFile(new URL("../electron/window-close-lifecycle.cjs", import.meta.url), "utf8"),
   ]);
-  assert.match(main, /app:flush-before-close/);
+  assert.match(main, /createWindowCloseLifecycle/);
   assert.match(main, /app:flush-result/);
+  assert.match(closeLifecycle, /app:flush-before-close/);
+  assert.match(closeLifecycle, /query-session-end/);
   assert.match(preload, /onFlushRequested/);
   assert.match(lifecycle, /await store\.flush\(\)/);
   assert.doesNotMatch(main, /IndexedDB|Notebook\.pages|library:v6/);

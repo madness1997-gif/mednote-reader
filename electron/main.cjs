@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
+const { createWindowCloseLifecycle } = require("./window-close-lifecycle.cjs");
 
 // Keep this in lockstep with GOOGLE_DRIVE_SCOPES in app/google-drive.ts.
 // appdata remains readable for legacy imports; canonical cross-platform v2
@@ -25,8 +26,6 @@ protocol.registerSchemesAsPrivileged([{
 let mainWindow = null;
 let activeAuthorization = null;
 let cancelActiveAuthorization = null;
-let pendingClose = null;
-const closeApproved = new WeakSet();
 
 function showFlushFailure(target, message) {
   if (target.isDestroyed()) return;
@@ -38,6 +37,11 @@ function showFlushFailure(target, message) {
     buttons: ["Tiếp tục làm việc"],
   });
 }
+
+const windowCloseLifecycle = createWindowCloseLifecycle({
+  createRequestId: () => crypto.randomUUID(),
+  onFlushFailure: showFlushFailure,
+});
 
 function credentialPath() {
   return path.join(app.getPath("userData"), "google-drive-token.bin");
@@ -339,25 +343,8 @@ function createWindow() {
       void shell.openExternal(url);
     }
   });
-  mainWindow.on("close", (event) => {
-    if (closeApproved.has(mainWindow)) return;
-    event.preventDefault();
-    if (pendingClose) return;
-    const requestId = crypto.randomUUID();
-    const target = mainWindow;
-    const timeout = setTimeout(() => {
-      if (pendingClose?.requestId !== requestId) return;
-      pendingClose = null;
-      showFlushFailure(target, "Hết thời gian chờ lưu dữ liệu; MedNote chưa đóng.");
-    }, 15_000);
-    pendingClose = { requestId, target, timeout };
-    target.webContents.send("app:flush-before-close", requestId);
-  });
+  windowCloseLifecycle.attach(mainWindow);
   mainWindow.on("closed", () => {
-    if (pendingClose?.target === mainWindow) {
-      clearTimeout(pendingClose.timeout);
-      pendingClose = null;
-    }
     mainWindow = null;
   });
   const devUrl = process.env.MEDNOTE_DEV_URL;
@@ -378,16 +365,7 @@ ipcMain.handle("drive:cancel-authorization", () => {
 });
 ipcMain.handle("drive:revoke", (_event, token) => revokeDrive(token));
 ipcMain.on("app:flush-result", (event, result = {}) => {
-  if (!pendingClose || event.sender !== pendingClose.target.webContents || result.requestId !== pendingClose.requestId) return;
-  const { target, timeout } = pendingClose;
-  clearTimeout(timeout);
-  pendingClose = null;
-  if (!result.success) {
-    showFlushFailure(target, result.error || "Không thể lưu dữ liệu; MedNote chưa đóng.");
-    return;
-  }
-  closeApproved.add(target);
-  if (!target.isDestroyed()) target.close();
+  windowCloseLifecycle.handleFlushResult(event.sender, result);
 });
 
 const hasLock = app.requestSingleInstanceLock();
