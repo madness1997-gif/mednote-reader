@@ -42,6 +42,14 @@
     "directories": { "output": "release" },
     "files": ["dist-electron/**/*", "electron/**/*", "package.json"],
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "artifactName": "MedNote-Reader-Setup-${version}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "MedNote Reader",
+      "include": "build/installer.nsh"
+    }
   }
 }

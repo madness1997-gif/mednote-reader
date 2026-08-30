@@ -9,6 +9,7 @@ on:
       - .github/windows-build-trigger
       - .github/workflows/windows.yml
       - app/**
+      - build/**
       - electron/**
       - src/**
       - tests/**
@@ -41,6 +42,9 @@ jobs:
         run: node tests/electron-smoke.cjs
       - name: Package Windows installer
         run: npx electron-builder --win nsis --publish never
+      - name: Smoke test Windows uninstaller
+        shell: pwsh
+        run: ./tests/windows-uninstall-smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: MedNote-Reader-Windows
