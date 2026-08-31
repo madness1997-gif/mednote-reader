@@ -21,7 +21,12 @@ async function waitForAppReady(page) {
 test('Reader keeps its continuous-scroll position after returning from a long Note visit', async ({ page }) => {
   const pdf = await PDFDocument.create();
   for (let index = 0; index < 120; index += 1) {
-    pdf.addPage(index % 3 === 0 ? [595, 842] : index % 3 === 1 ? [420, 595] : [612, 792]);
+    const pdfPage = pdf.addPage(index % 3 === 0 ? [595, 842] : index % 3 === 1 ? [420, 595] : [612, 792]);
+    const { width, height } = pdfPage.getSize();
+    pdfPage.drawRectangle({ x: width * .08, y: height * .14, width: width * .84, height: height * .24, borderWidth: 2 });
+    for (let row = 1; row < 5; row += 1) {
+      pdfPage.drawLine({ start: { x: width * .08, y: height * (.14 + row * .048) }, end: { x: width * .92, y: height * (.14 + row * .048) }, thickness: 1 });
+    }
   }
   const bytes = Buffer.from(await pdf.save());
 
@@ -52,19 +57,30 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   const targetPage = stage.locator('[data-pdf-page="87"]');
   await expect(targetPage).toBeAttached();
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(1_000);
+  await stage.evaluate((element) => {
+    const target = element.querySelector('[data-pdf-page="87"]');
+    const stageRect = element.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    element.scrollTop += targetRect.top + targetRect.height * .78 - (stageRect.top + 24);
+  });
+  await page.waitForTimeout(500);
   const before = await stage.evaluate((element) => {
     const stageRect = element.getBoundingClientRect();
     const pages = [...element.querySelectorAll('[data-pdf-page]')];
-    const anchor = pages.reduce((best, pageElement) => {
-      const offset = pageElement.getBoundingClientRect().top - stageRect.top;
-      return !best || Math.abs(offset) < Math.abs(best.offset) ? { pageElement, offset } : best;
-    }, null);
+    const anchorY = stageRect.top + 24;
+    const anchor = pages.find((pageElement) => {
+      const rect = pageElement.getBoundingClientRect();
+      return rect.top <= anchorY && rect.bottom >= anchorY;
+    });
+    const anchorRect = anchor?.getBoundingClientRect();
     return {
       left: element.scrollLeft,
-      page: anchor?.pageElement.getAttribute('data-pdf-page'),
-      offset: anchor?.offset ?? 0,
+      page: anchor?.getAttribute('data-pdf-page'),
+      ratio: anchorRect ? (anchorY - anchorRect.top) / anchorRect.height : Number.NaN,
     };
   });
+  expect(before.page).toBe('87');
+  expect(before.ratio).toBeGreaterThan(.7);
 
   await page.keyboard.press('F6');
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
@@ -77,13 +93,15 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   await page.waitForTimeout(3_200);
   const after = await stage.evaluate((element, anchorPage) => {
     const anchor = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
+    const stageRect = element.getBoundingClientRect();
+    const anchorRect = anchor?.getBoundingClientRect();
     return {
       left: element.scrollLeft,
-      offset: anchor ? anchor.getBoundingClientRect().top - element.getBoundingClientRect().top : Number.NaN,
+      ratio: anchorRect ? (stageRect.top + 24 - anchorRect.top) / anchorRect.height : Number.NaN,
     };
   }, before.page);
   expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(2);
-  expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(2);
+  expect(Math.abs(after.ratio - before.ratio)).toBeLessThanOrEqual(.003);
 
   await modeSwitcher.getByRole('button', { name: 'Note' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
@@ -94,13 +112,40 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   await page.waitForTimeout(3_200);
   const afterReader = await stage.evaluate((element, anchorPage) => {
     const anchor = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
+    const stageRect = element.getBoundingClientRect();
+    const anchorRect = anchor?.getBoundingClientRect();
     return {
       left: element.scrollLeft,
-      offset: anchor ? anchor.getBoundingClientRect().top - element.getBoundingClientRect().top : Number.NaN,
+      ratio: anchorRect ? (stageRect.top + 24 - anchorRect.top) / anchorRect.height : Number.NaN,
     };
   }, before.page);
   expect(Math.abs(afterReader.left - after.left)).toBeLessThanOrEqual(2);
-  expect(Math.abs(afterReader.offset - after.offset)).toBeLessThanOrEqual(2);
+  expect(Math.abs(afterReader.ratio - after.ratio)).toBeLessThanOrEqual(.003);
+
+  const boundaryPage = stage.locator('[data-pdf-page="88"]');
+  await expect(boundaryPage).toBeAttached();
+  await stage.evaluate((element) => {
+    const target = element.querySelector('[data-pdf-page="88"]');
+    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - 30;
+  });
+  await page.waitForTimeout(500);
+  const boundaryBefore = await stage.evaluate((element) => {
+    const target = element.querySelector('[data-pdf-page="88"]');
+    return target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+  });
+  expect(Math.abs(boundaryBefore - 30)).toBeLessThanOrEqual(2);
+
+  await modeSwitcher.getByRole('button', { name: 'Note' }).click();
+  await expect(stage).toBeHidden();
+  await page.waitForTimeout(1_200);
+  await modeSwitcher.getByRole('button', { name: 'Cả hai' }).click();
+  await expect(stage).toBeVisible();
+  await page.waitForTimeout(3_200);
+  const boundaryAfter = await stage.evaluate((element) => {
+    const target = element.querySelector('[data-pdf-page="88"]');
+    return target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+  });
+  expect(Math.abs(boundaryAfter - boundaryBefore)).toBeLessThanOrEqual(2);
 });
 
 test('F6 moves focus between Reader and Note while both panes stay visible', async ({ page }) => {

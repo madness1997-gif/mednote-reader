@@ -35,6 +35,7 @@ import { lookupEnglishVietnamese, oxfordLookupUrl, type EnglishVietnameseLookup 
 import type { PdfAnnotation, PdfCropResult, PdfMarkupAnnotation, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";
 import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
 import type { PdfHistory, PdfPanel } from "./ui/ui-contracts";
+import type { PdfContinuousScrollAnchor } from "./virtualized-pdf-pages";
 
 export type DictionaryLookupState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -48,6 +49,7 @@ export type ReaderScrollPosition = {
   left: number;
   anchorPage: number;
   anchorOffset: number;
+  continuousAnchor: PdfContinuousScrollAnchor | null;
 };
 
 export type ReaderPdfTool = { id: PdfTool; label: string; shortLabel: string; icon: LucideIcon };
@@ -91,7 +93,7 @@ export type UseReaderInteractionControllerOptions = {
   activeReader: ReaderState;
   currentPdfDocument: PDFDocumentProxy | null;
   documentStageRef: RefObject<HTMLDivElement | null>;
-  getContinuousScrollAnchor: (inset?: number) => { page: number; offset: number } | null;
+  getContinuousScrollAnchor: (inset?: number) => PdfContinuousScrollAnchor | null;
   inkColor: string;
   inkWidth: number;
   notify: (message: string) => void;
@@ -100,6 +102,8 @@ export type UseReaderInteractionControllerOptions = {
   onCrop: (result: PdfCropResult) => void | Promise<void>;
   pdfReader: PdfReaderController;
   pinContinuousScrollAnchor: () => void;
+  releaseContinuousScrollAnchor: () => void;
+  restoreContinuousScrollAnchor: (anchor: PdfContinuousScrollAnchor) => boolean;
   setInkColor: Dispatch<SetStateAction<string>>;
   setInkWidth: Dispatch<SetStateAction<number>>;
   setSourcePage: (page: number) => void;
@@ -126,6 +130,8 @@ export function useReaderInteractionController({
   onCrop,
   pdfReader,
   pinContinuousScrollAnchor,
+  releaseContinuousScrollAnchor,
+  restoreContinuousScrollAnchor,
   setInkColor,
   setInkWidth,
   setSourcePage,
@@ -348,7 +354,7 @@ export function useReaderInteractionController({
   };
 
   const rememberReaderScrollPosition = (stage: HTMLElement) => {
-    const virtualAnchor = viewMode === "continuous" ? getContinuousScrollAnchor() : null;
+    const virtualAnchor = viewMode === "continuous" ? getContinuousScrollAnchor(24) : null;
     const stageTop = stage.getBoundingClientRect().top;
     const pages = Array.from(stage.querySelectorAll<HTMLElement>("[data-pdf-page]"));
     const anchorPage = virtualAnchor?.page
@@ -360,6 +366,7 @@ export function useReaderInteractionController({
       left: stage.scrollLeft,
       anchorPage,
       anchorOffset: virtualAnchor?.offset ?? (anchor ? anchor.getBoundingClientRect().top - stageTop : 0),
+      continuousAnchor: virtualAnchor,
     };
   };
 
@@ -424,6 +431,7 @@ export function useReaderInteractionController({
     const restore = () => {
       if (cancelled) return;
       stage.scrollLeft = saved.left;
+      if (saved.continuousAnchor && restoreContinuousScrollAnchor(saved.continuousAnchor)) return;
       const anchor = stage.querySelector<HTMLElement>(`[data-pdf-page="${saved.anchorPage}"]`);
       if (anchor) {
         const currentOffset = anchor.getBoundingClientRect().top - stage.getBoundingClientRect().top;
@@ -449,6 +457,7 @@ export function useReaderInteractionController({
       stage.removeEventListener("pointerdown", finish);
       stage.removeEventListener("touchstart", finish);
       window.removeEventListener("keydown", finish);
+      releaseContinuousScrollAnchor();
       restoringScrollRef.current = false;
     };
     const observer = new ResizeObserver(queueRestore);

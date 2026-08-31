@@ -3,7 +3,7 @@ import test from "node:test";
 import { PdfCanvasBudgetManager } from "../app/pdf-canvas-budget";
 import { PdfReaderController } from "../app/pdf-reader-controller";
 import { PdfWorkScheduler } from "../app/pdf-work-scheduler";
-import { nearestPdfVirtualPageIndex, pdfPageVirtualMetrics, pdfPageVirtualRange } from "../app/pdf-page-virtualizer";
+import { nearestPdfVirtualPageIndex, pdfPageVirtualAnchorIndex, pdfPageVirtualAnchorTargetOffset, pdfPageVirtualMetrics, pdfPageVirtualRange } from "../app/pdf-page-virtualizer";
 import { pdfThumbnailVirtualRange } from "../app/virtualized-thumbnails";
 
 test("canvas budget evicts the least recently used unpinned page", () => {
@@ -78,6 +78,20 @@ test("continuous PDF metrics retain exact offsets after measured page heights ch
   assert.deepEqual(metrics.offsets, [0, 802, 1_824, 2_626]);
   assert.equal(metrics.totalHeight, 3_406);
   assert.equal(nearestPdfVirtualPageIndex(metrics, 1_810), 2);
+});
+
+test("continuous PDF anchors select the containing page and the next page inside a page gap", () => {
+  const metrics = pdfPageVirtualMetrics([1, 2, 3], new Map([[1, 1_000], [2, 600], [3, 900]]), 780, 22);
+  assert.equal(pdfPageVirtualAnchorIndex(metrics, 780), 0, "deep content remains anchored to its containing page");
+  assert.equal(pdfPageVirtualAnchorIndex(metrics, 1_010), 1, "the fixed page gap anchors to the following page boundary");
+  assert.equal(pdfPageVirtualAnchorIndex(metrics, 1_400), 1);
+});
+
+test("continuous PDF anchors scale deep page content while retaining fixed page gaps", () => {
+  const deepContent = { offset: -756, pageOffsetRatio: .78, viewportOffset: 24 };
+  assert.equal(pdfPageVirtualAnchorTargetOffset(deepContent, 1_000), -756);
+  assert.equal(pdfPageVirtualAnchorTargetOffset(deepContent, 600), -444);
+  assert.equal(pdfPageVirtualAnchorTargetOffset({ offset: 12, pageOffsetRatio: null, viewportOffset: 24 }, 600), 12);
 });
 
 test("opening a 2,500-page PDF does not eagerly request pages or initialize PDFium", async () => {

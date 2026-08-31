@@ -6,16 +6,26 @@ import {
   PDF_CONTINUOUS_ESTIMATED_HEIGHT,
   PDF_CONTINUOUS_OVERSCAN,
   nearestPdfVirtualPageIndex,
+  pdfPageVirtualAnchorIndex,
+  pdfPageVirtualAnchorTargetOffset,
   pdfPageVirtualMetrics,
   pdfPageVirtualRange,
 } from "./pdf-page-virtualizer";
 import { LazyPdfPageView, type PdfPageViewProps } from "./pdf-reader";
 
-export type PdfContinuousScrollAnchor = { page: number; offset: number };
+export type PdfContinuousScrollAnchor = {
+  page: number;
+  offset: number;
+  // Null means the viewport anchor is in the fixed-size gap before this page.
+  pageOffsetRatio: number | null;
+  viewportOffset: number;
+};
 
 export type VirtualizedPdfPagesHandle = {
   getScrollAnchor: (inset?: number) => PdfContinuousScrollAnchor | null;
   pinScrollAnchor: () => void;
+  releaseScrollAnchor: () => void;
+  restoreScrollAnchor: (anchor: PdfContinuousScrollAnchor) => boolean;
   scrollToPage: (page: number, smooth?: boolean) => void;
 };
 
@@ -31,7 +41,7 @@ type VirtualizedPdfPagesProps = Omit<
   onAnnotationCommit: (page: number, next: PdfAnnotation[], previous: PdfAnnotation[]) => void;
 };
 
-type PendingAnchor = { page: number; offset: number };
+type PendingAnchor = PdfContinuousScrollAnchor;
 
 export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, VirtualizedPdfPagesProps>(function VirtualizedPdfPages({
   documentKey,
@@ -88,11 +98,18 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     const host = hostRef.current;
     const currentMetrics = metricsRef.current;
     if (!stage || !host || !pages.length) return null;
-    const index = nearestPdfVirtualPageIndex(currentMetrics, viewportTop(inset));
+    const index = pdfPageVirtualAnchorIndex(currentMetrics, viewportTop(inset));
     if (index < 0) return null;
+    const pageTop = host.getBoundingClientRect().top + currentMetrics.offsets[index] - stage.getBoundingClientRect().top;
+    const offsetWithinPage = inset - pageTop;
+    const pageHeight = currentMetrics.heights[index];
     return {
       page: pages[index],
-      offset: host.getBoundingClientRect().top + currentMetrics.offsets[index] - stage.getBoundingClientRect().top,
+      offset: pageTop,
+      pageOffsetRatio: offsetWithinPage >= 0 && offsetWithinPage <= pageHeight
+        ? offsetWithinPage / Math.max(1, pageHeight)
+        : null,
+      viewportOffset: inset,
     };
   }, [pages, rootRef, viewportTop]);
 
@@ -120,17 +137,52 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     if (anchor) pendingAnchorRef.current = anchor;
   }, [getScrollAnchor]);
 
-  const pinScrollAnchor = useCallback(() => {
-    const anchor = getScrollAnchor();
-    if (!anchor) return;
+  const holdPinnedAnchor = useCallback((anchor: PendingAnchor) => {
     pinnedAnchorRef.current = anchor;
-    pendingAnchorRef.current = anchor;
     if (pinnedAnchorTimerRef.current !== null) window.clearTimeout(pinnedAnchorTimerRef.current);
     pinnedAnchorTimerRef.current = window.setTimeout(() => {
       pinnedAnchorRef.current = null;
       pinnedAnchorTimerRef.current = null;
     }, 1_500);
-  }, [getScrollAnchor]);
+  }, []);
+
+  const releaseScrollAnchor = useCallback(() => {
+    pendingAnchorRef.current = null;
+    pinnedAnchorRef.current = null;
+    if (pinnedAnchorTimerRef.current !== null) window.clearTimeout(pinnedAnchorTimerRef.current);
+    pinnedAnchorTimerRef.current = null;
+  }, []);
+
+  const pinScrollAnchor = useCallback(() => {
+    const anchor = getScrollAnchor();
+    if (!anchor) return;
+    pendingAnchorRef.current = anchor;
+    holdPinnedAnchor(anchor);
+  }, [getScrollAnchor, holdPinnedAnchor]);
+
+  const applyScrollAnchor = useCallback((anchor: PendingAnchor, currentMetrics = metricsRef.current) => {
+    const stage = rootRef.current;
+    const host = hostRef.current;
+    if (!stage || !host) return false;
+    const index = pages.indexOf(anchor.page);
+    if (index < 0) return false;
+    const currentOffset = host.getBoundingClientRect().top + currentMetrics.offsets[index] - stage.getBoundingClientRect().top;
+    const targetOffset = pdfPageVirtualAnchorTargetOffset(anchor, currentMetrics.heights[index]);
+    stage.scrollTop += currentOffset - targetOffset;
+    return true;
+  }, [pages, rootRef]);
+
+  const restoreScrollAnchor = useCallback((anchor: PendingAnchor) => {
+    const stage = rootRef.current;
+    const index = pages.indexOf(anchor.page);
+    if (!stage || index < 0) return false;
+    pendingAnchorRef.current = anchor;
+    holdPinnedAnchor(anchor);
+    setRange(pdfPageVirtualRange(metricsRef.current, metricsRef.current.offsets[index], stage.clientHeight, PDF_CONTINUOUS_OVERSCAN));
+    const restored = applyScrollAnchor(anchor);
+    queueRangeUpdate();
+    return restored;
+  }, [applyScrollAnchor, holdPinnedAnchor, pages, queueRangeUpdate, rootRef]);
 
   const scrollToPage = useCallback((page: number, smooth = true) => {
     const stage = rootRef.current;
@@ -147,20 +199,15 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     queueRangeUpdate();
   }, [pages, queueRangeUpdate, rootRef]);
 
-  useImperativeHandle(forwardedRef, () => ({ getScrollAnchor, pinScrollAnchor, scrollToPage }), [getScrollAnchor, pinScrollAnchor, scrollToPage]);
+  useImperativeHandle(forwardedRef, () => ({ getScrollAnchor, pinScrollAnchor, releaseScrollAnchor, restoreScrollAnchor, scrollToPage }), [getScrollAnchor, pinScrollAnchor, releaseScrollAnchor, restoreScrollAnchor, scrollToPage]);
 
   useLayoutEffect(() => {
     const pending = pendingAnchorRef.current;
-    const stage = rootRef.current;
-    const host = hostRef.current;
-    if (!pending || !stage || !host) return;
+    if (!pending) return;
     pendingAnchorRef.current = null;
-    const index = pages.indexOf(pending.page);
-    if (index < 0) return;
-    const nextOffset = host.getBoundingClientRect().top + metrics.offsets[index] - stage.getBoundingClientRect().top;
-    stage.scrollTop += nextOffset - pending.offset;
+    applyScrollAnchor(pending, metrics);
     updateRange();
-  }, [metrics, pages, rootRef, updateRange]);
+  }, [applyScrollAnchor, metrics, updateRange]);
 
   useLayoutEffect(() => {
     scrollToPage(initialPage, false);

@@ -63,3 +63,23 @@ export function nearestPdfVirtualPageIndex(metrics: PdfPageVirtualMetrics, offse
     ? next
     : next - 1;
 }
+
+export function pdfPageVirtualAnchorIndex(metrics: PdfPageVirtualMetrics, offset: number) {
+  const count = metrics.offsets.length;
+  if (!count) return -1;
+  const next = firstIndex(count, (index) => metrics.offsets[index] >= offset);
+  if (next <= 0) return 0;
+  if (next >= count) return count - 1;
+  const previous = next - 1;
+  return offset <= metrics.offsets[previous] + metrics.heights[previous] ? previous : next;
+}
+
+// Page content scales with the pane width, while the inter-page gap does not.
+export function pdfPageVirtualAnchorTargetOffset(
+  anchor: { offset: number; pageOffsetRatio: number | null; viewportOffset: number },
+  pageHeight: number,
+) {
+  return anchor.pageOffsetRatio === null
+    ? anchor.offset
+    : anchor.viewportOffset - anchor.pageOffsetRatio * Math.max(1, pageHeight);
+}

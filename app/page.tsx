@@ -256,6 +256,8 @@ export default function Home() {
     documentStageRef,
     getContinuousScrollAnchor: (inset) => continuousPdfPagesRef.current?.getScrollAnchor(inset) ?? null,
     pinContinuousScrollAnchor: () => continuousPdfPagesRef.current?.pinScrollAnchor(),
+    releaseContinuousScrollAnchor: () => continuousPdfPagesRef.current?.releaseScrollAnchor(),
+    restoreContinuousScrollAnchor: (anchor) => continuousPdfPagesRef.current?.restoreScrollAnchor(anchor) ?? false,
     inkColor: noteCanvas.inkColor,
     inkWidth: noteCanvas.inkWidth,
     notify: setToast,
