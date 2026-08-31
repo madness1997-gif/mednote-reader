@@ -413,7 +413,7 @@ export function useReaderInteractionController({
   }, [activeDocument?.id]);
 
   useEffect(() => {
-    if (workspaceMode !== "reader" || !pendingScrollRestoreRef.current) return;
+    if (workspaceMode === "note" || !pendingScrollRestoreRef.current) return;
     const stage = documentStageRef.current;
     const saved = scrollPositionRef.current;
     if (!stage || !saved) return;

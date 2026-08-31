@@ -18,9 +18,11 @@ async function waitForAppReady(page) {
   }), { timeout: 10000 }).toBe(true);
 }
 
-test('Reader keeps its continuous-scroll position after visiting Note mode', async ({ page }) => {
+test('Reader keeps its continuous-scroll position after returning from a long Note visit', async ({ page }) => {
   const pdf = await PDFDocument.create();
-  for (let index = 0; index < 9; index += 1) pdf.addPage([420, 595]);
+  for (let index = 0; index < 120; index += 1) {
+    pdf.addPage(index % 3 === 0 ? [595, 842] : index % 3 === 1 ? [420, 595] : [612, 792]);
+  }
   const bytes = Buffer.from(await pdf.save());
 
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
@@ -45,9 +47,9 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
 
   const stage = page.locator('.document-stage');
   const pageInput = page.getByRole('textbox', { name: 'Số trang' });
-  await pageInput.fill('6');
+  await pageInput.fill('87');
   await pageInput.press('Enter');
-  const targetPage = stage.locator('[data-pdf-page="6"]');
+  const targetPage = stage.locator('[data-pdf-page="87"]');
   await expect(targetPage).toBeAttached();
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(1_000);
   const before = await stage.evaluate((element) => {
@@ -67,9 +69,10 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
   await page.keyboard.press('F6');
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
   await expect(stage).toBeHidden();
+  await page.waitForTimeout(5_000);
 
-  await page.keyboard.press('F6');
-  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
+  await modeSwitcher.getByRole('button', { name: 'Cả hai' }).click();
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
   await expect(stage).toBeVisible();
   await page.waitForTimeout(3_200);
   const after = await stage.evaluate((element, anchorPage) => {
@@ -81,6 +84,23 @@ test('Reader keeps its continuous-scroll position after visiting Note mode', asy
   }, before.page);
   expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(2);
   expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(2);
+
+  await modeSwitcher.getByRole('button', { name: 'Note' }).click();
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
+  await expect(stage).toBeHidden();
+  await page.keyboard.press('F6');
+  await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
+  await expect(stage).toBeVisible();
+  await page.waitForTimeout(3_200);
+  const afterReader = await stage.evaluate((element, anchorPage) => {
+    const anchor = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
+    return {
+      left: element.scrollLeft,
+      offset: anchor ? anchor.getBoundingClientRect().top - element.getBoundingClientRect().top : Number.NaN,
+    };
+  }, before.page);
+  expect(Math.abs(afterReader.left - after.left)).toBeLessThanOrEqual(2);
+  expect(Math.abs(afterReader.offset - after.offset)).toBeLessThanOrEqual(2);
 });
 
 test('F6 moves focus between Reader and Note while both panes stay visible', async ({ page }) => {
