@@ -117,6 +117,10 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     const stage = rootRef.current;
     const host = hostRef.current;
     if (!stage || !host) return;
+    // Note-only mode hides Reader with display:none. Preserve the mounted
+    // range while hidden instead of collapsing virtualization back to page 1;
+    // the saved anchor can then be restored before the Reader paints again.
+    if (!stage.clientWidth || !stage.clientHeight) return;
     const currentMetrics = metricsRef.current;
     const next = pdfPageVirtualRange(currentMetrics, viewportTop(), stage.clientHeight, PDF_CONTINUOUS_OVERSCAN);
     setRange((current) => current.start === next.start && current.end === next.end ? current : next);

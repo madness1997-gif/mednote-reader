@@ -251,6 +251,8 @@ body {
 .pdf-page-number { align-self: center; margin-top: 8px; padding: 2px 8px; border-radius: 999px; background: #e7edef; color: #697b84; font-size: 9px; }
 .pdf-view-single .pdf-page-host { min-height: 100%; justify-content: center; }
 .continuous-pages { position: relative; width: max-content; min-width: 100%; }
+.document-stage[data-reader-scroll-restoring="true"] .continuous-pages { visibility: hidden; }
+.document-stage[data-reader-scroll-restoring="true"] .pdf-page-canvas { width: 100% !important; height: 100% !important; }
 .virtual-pdf-page-slot { position: absolute; left: 0; width: 100%; }
 /* The page host already centres a page while it fits. Centring the host again
    here creates unreachable negative overflow on the left once the PDF is

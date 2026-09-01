@@ -1239,7 +1239,13 @@ export function LazyPdfPageView({ estimatedHeight, onHeightChange, ...props }: L
     const pageElement = host?.querySelector(".pdf-page-host");
     if (proximity === "cold" || !cacheAllowed || !pageElement) return;
     const update = () => {
-      const height = Math.max(260, pageElement.getBoundingClientRect().height);
+      const stage = pageElement.closest(".document-stage") as HTMLElement | null;
+      const rect = pageElement.getBoundingClientRect();
+      // display:none produces a zero rect while Note-only mode is active.
+      // Treating that as a 260px measurement corrupts virtual offsets and
+      // forces several corrective renders on the way back to Reader.
+      if ((stage && (!stage.clientWidth || !stage.clientHeight)) || rect.height <= 1) return;
+      const height = Math.max(260, rect.height);
       setMeasuredHeight((current) => Math.abs(current - height) > 1 ? height : current);
       onHeightChangeRef.current?.(props.page, height);
     };

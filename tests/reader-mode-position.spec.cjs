@@ -87,9 +87,72 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   await expect(stage).toBeHidden();
   await page.waitForTimeout(5_000);
 
+  const hiddenReader = await stage.evaluate((element, anchorPage) => {
+    const target = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
+    const canvas = target?.querySelector('canvas.pdf-page-canvas');
+    return {
+      anchorMounted: Boolean(target),
+      canvasWidth: canvas?.width || 0,
+      canvasHeight: canvas?.height || 0,
+      slots: [...element.querySelectorAll('[data-pdf-page]')].map((item) => item.getAttribute('data-pdf-page')),
+    };
+  }, before.page);
+  expect(hiddenReader.anchorMounted).toBe(true);
+  expect(hiddenReader.slots).toContain(before.page);
+  expect(hiddenReader.canvasWidth).toBeGreaterThan(100);
+  expect(hiddenReader.canvasHeight).toBeGreaterThan(100);
+
+  const transitionPromise = stage.evaluate(async (element, anchorPage) => {
+    const samples = [];
+    const started = Date.now();
+    while (Date.now() - started < 1_200) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const readerPane = element.closest('.reader-pane');
+      const continuousPages = element.querySelector('.continuous-pages');
+      if (readerPane
+        && getComputedStyle(readerPane).display !== 'none'
+        && continuousPages
+        && getComputedStyle(continuousPages).visibility !== 'hidden') {
+        const stageRect = element.getBoundingClientRect();
+        const anchorY = stageRect.top + 24;
+        const pageElement = [...element.querySelectorAll('[data-pdf-page]')].find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.top <= anchorY && rect.bottom >= anchorY;
+        });
+        const target = element.querySelector(`[data-pdf-page="${anchorPage}"]`);
+        const targetRect = target?.getBoundingClientRect();
+        const canvas = target?.querySelector('canvas.pdf-page-canvas');
+        samples.push({
+          elapsed: Date.now() - started,
+          restoring: element.dataset.readerScrollRestoring || null,
+          visibility: getComputedStyle(continuousPages).visibility,
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          page: pageElement?.getAttribute('data-pdf-page') || null,
+          ratio: targetRect ? (anchorY - targetRect.top) / targetRect.height : Number.NaN,
+          canvasWidth: canvas?.width || 0,
+          canvasHeight: canvas?.height || 0,
+          surfaceWidth: target?.querySelector('.pdf-page-surface')?.getBoundingClientRect().width || 0,
+          surfaceHeight: target?.querySelector('.pdf-page-surface')?.getBoundingClientRect().height || 0,
+        });
+      }
+    }
+    return samples;
+  }, before.page);
+
   await modeSwitcher.getByRole('button', { name: 'Cả hai' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-split/);
   await expect(stage).toBeVisible();
+  const transition = await transitionPromise;
+  expect(transition.length).toBeGreaterThan(0);
+  expect(
+    transition.every((sample) => sample.page === before.page),
+    JSON.stringify(transition.filter((sample) => sample.page !== before.page)),
+  ).toBe(true);
+  expect(transition.every((sample) => sample.canvasWidth > 100 && sample.canvasHeight > 100)).toBe(true);
+  expect(transition.every((sample) => sample.surfaceWidth > 100 && sample.surfaceHeight > 100)).toBe(true);
+  const transitionRatios = transition.map((sample) => sample.ratio);
+  expect(Math.max(...transitionRatios) - Math.min(...transitionRatios)).toBeLessThanOrEqual(.01);
   await page.waitForTimeout(3_200);
   const after = await stage.evaluate((element, anchorPage) => {
     const anchor = element.querySelector(`[data-pdf-page="${anchorPage}"]`);

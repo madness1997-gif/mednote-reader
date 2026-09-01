@@ -34,6 +34,12 @@ class PdfPageObserverPool {
   private update(element: Element, field: "nearby" | "visible", value: boolean) {
     const state = this.pages.get(element);
     if (!state || state[field] === value) return;
+    const root = this.root as HTMLElement;
+    // IntersectionObserver reports every page as non-intersecting when its
+    // Reader pane is display:none. That is a layout transition, not a real
+    // scroll-away event: retaining the few mounted canvases prevents a blank
+    // and 2x2-pixel render flash when Reader becomes visible again.
+    if (!value && (!root.clientWidth || !root.clientHeight)) return;
     state[field] = value;
     state.listener({ nearby: state.nearby, visible: state.visible });
   }

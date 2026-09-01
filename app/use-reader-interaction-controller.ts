@@ -20,7 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import {
   addPdfMarkup as addPdfMarkupCommand,
   deletePdfAnnotation as deletePdfAnnotationCommand,
@@ -33,6 +33,7 @@ import {
 import type { LibraryDocument, ReaderState, WorkspaceMode } from "./document-runtime-adapter";
 import { lookupEnglishVietnamese, oxfordLookupUrl, type EnglishVietnameseLookup } from "./dictionary";
 import type { PdfAnnotation, PdfCropResult, PdfMarkupAnnotation, PdfSelection, PdfTool, PdfViewMode } from "./pdf-domain";
+import { pdfPageVirtualAnchorTargetOffset } from "./pdf-page-virtualizer";
 import { PdfReaderController, zoomAroundAnchor } from "./pdf-reader-controller";
 import type { PdfHistory, PdfPanel } from "./ui/ui-contracts";
 import type { PdfContinuousScrollAnchor } from "./virtualized-pdf-pages";
@@ -393,6 +394,15 @@ export function useReaderInteractionController({
     const stage = documentStageRef.current;
     if (stage && workspaceModeRef.current !== "note") rememberReaderScrollPosition(stage);
     if (mode === "note" && workspaceModeRef.current !== "note") pendingScrollRestoreRef.current = true;
+    if (stage
+      && mode !== "note"
+      && workspaceModeRef.current === "note"
+      && pendingScrollRestoreRef.current
+      && scrollPositionRef.current?.continuousAnchor) {
+      // Set this before the workspace class changes so no intermediate frame
+      // can expose the hidden pane's clamped scroll position.
+      stage.dataset.readerScrollRestoring = "true";
+    }
     if (mode === "note") {
       clearSelection();
       setPdfPanel(null);
@@ -419,7 +429,7 @@ export function useReaderInteractionController({
     setPdfPanel(null);
   }, [activeDocument?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (workspaceMode === "note" || !pendingScrollRestoreRef.current) return;
     const stage = documentStageRef.current;
     const saved = scrollPositionRef.current;
@@ -428,10 +438,28 @@ export function useReaderInteractionController({
     restoringScrollRef.current = true;
     let cancelled = false;
     let restoreFrame: number | null = null;
+    let revealFrame: number | null = null;
+    let stableRevealFrames = 0;
+    const revealDeadline = window.performance.now() + 750;
+    if (saved.continuousAnchor) stage.dataset.readerScrollRestoring = "true";
+    const restoreContinuousDomAnchor = () => {
+      const continuousAnchor = saved.continuousAnchor;
+      if (!continuousAnchor) return false;
+      const page = stage.querySelector<HTMLElement>(`[data-pdf-page="${continuousAnchor.page}"]`);
+      if (!page) return false;
+      const stageRect = stage.getBoundingClientRect();
+      const pageRect = page.getBoundingClientRect();
+      const targetOffset = pdfPageVirtualAnchorTargetOffset(continuousAnchor, pageRect.height);
+      stage.scrollTop += pageRect.top - stageRect.top - targetOffset;
+      return true;
+    };
     const restore = () => {
       if (cancelled) return;
       stage.scrollLeft = saved.left;
-      if (saved.continuousAnchor && restoreContinuousScrollAnchor(saved.continuousAnchor)) return;
+      if (saved.continuousAnchor) {
+        const restoredVirtualAnchor = restoreContinuousScrollAnchor(saved.continuousAnchor);
+        if (restoreContinuousDomAnchor() || restoredVirtualAnchor) return;
+      }
       const anchor = stage.querySelector<HTMLElement>(`[data-pdf-page="${saved.anchorPage}"]`);
       if (anchor) {
         const currentOffset = anchor.getBoundingClientRect().top - stage.getBoundingClientRect().top;
@@ -447,16 +475,36 @@ export function useReaderInteractionController({
         restore();
       });
     };
+    const continuousAnchorIsSettled = () => {
+      const continuousAnchor = saved.continuousAnchor;
+      if (!continuousAnchor) return true;
+      const page = stage.querySelector<HTMLElement>(`[data-pdf-page="${continuousAnchor.page}"]`);
+      const surface = page?.querySelector<HTMLElement>(".pdf-page-surface");
+      const canvas = surface?.querySelector<HTMLCanvasElement>(".pdf-page-canvas");
+      if (!page || !surface || !canvas || canvas.width <= 2 || canvas.height <= 2) return false;
+      const stageRect = stage.getBoundingClientRect();
+      const pageRect = page.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      const stageStyle = window.getComputedStyle(stage);
+      const horizontalPadding = Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight);
+      const expectedSurfaceWidth = Math.max(280, stage.clientWidth - horizontalPadding - 2) * sourceZoom;
+      const targetOffset = pdfPageVirtualAnchorTargetOffset(continuousAnchor, pageRect.height);
+      return surfaceRect.width > 2
+        && Math.abs(surfaceRect.width - expectedSurfaceWidth) <= 2.5
+        && Math.abs(pageRect.top - stageRect.top - targetOffset) <= 1.5;
+    };
     const finish = () => {
       if (cancelled) return;
       cancelled = true;
       observer.disconnect();
       if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
+      if (revealFrame !== null) window.cancelAnimationFrame(revealFrame);
       window.clearTimeout(timeout);
       stage.removeEventListener("wheel", finish);
       stage.removeEventListener("pointerdown", finish);
       stage.removeEventListener("touchstart", finish);
       window.removeEventListener("keydown", finish);
+      delete stage.dataset.readerScrollRestoring;
       releaseContinuousScrollAnchor();
       restoringScrollRef.current = false;
     };
@@ -464,6 +512,19 @@ export function useReaderInteractionController({
     observer.observe(stage.querySelector<HTMLElement>(".continuous-pages") ?? stage);
     restore();
     queueRestore();
+    if (saved.continuousAnchor) {
+      const revealWhenSettled = () => {
+        restore();
+        stableRevealFrames = continuousAnchorIsSettled() ? stableRevealFrames + 1 : 0;
+        if (stableRevealFrames >= 2 || window.performance.now() >= revealDeadline) {
+          revealFrame = null;
+          delete stage.dataset.readerScrollRestoring;
+          return;
+        }
+        revealFrame = window.requestAnimationFrame(revealWhenSettled);
+      };
+      revealFrame = window.requestAnimationFrame(revealWhenSettled);
+    }
     const timeout = window.setTimeout(finish, 3000);
     stage.addEventListener("wheel", finish, { passive: true });
     stage.addEventListener("pointerdown", finish);
