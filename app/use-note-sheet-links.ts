@@ -21,9 +21,10 @@ type Options = {
   stageRef: RefObject<HTMLDivElement | null>;
   openSheet: (sheetId: string) => Promise<void>;
   notify: (message: string) => void;
+  enableTextEditing: () => void;
 };
 
-export function useNoteSheetLinks({ state, activeSheetId, hydrating, stageRef, openSheet, notify }: Options) {
+export function useNoteSheetLinks({ state, activeSheetId, hydrating, stageRef, openSheet, notify, enableTextEditing }: Options) {
   const [session, setSession] = useState<LinkSession | null>(null);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const navigating = useRef(false);
@@ -61,12 +62,26 @@ export function useNoteSheetLinks({ state, activeSheetId, hydrating, stageRef, o
   }, [activeSheetId, hydrating, scrollTarget, stageRef, state.hydratingPageId, state.pageSheetContents]);
 
   const createLink = () => {
-    const target = noteRichTextController.activeEditorRef.current;
-    const range = noteRichTextController.captureCurrentSelection() ?? noteRichTextController.savedRangeRef.current;
-    if (hydrating || !target?.editor.isConnected || !target.editor.isContentEditable || !range || !richTextRangeBelongsToEditor(range, target.editor)) {
-      notify("Đặt con trỏ hoặc bôi chọn chữ trong nội dung ghi chú trước khi tạo liên kết");
-      return;
+    if (hydrating) { notify("Sheet đang tải, vui lòng thử lại sau giây lát"); return; }
+    const paper = stageRef.current?.querySelector<HTMLElement>(".note-paper.interactive");
+    if (!paper || paper.dataset.notePageId !== activeSheetId) return;
+    // Capture the DOM selection even when the editor controller has not been activated.
+    const selection = window.getSelection();
+    const currentRange = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    const editors = Array.from(paper.querySelectorAll<HTMLElement>("[data-rich-editor-id]"));
+    const previous = noteRichTextController.activeEditorRef.current;
+    const selectedEditor = currentRange && editors.find((editor) => richTextRangeBelongsToEditor(currentRange, editor));
+    const editor = selectedEditor || (previous && editors.includes(previous.editor) ? previous.editor : null)
+      || editors.find((editor) => editor.classList.contains("note-editor")) || editors.at(-1);
+    if (!editor) { notify("Thêm một khối văn bản vào sheet để chèn liên kết"); return; }
+    let range = selectedEditor ? currentRange : previous?.editor === editor ? noteRichTextController.savedRangeRef.current?.cloneRange() : null;
+    if (!range || !richTextRangeBelongsToEditor(range, editor)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
     }
+    enableTextEditing();
+    const target = { id: editor.dataset.richEditorId!, editor };
     const element = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer as Element : range.startContainer.parentElement;
     const anchor = element?.closest<HTMLAnchorElement>("a[href]") ?? null;
     const existingLink = anchor && target.editor.contains(anchor) && parseNoteSheetHref(anchor.getAttribute("href")) ? anchor : null;

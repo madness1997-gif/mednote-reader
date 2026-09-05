@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { useNotePaneControllers } from "../workspace-controllers-context";
 import { useNoteSheetLinks } from "../use-note-sheet-links";
 import { NoteSheetLinkDialog } from "./note-sheet-link-dialog";
@@ -19,6 +20,10 @@ export function NotePane({ viewModel }: { viewModel: NotePaneViewModel }) {
     stageRef: viewModel.stage.noteStageRef,
     openSheet: viewModel.openLinkedSheet,
     notify: noteCanvas.notify,
+    enableTextEditing: () => flushSync(() => {
+      noteCanvas.setActiveTool("text");
+      viewModel.toolbar.setNotePanel("text");
+    }),
   });
   return <section className="notes-pane" tabIndex={-1} aria-label="Note" onClickCapture={links.followLink} onKeyDownCapture={(event) => {
     if (event.target instanceof Element && event.target.closest("dialog")) return;
