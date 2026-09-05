@@ -1,0 +1,39 @@
+.notes-pane a[href^="#mednote-sheet="] {
+  color: #146cba;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.notes-pane .paper-dark a[href^="#mednote-sheet="] { color: #8bcdff; }
+.note-sheet-link-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #d5e1e6;
+  border-radius: 14px;
+  color: #26343a;
+  background: #fff;
+  box-shadow: 0 20px 70px #152b3940;
+  font: 14px/1.45 system-ui, sans-serif;
+}
+.note-sheet-link-dialog::backdrop { background: #142e4166; }
+.note-sheet-link-dialog form { padding: 20px; display: grid; gap: 12px; }
+.note-sheet-link-dialog header, .note-sheet-link-dialog footer { display: flex; align-items: center; gap: 10px; }
+.note-sheet-link-dialog h2 { flex: 1; margin: 0; font-size: 18px; }
+.note-sheet-link-dialog label { display: grid; gap: 6px; font-weight: 600; min-width: 0; }
+.note-sheet-link-dialog input, .note-sheet-link-dialog select {
+  box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px;
+  border: 1px solid #b9cbd5; border-radius: 7px; color: inherit; background: #fff; font: inherit; font-weight: 400;
+}
+.note-sheet-link-dialog select { padding: 4px; }
+.note-sheet-link-dialog option { padding: 7px 8px; }
+.note-sheet-link-dialog p { margin: 0; overflow-wrap: anywhere; }
+.note-link-hint, .note-link-result-count { color: #536a77; font-size: 12px; }
+.note-link-destination { padding: 8px 10px; background: #eef6fa; border-radius: 7px; }
+.note-sheet-link-dialog footer span { flex: 1; }
+.note-sheet-link-dialog footer button { padding: 8px 12px; border: 1px solid #c7d6de; border-radius: 7px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+.note-sheet-link-dialog footer .primary { background: #176f80; color: #fff; border-color: #176f80; }
+.note-sheet-link-dialog button:disabled { opacity: .5; cursor: default; }
+.note-sheet-link-dialog :focus-visible { outline: 2px solid #17869b; outline-offset: 2px; }
+@media (max-width: 480px) { .note-sheet-link-dialog form { padding: 14px; } }

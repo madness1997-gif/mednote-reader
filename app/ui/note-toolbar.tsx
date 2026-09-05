@@ -1,4 +1,4 @@
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, Link2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { NotePage } from "../note-runtime-adapter";
 import { useNotePaneControllers } from "../workspace-controllers-context";
@@ -18,7 +18,7 @@ export type NoteToolbarViewModel = {
   setNoteViewZoom: (zoom: number) => void;
 };
 
-export function NoteToolbar({ viewModel }: { viewModel: NoteToolbarViewModel }) {
+export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteToolbarViewModel; onCreateSheetLink: () => void }) {
   const { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets } = viewModel;
   const { layout, noteCanvas: canvas, noteEditor: editor } = useNotePaneControllers();
   const { activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
@@ -58,6 +58,7 @@ export function NoteToolbar({ viewModel }: { viewModel: NoteToolbarViewModel }) 
                 })}
                 <button className={`tool-button expandable sticker-primary-button ${textInsertPopover === "stickers" ? "active show-label" : ""}`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} />{textInsertPopover === "stickers" && <span className="tool-label">Sticker</span>}<ChevronDown className="tool-chevron" size={11} /></button>
               </div>
+              <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={onCreateSheetLink} aria-label="Liên kết đến sheet" title="Tạo hoặc sửa liên kết đến sheet (Ctrl+K)"><Link2 size={17} /><span>Liên kết</span></button>
               <span className="toolbar-spacer" />
               <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">
                 <span className="layer-control-label" title={selectedExcerpt ? "Đối tượng đang chọn" : "Chọn một khung chữ hoặc ảnh để sắp xếp lớp"}><Layers2 size={16} /><span>Lớp</span></span>

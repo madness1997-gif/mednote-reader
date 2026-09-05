@@ -424,6 +424,7 @@ export default function Home() {
     const pending = pendingNoteScrollRef.current;
     if (!pending || pending.sheetId !== activeNote.id) return;
     const restore = () => {
+      if (pendingNoteScrollRef.current !== pending) return;
       if (noteStageRef.current) noteStageRef.current.scrollTop = pending.scrollTop;
     };
     restore();
@@ -665,6 +666,10 @@ export default function Home() {
     stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
   };
   const notePaneViewModel: NotePaneViewModel = {
+    openLinkedSheet: async (sheetId) => {
+      pendingNoteScrollRef.current = null;
+      await noteStore.openSheet(sheetId);
+    },
     toolbar: { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets: NOTE_ZOOM_PRESETS },
     stage: { activateContinuousSheet, activeLogicalPage, activeNote, activeNoteHydrating, activeSheetIndex, continuousNotes, notePanel, noteSheetViewMode, noteStageRef, noteState, noteZoom, resolveExcerptSource },
   };

@@ -10,6 +10,7 @@ import "../app/note-zoom-fixes.css";
 import "../app/note-pdf-export.css";
 import "../app/note-symbol-library.css";
 import "../app/note-stickers.css";
+import "../app/ui/note-sheet-link.css";
 import { installDesktopLifecycle } from "../app/desktop-lifecycle";
 
 installDesktopLifecycle();
