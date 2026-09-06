@@ -1,3 +1,4 @@
+import { ordered } from "./note-domain";
 import { requestSelect, requestText } from "./mednote-dialog";
 import type { NoteStore } from "./note-store";
 import type { NoteSidebarNotebook, NoteSidebarPage, NoteSidebarSection, NoteSidebarSheet } from "./note-sidebar-model";
@@ -125,6 +126,37 @@ export class NoteSidebarController {
   }
 
   createSheet(page: NoteSidebarPage) { return this.perform(() => this.store.createSheet(page.id)); }
+
+  renameSheet(sheet: NoteSidebarSheet) {
+    return this.perform(async () => {
+      const title = await this.prompts.requestText({ title: "Đổi tên sheet", label: "Tên sheet", value: sheet.label });
+      if (title?.trim()) await this.store.renameSheet(sheet.id, title);
+    });
+  }
+
+  transferSheet(sheet: NoteSidebarSheet) {
+    return this.perform(async () => {
+      const structure = this.store.getSnapshot().structure;
+      if (!structure) return;
+      const pages = structure.pages.filter((page) => page.id !== sheet.pageId);
+      const sections = structure.sections.filter((section) => pages.some((page) => page.sectionId === section.id));
+      const notebooks = ordered(structure.notebooks.filter((notebook) => sections.some((section) => section.notebookId === notebook.id)));
+      if (!notebooks.length) return this.prompts.alert("Hãy tạo một Page khác trước khi di chuyển sheet.");
+      const notebookId = await this.prompts.requestSelect({ title: "Di chuyển sheet", label: "Notebook đích", value: notebooks[0].id, options: notebooks.map((item) => ({ value: item.id, label: item.title })) });
+      if (!notebookId) return;
+      const sectionOptions = ordered(sections.filter((section) => section.notebookId === notebookId));
+      if (!sectionOptions.length) return;
+      const sectionId = await this.prompts.requestSelect({ title: "Di chuyển sheet", label: "Section đích", value: sectionOptions[0].id, options: sectionOptions.map((item) => ({ value: item.id, label: item.title })) });
+      if (!sectionId) return;
+      const pageOptions = ordered(pages.filter((page) => page.sectionId === sectionId));
+      if (!pageOptions.length) return;
+      const pageId = await this.prompts.requestSelect({ title: "Di chuyển sheet", label: "Page đích", value: pageOptions[0].id, options: pageOptions.map((item) => ({ value: item.id, label: item.title })), confirmLabel: "Di chuyển" });
+      if (!pageOptions.some((page) => page.id === pageId)) return;
+      const current = this.store.getSnapshot().structure;
+      await this.store.moveSheet(sheet.id, pageId!, current?.sheets.filter((item) => item.pageId === pageId).length || 0);
+      await this.store.openSheet(sheet.id);
+    });
+  }
 
   moveSheet(sheet: NoteSidebarSheet, nextOrder: number) {
     return this.perform(() => this.store.moveSheet(sheet.id, sheet.pageId, nextOrder));

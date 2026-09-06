@@ -358,6 +358,8 @@ export class NoteStore {
   renameSection(id: string, title: string) { return this.mutation(() => this.commands.renameSection(id, title)); }
   renamePage(id: string, title: string) { return this.mutation(() => this.commands.renamePage(id, title)); }
   movePage(id: string, sectionId: string, order: number) { return this.mutation(() => this.commands.movePage(id, sectionId, order)); }
+  renameSheet(id: string, title: string) { return this.mutation(() => this.commands.renameSheet(id, title)); }
+
   moveSheet(id: string, pageId: string, order: number) { return this.mutation(() => this.commands.moveSheet(id, pageId, order)); }
   deleteNotebook(id: string, replacementContent?: SheetContent) { return this.mutation(() => this.commands.deleteNotebook(id, replacementContent), true); }
   deleteSection(id: string) { return this.mutation(() => this.commands.deleteSection(id), true); }

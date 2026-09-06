@@ -51,7 +51,7 @@ export function projectNoteSidebar(structure: NoteStructure): NoteSidebarModel {
       id: sheet.id,
       pageId: sheet.pageId,
       order: sheet.order,
-      label: `Tờ ${sheet.order + 1}`,
+      label: sheet.title?.trim() || `Tờ ${sheet.order + 1}`,
       active: sheet.id === structure.active.activeSheetId,
     });
     sheetsByPageId.set(sheet.pageId, siblings);

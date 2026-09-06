@@ -28,6 +28,7 @@ export type Page = {
 export type SheetContent = Record<string, unknown>;
 
 export type Sheet = {
+  title?: string;
   id: EntityId;
   pageId: EntityId;
   order: number;

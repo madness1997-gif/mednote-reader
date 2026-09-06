@@ -38,7 +38,7 @@ export function noteSheetLinkTargets(structure: NoteStructure): NoteSheetLinkTar
     for (const section of ordered(sections.get(notebook.id) ?? [])) {
       for (const page of ordered(pages.get(section.id) ?? [])) {
         ordered(sheets.get(page.id) ?? []).forEach((sheet, index) => {
-          const label = `${page.title} · Tờ ${index + 1}`;
+          const label = `${page.title} · ${sheet.title?.trim() || `Tờ ${index + 1}`}`;
           targets.push({ sheetId: sheet.id, label, path: `${notebook.title} / ${section.title} / ${label}` });
         });
       }

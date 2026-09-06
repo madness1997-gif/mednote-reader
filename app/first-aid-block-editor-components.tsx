@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { noteRichTextController } from "./note-rich-text-controller";
 import { RichTextEditor } from "./rich-text-editor";
 import { FirstAidHeadingInput } from "./first-aid-heading-input";
 import {
@@ -325,7 +326,25 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
 
   if (block.type === "text") return <div className="fa-text-block">
     <div className="fa-text-style-switch">{(["paragraph", "bullets", "numbered"] as TextStyle[]).map((style) =>
-      <button type="button" key={style} className={block.textStyle === style ? "selected" : ""} disabled={!canEdit} onClick={() => updateBlock(block.id, { textStyle: style, textHtml: richBlockHtml(undefined, block.text, style) })}>{style === "paragraph" ? "Đoạn" : style === "bullets" ? "• Danh sách" : "1. Đánh số"}</button>)}</div>
+      <button type="button" key={style} disabled={!canEdit} onPointerDown={(event) => event.preventDefault()} onClick={(event) => {
+        const editor = event.currentTarget.closest(".fa-text-block")?.querySelector<HTMLElement>("[data-rich-editor-id]");
+        if (!editor) return;
+        const controller = noteRichTextController;
+        const range = controller.captureRangeFor(editor) ?? (controller.activeEditorRef.current?.editor === editor ? controller.savedRangeRef.current : null);
+        controller.activate(editor.dataset.richEditorId!, editor, range);
+        const restored = controller.restoreSelection();
+        if (!restored) return;
+        const node = restored.range.startContainer;
+        const element = node instanceof Element ? node : node.parentElement;
+        const list = element?.closest("ul,ol");
+        const kind = list && editor.contains(list) ? list.tagName : null;
+        if (style === "paragraph") {
+          if (kind) controller.execCommand(kind === "OL" ? "insertOrderedList" : "insertUnorderedList", false);
+        } else {
+          const desired = style === "numbered" ? "OL" : "UL";
+          if (kind !== desired) controller.execCommand(desired === "OL" ? "insertOrderedList" : "insertUnorderedList", false);
+        }
+      }}>{style === "paragraph" ? "Đoạn" : style === "bullets" ? "• Danh sách" : "1. Đánh số"}</button>)}</div>
     {renderRichField("text", "textHtml", "fa-content-input", "Đoạn hoặc danh sách", { placeholder: "Nhập đoạn văn hoặc dùng Bullet / Đánh số trên thanh Type…", textStyle: block.textStyle })}
   </div>;
 

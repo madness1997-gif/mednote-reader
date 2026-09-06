@@ -57,6 +57,7 @@ export interface NoteRepository extends DocumentRepository {
   createSheet(input: CreateSheetInput): Promise<ActiveNoteState>;
   renameNotebook(id: string, title: string): Promise<void>;
   renameSection(id: string, title: string): Promise<void>;
+  renameSheet(id: string, title: string): Promise<void>;
   renamePage(id: string, title: string): Promise<void>;
   movePage(id: string, sectionId: string, order: number): Promise<void>;
   moveSheet(id: string, pageId: string, order: number): Promise<void>;

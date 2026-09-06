@@ -341,58 +341,45 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
     finishTextCommand(target, `Đã đặt giãn dòng ${lineHeight}`);
   }, [finishTextCommand, requireSelection]);
 
-  const applyBulletStyle = useCallback((bulletStyle: BulletStyle) => {
+  const applyListStyle = useCallback((kind: "ul" | "ol", style: string | null) => {
     const target = requireSelection("Bấm vào đoạn văn trước khi tạo danh sách");
     if (!target) return;
-    let selection = window.getSelection();
-    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    let lists = range ? [closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor)].filter(Boolean) as HTMLUListElement[] : [];
-    if (bulletStyle === "none" && lists.length) {
-      noteRichTextController.execCommand("insertUnorderedList", false);
-      finishTextCommand(target, "Đã bỏ dấu đầu dòng");
-      setTextInsertPopover(null);
-      return;
+    const range = noteRichTextController.captureCurrentSelection();
+    const nearest = range ? closestWithin<HTMLElement>(range.startContainer, "ul,ol", target.editor) : null;
+    const command = kind === "ul" ? "insertUnorderedList" : "insertOrderedList";
+    if (style === null) {
+      if (nearest?.tagName.toLowerCase() === kind) noteRichTextController.execCommand(command, false);
+    } else {
+      if (nearest?.tagName.toLowerCase() !== kind) noteRichTextController.execCommand(command, false);
+      const current = noteRichTextController.captureCurrentSelection();
+      // Resolve the innermost list for each selected text node, never its ancestors.
+      const lists = new Set<HTMLElement>();
+      const add = (node: Node) => {
+        const list = closestWithin<HTMLElement>(node, "ul,ol", target.editor);
+        if (list?.tagName.toLowerCase() === kind) lists.add(list);
+      };
+      if (current) {
+        add(current.startContainer);
+        if (!current.collapsed) {
+          const walker = document.createTreeWalker(target.editor, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            if (current.intersectsNode(walker.currentNode)) add(walker.currentNode);
+          }
+        }
+      }
+      lists.forEach((list) => { list.style.listStyleType = style; });
     }
-    if (bulletStyle === "none") {
-      setTextInsertPopover(null);
-      return;
-    }
-    if (!lists.length) {
-      noteRichTextController.execCommand("insertUnorderedList", false);
-      selection = window.getSelection();
-      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const list = range ? closestWithin<HTMLUListElement>(range.startContainer, "ul", target.editor) : null;
-      if (list) lists = [list];
-    }
-    if (range) target.editor.querySelectorAll<HTMLUListElement>("ul").forEach((list) => {
-      try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* Detached DOM is ignored. */ }
-    });
-    const listStyleType = { disc: "disc", circle: "circle", square: "square", diamond: '"◆  "', arrow: '"➤  "', check: '"✓  "', dash: '"–  "', none: "none" }[bulletStyle];
-    lists.forEach((list) => { list.style.listStyleType = listStyleType; });
-    finishTextCommand(target, "Đã đổi kiểu dấu đầu dòng");
+    finishTextCommand(target, "Đã cập nhật danh sách tại cấp đang chọn");
     setTextInsertPopover(null);
   }, [finishTextCommand, requireSelection]);
 
-  const applyNumberingStyle = useCallback((numberingStyle: NumberingStyle) => {
-    const target = requireSelection("Bấm vào đoạn văn trước khi tạo danh sách");
-    if (!target) return;
-    let selection = window.getSelection();
-    let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    let lists = range ? [closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor)].filter(Boolean) as HTMLOListElement[] : [];
-    if (!lists.length) {
-      noteRichTextController.execCommand("insertOrderedList", false);
-      selection = window.getSelection();
-      range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const list = range ? closestWithin<HTMLOListElement>(range.startContainer, "ol", target.editor) : null;
-      if (list) lists = [list];
-    }
-    if (range) target.editor.querySelectorAll<HTMLOListElement>("ol").forEach((list) => {
-      try { if (range!.intersectsNode(list) && !lists.includes(list)) lists.push(list); } catch { /* Detached DOM is ignored. */ }
-    });
-    lists.forEach((list) => { list.style.listStyleType = numberingStyle; });
-    finishTextCommand(target, "Đã đổi kiểu đánh số");
-    setTextInsertPopover(null);
-  }, [finishTextCommand, requireSelection]);
+  const applyBulletStyle = useCallback((style: BulletStyle) => {
+    applyListStyle("ul", { disc: "disc", circle: "circle", square: "square", diamond: '\"◆  \"', arrow: '\"➤  \"', check: '\"✓  \"', dash: '\"–  \"', none: null }[style]);
+  }, [applyListStyle]);
+
+  const applyNumberingStyle = useCallback((style: NumberingStyle) => {
+    applyListStyle("ol", style);
+  }, [applyListStyle]);
 
   const changeListLevel = useCallback((direction: "increase" | "decrease") => {
     const target = requireSelection("Bấm vào một mục trong danh sách trước");

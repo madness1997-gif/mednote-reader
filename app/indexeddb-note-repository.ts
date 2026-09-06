@@ -592,6 +592,15 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
 
   renameNotebook(id: string, title: string) { return this.renameRecord<Notebook>(V6_KEYS.notebook, id, title, "Notebook"); }
   renameSection(id: string, title: string) { return this.renameRecord<Section>(V6_KEYS.section, id, title, "Section"); }
+  renameSheet(id: string, title: string) {
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const record = await this.requireRecord<Sheet>(store, `${V6_KEYS.sheet}${id}`, `Sheet ${id}`);
+      store.put({ ...record, title: cleanTitle(title, record.title || `Tờ ${record.order + 1}`) }, `${V6_KEYS.sheet}${id}`);
+      store.put(touchMeta(meta), V6_KEYS.meta);
+    }));
+  }
+
   renamePage(id: string, title: string) {
     return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
       const meta = await this.requireMeta(store);
@@ -632,14 +641,20 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       await this.requireRecord<Page>(store, `${V6_KEYS.page}${pageId}`, `Page ${pageId}`);
       const sheets = await this.recordsByIds<Sheet>(store, meta.sheetIds, V6_KEYS.sheet);
       const oldSiblings = sheets.filter((record) => record.pageId === moving.pageId);
-      if (oldSiblings.length === 1 && moving.pageId !== pageId) throw new RepositoryMutationError("Không thể chuyển Sheet duy nhất vì Page nguồn phải luôn có ít nhất một Sheet");
+      let sheetIds = meta.sheetIds;
+      if (oldSiblings.length === 1 && moving.pageId !== pageId) {
+        const replacementId = idOf("sheet");
+        store.put({ id: replacementId, pageId: moving.pageId, order: 0 }, `${V6_KEYS.sheet}${replacementId}`);
+        store.put({}, `${V6_KEYS.sheetContent}${replacementId}`);
+        sheetIds = [...sheetIds, replacementId];
+      }
       this.reorderMove(sheets, moving, (record) => record.pageId, pageId, order, (record, parentId, nextOrder) => ({ ...record, pageId: parentId, order: nextOrder }))
         .forEach((record) => store.put(record, `${V6_KEYS.sheet}${record.id}`));
-      let nextMeta = meta;
+      let nextMeta = { ...meta, sheetIds };
       if (meta.active.activeSheetId === id) {
         const page = await this.requireRecord<Page>(store, `${V6_KEYS.page}${pageId}`, `Page ${pageId}`);
         const section = await this.requireRecord<Section>(store, `${V6_KEYS.section}${page.sectionId}`, `Section ${page.sectionId}`);
-        nextMeta = { ...meta, active: { activeNotebookId: section.notebookId, activeSectionId: section.id, activePageId: page.id, activeSheetId: id } };
+        nextMeta = { ...nextMeta, active: { activeNotebookId: section.notebookId, activeSectionId: section.id, activePageId: page.id, activeSheetId: id } };
       }
       store.put(touchMeta(nextMeta), V6_KEYS.meta);
     }));

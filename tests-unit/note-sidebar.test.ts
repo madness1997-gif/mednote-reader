@@ -112,3 +112,43 @@ test("new Notebook, Page and Sheet content defaults to First Aid", async () => {
     await deleteNoteRepositoryDatabase(dbName);
   }
 });
+
+test("sheet names and links survive transfer to another notebook, including the last source sheet", async () => {
+  const { dbName, repository, store, controller } = await harness(["Phác đồ insulin"]);
+  try {
+    let model = projectNoteSidebar(store.getSnapshot().structure!);
+    await controller.renameSheet(model.pages[0].sheets[0]);
+    assert.equal(projectNoteSidebar(store.getSnapshot().structure!).pages[0].sheets[0].label, "Phác đồ insulin");
+    await store.createNotebook("Sổ đích");
+    const notebook = store.getSnapshot().structure!.notebooks.find((item) => item.title === "Sổ đích")!;
+    const structure = store.getSnapshot().structure!;
+    const targetSection = structure.sections.find((section) => section.notebookId === notebook.id)!;
+    const targetPage = structure.pages.find((page) => page.sectionId === targetSection.id)!;
+    await store.openSheet("sheet-a1");
+    const html = '<a href="#mednote-sheet=sheet-a1">Liên kết cũ</a>';
+    store.patchActiveSheetContent({ bodyHtml: html });
+    const answers = [notebook.id, targetSection.id, targetPage.id];
+    const mover = new NoteSidebarController(store, {
+      requestText: async () => null, requestSelect: async () => answers.shift() ?? null,
+      confirm: () => true, alert: () => { throw new Error("Unexpected alert"); },
+    });
+    model = projectNoteSidebar(store.getSnapshot().structure!);
+    await mover.transferSheet(model.pages[0].sheets[0]);
+    assert.equal(store.activeState()?.activeNotebookId, notebook.id);
+    assert.equal(store.activeState()?.activeSheetId, "sheet-a1");
+    assert.equal((await repository.loadSheetContent("sheet-a1"))?.bodyHtml, html);
+    await store.moveSheet("sheet-a2", targetPage.id, 2);
+    const result = (await repository.loadNoteStructure())!;
+    assert.equal(result.sheets.find((sheet) => sheet.id === "sheet-a1")?.title, "Phác đồ insulin");
+    const remaining = result.sheets.filter((sheet) => sheet.pageId === "page-a");
+    assert.equal(remaining.length, 1);
+    assert.notEqual(remaining[0].id, "sheet-a2");
+    assert.deepEqual(await repository.loadSheetContent(remaining[0].id), {});
+    const reopened = new NoteStore(repository);
+    await reopened.initialize({ skipMigration: true });
+    assert.equal(projectNoteSidebar(reopened.getSnapshot().structure!).pages[0].sheets.find((sheet) => sheet.id === "sheet-a1")?.label, "Phác đồ insulin");
+  } finally {
+    await store.flush();
+    await deleteNoteRepositoryDatabase(dbName);
+  }
+});

@@ -112,6 +112,13 @@ export class NoteCommands {
     });
   }
 
+  renameSheet(id: string, title: string) {
+    return this.enqueue(async () => {
+      await this.repository.renameSheet(id, title);
+      return this.committedResult();
+    });
+  }
+
   renamePage(id: string, title: string) {
     return this.enqueue(async () => {
       await this.repository.renamePage(id, title);
