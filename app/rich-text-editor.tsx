@@ -132,6 +132,20 @@ export function RichTextEditor({ editorId, className, html, editable, placeholde
       }}
       onKeyDown={(event) => {
         if (singleLine && event.key === "Enter") event.preventDefault();
+        if (!editable || singleLine || composingRef.current || event.nativeEvent.isComposing) return;
+        const editor = editorRef.current;
+        const range = editor && noteRichTextController.captureRangeFor(editor);
+        const node = range?.startContainer;
+        const element = node instanceof Element ? node : node?.parentElement;
+        const item = element?.closest<HTMLLIElement>("li");
+        if (!editor || !range || !item || !editor.contains(item)) return;
+        const emptyItem = !(item.textContent ?? "").replace(/[\s\u200b]/g, "") && !item.querySelector("img,ul,ol,table");
+        if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && range.collapsed && emptyItem)) {
+          event.preventDefault();
+          noteRichTextController.activate(editorId, editor, range);
+          noteRichTextController.changeListLevel(event.key === "Tab" && !event.shiftKey ? "increase" : "decrease");
+        }
+
       }}
       onCompositionStart={() => {
         if (compositionCommitFrameRef.current !== null) {

@@ -63,3 +63,34 @@ test('toolbar changes only the nested list kind and numbering style', async ({ p
   await expect(editor.locator('ol ol i')).toHaveText('Con');
   await expect(editor.locator('b')).toHaveText('Cha');
 });
+
+test('outdent returns a bullet item to its numbered parent', async ({ page }) => {
+  const editor = page.getByRole('textbox', { name: 'Đoạn hoặc danh sách', exact: true });
+  await editor.locator('i').click();
+  await page.getByRole('button', { name: '• Danh sách', exact: true }).click();
+  await page.getByRole('button', { name: 'Giảm một cấp danh sách', exact: true }).click();
+  await expect(editor.locator(':scope > ol > li > i')).toHaveText('Con');
+});
+
+for (const parentKind of ['ol', 'ul']) {
+  for (const key of ['Shift+Tab', 'Enter']) {
+    test(`return to ${parentKind} parent using ${key}`, async ({ page }) => {
+      const editor = page.getByRole('textbox', { name: 'Đoạn hoặc danh sách', exact: true });
+      await editor.locator('i').click();
+      await editor.evaluate((element, parentKind) => {
+        const child = parentKind === 'ol' ? 'ul' : 'ol';
+        element.innerHTML = `<${parentKind} style="list-style-type:${parentKind === 'ol' ? 'upper-roman' : 'square'}"><li>Cha<${child}><li><i>Con</i></li></${child}></li><li>Tiếp</li></${parentKind}>`;
+        element.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      }, parentKind);
+      await editor.locator('i').click();
+      await page.keyboard.press('End');
+      if (key === 'Enter') await page.keyboard.press('Enter');
+      await page.keyboard.press(key);
+      await page.keyboard.type('Returned');
+      const item = editor.locator(`:scope > ${parentKind} > li`).filter({ hasText: key === 'Enter' ? /^Returned$/ : /^ConReturned$/ });
+      await expect(item).toHaveCount(1);
+      await expect(item).toHaveCSS('list-style-type', parentKind === 'ol' ? 'upper-roman' : 'square');
+      await expect(editor.locator('li > li')).toHaveCount(0);
+    });
+  }
+}

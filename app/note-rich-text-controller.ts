@@ -64,6 +64,52 @@ export class NoteRichTextController {
     return result;
   }
 
+  changeListLevel(direction: "increase" | "decrease") {
+    const restored = this.restoreSelection();
+    if (!restored) return false;
+    const node = restored.range.startContainer;
+    const element = node instanceof Element ? node : node.parentElement;
+    const list = element?.closest<HTMLElement>("ul,ol");
+    if (!list || !restored.editor.contains(list)) return false;
+    const parent = list.parentElement?.closest<HTMLElement>("ul,ol");
+    if (direction === "decrease" && parent && restored.editor.contains(parent)) {
+      // Chromium otherwise keeps the child marker when outdenting a mixed list.
+      const parentStyle = parent.style.listStyleType;
+      if (list.tagName !== parent.tagName) {
+        this.execCommand(parent.tagName === "OL" ? "insertOrderedList" : "insertUnorderedList");
+      }
+      const range = this.captureCurrentSelection();
+      const start = range?.startContainer;
+      const current = (start instanceof Element ? start : start?.parentElement)?.closest<HTMLElement>("ul,ol");
+      if (current && current !== parent) current.style.listStyleType = parentStyle;
+    }
+    const result = this.execCommand(direction === "increase" ? "indent" : "outdent");
+    if (direction === "decrease" && parent && restored.editor.contains(parent)) {
+      // Chromium can leave <li> directly inside another <li> after outdent.
+      // Lift those items into the parent list so numbering continues normally.
+      const selected = this.captureCurrentSelection();
+      const start = selected && { node: selected.startContainer, offset: selected.startOffset };
+      const end = selected && { node: selected.endContainer, offset: selected.endOffset };
+      Array.from(restored.editor.querySelectorAll<HTMLLIElement>("li > li")).reverse().forEach((item) => {
+        const owner = item.parentElement!;
+        const list = owner.parentElement;
+        if (list?.matches("ol,ul")) {
+          list.insertBefore(item, owner.nextSibling);
+          item.style.removeProperty("list-style-type");
+        }
+      });
+      if (start && end && start.node.isConnected && end.node.isConnected) {
+        const range = document.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+        this.activate(restored.id, restored.editor, range);
+        this.restoreSelection();
+      }
+      dispatchInput(restored.editor);
+    }
+    return result;
+  }
+
   insertText(value: string) {
     const restored = this.restoreSelection();
     if (!restored) return false;

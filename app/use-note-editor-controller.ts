@@ -391,7 +391,7 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
       notify("Nút này chỉ dùng cho bullet hoặc numbering");
       return;
     }
-    noteRichTextController.execCommand(direction === "increase" ? "indent" : "outdent", false);
+    noteRichTextController.changeListLevel(direction);
     finishTextCommand(target, direction === "increase" ? "Đã tăng một cấp danh sách" : "Đã giảm một cấp danh sách");
   }, [finishTextCommand, notify, requireSelection]);
 
