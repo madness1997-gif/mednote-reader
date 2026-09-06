@@ -58,7 +58,7 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
                 })}
                 <button className={`tool-button expandable sticker-primary-button ${textInsertPopover === "stickers" ? "active show-label" : ""}`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} />{textInsertPopover === "stickers" && <span className="tool-label">Sticker</span>}<ChevronDown className="tool-chevron" size={11} /></button>
               </div>
-              <button className="word-command-button" onPointerDown={(event) => event.preventDefault()} onClick={onCreateSheetLink} aria-label="Liên kết đến sheet" title="Tạo hoặc sửa liên kết đến sheet (Ctrl+K)"><Link2 size={17} /><span>Liên kết</span></button>
+              <button className="icon-button compact" onPointerDown={(event) => event.preventDefault()} onClick={onCreateSheetLink} aria-label="Liên kết đến sheet" title="Tạo hoặc sửa liên kết đến sheet (Ctrl+K)"><Link2 size={17} /></button>
               <span className="toolbar-spacer" />
               <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">
                 <span className="layer-control-label" title={selectedExcerpt ? "Đối tượng đang chọn" : "Chọn một khung chữ hoặc ảnh để sắp xếp lớp"}><Layers2 size={16} /><span>Lớp</span></span>
