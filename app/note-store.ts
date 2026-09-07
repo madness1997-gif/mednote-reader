@@ -1,3 +1,4 @@
+import type { NotebookCover } from "./notebook-cover";
 import { useSyncExternalStore } from "react";
 import { IndexedDbNoteRepository } from "./indexeddb-note-repository";
 import {
@@ -353,6 +354,8 @@ export class NoteStore {
   createSheet(pageId: string, content?: SheetContent) {
     return this.mutation(() => this.commands.createSheet(pageId, content), true);
   }
+
+  updateNotebookCover(id: string, cover: NotebookCover) { return this.mutation(() => this.commands.updateNotebookCover(id, cover)); }
 
   renameNotebook(id: string, title: string) { return this.mutation(() => this.commands.renameNotebook(id, title)); }
   renameSection(id: string, title: string) { return this.mutation(() => this.commands.renameSection(id, title)); }

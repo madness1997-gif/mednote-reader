@@ -706,6 +706,7 @@ export default function Home() {
           ready={ready}
           onClose={() => setLibraryOpen(false)}
           onOpenNotebook={openLibraryNotebook}
+          onSaveCover={(id, cover) => noteStore.updateNotebookCover(id, cover)}
         />
       )}
 

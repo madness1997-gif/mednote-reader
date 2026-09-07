@@ -1,3 +1,4 @@
+import type { NotebookCover } from "./notebook-cover";
 import type { NoteRepository } from "./note-repository";
 import { noteContextForSheet } from "./note-domain";
 import { createDefaultSheetContent } from "./note-runtime-adapter";
@@ -88,6 +89,13 @@ export class NoteCommands {
   createSheet(pageId: string, content?: SheetContent) {
     return this.enqueue(async () => {
       await this.repository.createSheet({ pageId, content: content ?? createDefaultSheetContent() });
+      return this.committedResult();
+    });
+  }
+
+  updateNotebookCover(id: string, cover: NotebookCover) {
+    return this.enqueue(async () => {
+      await this.repository.updateNotebookCover(id, cover);
       return this.committedResult();
     });
   }

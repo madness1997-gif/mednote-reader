@@ -1,3 +1,4 @@
+import { normalizeNotebookCover, type NotebookCover } from "./notebook-cover";
 import { assertDocumentGraph, type DocumentGraph, type DocumentLinkRelation, type NoteDocumentLink } from "./document-domain";
 import type { DocumentRepository, SaveDocumentWorkspaceInput } from "./document-repository";
 import { assertNoteStructure, assertSheetContents, hydrateSheet, noteContextForSheet, ordered, type ActiveNoteState, type Notebook, type NoteStructure, type Page, type Section, type Sheet, type SheetContent, type SheetContentMap } from "./note-domain";
@@ -587,6 +588,16 @@ export class IndexedDbNoteRepository implements NoteRepository, DocumentReposito
       store.put(clone(input.content || {}), `${V6_KEYS.sheetContent}${id}`);
       store.put(touchMeta({ ...meta, sheetIds: [...meta.sheetIds, id], active }), V6_KEYS.meta);
       return active;
+    }));
+  }
+
+  updateNotebookCover(id: string, cover: NotebookCover) {
+    const normalized = normalizeNotebookCover(cover, id);
+    return this.enqueue(() => this.transaction("readwrite", async ({ store }) => {
+      const meta = await this.requireMeta(store);
+      const record = await this.requireRecord<Notebook>(store, `${V6_KEYS.notebook}${id}`, `Notebook ${id}`);
+      store.put({ ...record, cover: normalized }, `${V6_KEYS.notebook}${id}`);
+      store.put(touchMeta(meta), V6_KEYS.meta);
     }));
   }
 

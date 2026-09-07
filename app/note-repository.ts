@@ -1,3 +1,4 @@
+import type { NotebookCover } from "./notebook-cover";
 import type { DocumentGraph } from "./document-domain";
 import type { DocumentRepository } from "./document-repository";
 import type { ActiveNoteState, HydratedSheet, NoteStructure, SheetContent, SheetContentMap } from "./note-domain";
@@ -55,6 +56,7 @@ export interface NoteRepository extends DocumentRepository {
   createSection(input: CreateSectionInput): Promise<string>;
   createPage(input: CreatePageInput): Promise<ActiveNoteState>;
   createSheet(input: CreateSheetInput): Promise<ActiveNoteState>;
+  updateNotebookCover(id: string, cover: NotebookCover): Promise<void>;
   renameNotebook(id: string, title: string): Promise<void>;
   renameSection(id: string, title: string): Promise<void>;
   renameSheet(id: string, title: string): Promise<void>;

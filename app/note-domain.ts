@@ -1,3 +1,4 @@
+import type { NotebookCover } from "./notebook-cover";
 export type EntityId = string;
 
 export type Workspace = {
@@ -6,6 +7,7 @@ export type Workspace = {
 };
 
 export type Notebook = {
+  cover?: NotebookCover;
   id: EntityId;
   title: string;
   order: number;

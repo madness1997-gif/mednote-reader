@@ -5,7 +5,8 @@ import {
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { NoteSidebarController } from "./note-sidebar-controller";
 import type { NoteSidebarModel } from "./note-sidebar-model";
-import { notebookIconStyle } from "./ui/notebook-color-style";
+import { NotebookCover } from "./ui/notebook-cover";
+import { NotebookCoverEditor } from "./ui/notebook-cover-editor";
 import "./note-sidebar.css";
 
 type NoteSidebarProps = {
@@ -30,6 +31,7 @@ function textError(error: unknown) {
 }
 
 export function NoteSidebar({ status, model, controller, busy, hydratingSheetId, error, onRequestClose }: NoteSidebarProps) {
+  const [coverOpen, setCoverOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
@@ -66,8 +68,9 @@ export function NoteSidebar({ status, model, controller, busy, hydratingSheetId,
 
   return (
     <div className="note-sidebar" data-testid="note-sidebar" aria-label="Điều hướng ghi chú" aria-busy={busy}>
+      {coverOpen && activeNotebook && <NotebookCoverEditor key={activeNotebook.id} notebook={activeNotebook} onSave={(id, cover) => controller.updateNotebookCover(id, cover)} onClose={() => setCoverOpen(false)} />}
       <header className="note-sidebar-bookbar">
-        <span className="note-sidebar-bookmark" style={notebookIconStyle(model.activeNotebookId)}><NotebookTabs size={16} /></span>
+        <button className="sidebar-cover-button" aria-label="Đổi bìa notebook" disabled={busy} onClick={() => setCoverOpen(true)}>{activeNotebook && <NotebookCover id={activeNotebook.id} title={activeNotebook.title} cover={activeNotebook.cover} small />}</button>
         <select value={model.activeNotebookId} onChange={(event) => run(() => controller.openNotebook(event.target.value))} aria-label="Notebook" disabled={busy}>
           {model.notebooks.map((notebook) => <option value={notebook.id} key={notebook.id}>{notebook.title}</option>)}
         </select>
@@ -76,6 +79,7 @@ export function NoteSidebar({ status, model, controller, busy, hydratingSheetId,
         <button type="button" className="note-sidebar-collapse-button" onClick={onRequestClose} title="Ẩn thanh điều hướng Note" aria-label="Ẩn thanh điều hướng Note"><span>Ẩn</span><ChevronRight size={17} /></button>
         {menuOpen && activeNotebook && <div className="note-sidebar-menu">
           <button type="button" onClick={() => { setMenuOpen(false); run(() => controller.renameNotebook(activeNotebook)); }}><Pencil size={14} />Đổi tên Notebook</button>
+          <button type="button" onClick={() => { setMenuOpen(false); setCoverOpen(true); }}><NotebookTabs size={14} />Đổi bìa</button>
           <button type="button" className="danger" onClick={() => { setMenuOpen(false); run(() => controller.deleteNotebook(activeNotebook)); }}><Trash2 size={14} />Xóa Notebook</button>
         </div>}
       </header>

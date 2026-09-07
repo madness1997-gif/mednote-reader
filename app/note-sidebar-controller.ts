@@ -35,6 +35,8 @@ export class NoteSidebarController {
     }
   }
 
+  updateNotebookCover(id: string, cover: import("./notebook-cover").NotebookCover) { return this.store.updateNotebookCover(id, cover); }
+
   openNotebook(id: string) { return this.perform(() => this.store.openNotebook(id)); }
   openSection(id: string) { return this.perform(() => this.store.openSection(id)); }
   openPage(id: string) { return this.perform(() => this.store.openPage(id)); }

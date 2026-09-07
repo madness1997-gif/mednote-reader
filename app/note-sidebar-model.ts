@@ -1,6 +1,7 @@
 import { ordered, type NoteStructure } from "./note-domain";
 
 export type NoteSidebarNotebook = {
+  cover?: import("./notebook-cover").NotebookCover;
   id: string;
   title: string;
 };
@@ -83,7 +84,7 @@ export function projectNoteSidebar(structure: NoteStructure): NoteSidebarModel {
     sectionsByNotebookId.set(section.notebookId, siblings);
   });
 
-  const notebooks = ordered(structure.notebooks).map(({ id, title }) => ({ id, title }));
+  const notebooks = ordered(structure.notebooks).map(({ id, title, cover }) => ({ id, title, cover }));
   const activeNotebook = notebooks.find(({ id }) => id === structure.active.activeNotebookId) || notebooks[0];
   const sections = activeNotebook ? sectionsByNotebookId.get(activeNotebook.id) || [] : [];
   const activeSection = sections.find(({ id }) => id === structure.active.activeSectionId) || sections[0];

@@ -1,8 +1,10 @@
-import { Check, FileText, FolderOpen, NotebookTabs, Pencil, Trash2, X } from "lucide-react";
+import { Check, FileText, FolderOpen, LayoutGrid, List, Palette, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { LibraryProjection } from "../library-projection";
 import type { DocumentWorkspaceController } from "../use-document-workspace-controller";
-import { notebookIconStyle } from "./notebook-color-style";
+import { NotebookCover } from "./notebook-cover";
+import { NotebookCoverEditor } from "./notebook-cover-editor";
+import type { NotebookCover as Cover } from "../notebook-cover";
 import "../library-panel.css";
 
 export type LibraryPanelProps = {
@@ -12,6 +14,7 @@ export type LibraryPanelProps = {
   libraryProjection: LibraryProjection;
   ready: boolean;
   onClose: () => void;
+  onSaveCover: (id: string, cover: Cover) => Promise<unknown>;
   onOpenNotebook: (notebookId: string) => void | Promise<unknown>;
 };
 
@@ -23,7 +26,11 @@ export function LibraryPanel({
   ready,
   onClose,
   onOpenNotebook,
+  onSaveCover,
 }: LibraryPanelProps) {
+  const [coverId, setCoverId] = useState<string | null>(null);
+  const [grid, setGrid] = useState(true);
+  const coverNotebook = libraryProjection.notes.find((item) => item.id === coverId);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState("");
   const [renamePending, setRenamePending] = useState(false);
@@ -90,19 +97,21 @@ export function LibraryPanel({
           </section>
 
           <section className="library-domain library-note-domain" aria-label="Ghi chú">
-            <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><small>NoteStructure</small></div>
-            <div className="library-domain-scroll">
+            <div className="library-domain-heading"><div><strong>Ghi chú</strong><span>{libraryProjection.notes.length} Notebook</span></div><div><button className="icon-button" aria-label="Dạng lưới" aria-pressed={grid} onClick={() => setGrid(true)}><LayoutGrid size={17} /></button><button className="icon-button" aria-label="Dạng danh sách" aria-pressed={!grid} onClick={() => setGrid(false)}><List size={17} /></button></div></div>
+            <div className={`library-domain-scroll notebook-library ${grid ? "notebook-grid" : "notebook-list"}`}>
               {libraryProjection.notes.length ? libraryProjection.notes.map((notebook) => (
-                <div className="library-row library-row-single" key={`note:${notebook.id}`}>
+                <div className="notebook-card" key={`note:${notebook.id}`}>
                   <button className={`library-item ${activeNotebookId === notebook.id ? "active" : ""}`} onClick={() => { void onOpenNotebook(notebook.id); }}>
-                    <span className="library-icon" style={notebookIconStyle(notebook.id)}><NotebookTabs size={19} /></span>
+                    <NotebookCover id={notebook.id} title={notebook.title} cover={notebook.cover} small />
                     <span><strong>{notebook.title}</strong><small>{notebook.sectionCount} section · {notebook.pageCount} page · {notebook.sheetCount} sheet{notebook.linkedDocuments.length ? ` · ${notebook.linkedDocuments.length} PDF liên kết` : " · độc lập"}</small></span>
                   </button>
+                  <button className="cover-edit-action" disabled={!ready} onClick={() => setCoverId(notebook.id)} aria-label={`Đổi bìa ${notebook.title}`} title="Đổi bìa"><Palette size={16} /></button>
                 </div>
               )) : <div className="library-domain-empty">Chưa có Notebook.</div>}
             </div>
           </section>
         </div>
+        {coverNotebook && <NotebookCoverEditor key={coverNotebook.id} notebook={coverNotebook} onSave={onSaveCover} onClose={() => setCoverId(null)} />}
       </aside>
     </div>
   );

@@ -1,7 +1,9 @@
+import type { NotebookCover } from "./notebook-cover";
 import { indexDocumentNotebookLinks, type DocumentGraph } from "./document-domain";
 import { ordered, type NoteStructure } from "./note-domain";
 
 export type NoteLibraryItem = {
+  cover?: NotebookCover;
   id: string;
   title: string;
   sectionCount: number;
@@ -49,6 +51,7 @@ export function projectLibrary(structure: NoteStructure, graph: DocumentGraph): 
     return {
       id: notebook.id,
       title: notebook.title,
+      cover: notebook.cover,
       sectionCount: sectionsByNotebookId.get(notebook.id) || 0,
       pageCount: pagesByNotebookId.get(notebook.id) || 0,
       sheetCount: sheetsByNotebookId.get(notebook.id) || 0,
