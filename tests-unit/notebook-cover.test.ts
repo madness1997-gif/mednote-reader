@@ -62,3 +62,31 @@ test('legacy notebooks get stable covers; malformed metadata cannot supply remot
   assert.equal(result.positionY, 0);
   assert.equal(result.title.length, 120);
 });
+
+test('opening a notebook shows its cover and resumes its sheet without altering durable navigation', async () => {
+  const dbName = `cover-opening-${crypto.randomUUID()}`;
+  try {
+    const repository = new IndexedDbNoteRepository({ dbName });
+    await repository.replaceLibrary(emptyLibrary());
+    const store = new NoteStore(repository);
+    await store.initialize({ skipMigration: true });
+    await store.createPage('sec', 'Trang thứ hai', { body: 'Đang viết' });
+    const secondSheet = store.getSnapshot().structure!.active.activeSheetId;
+    await store.openNotebook('nb');
+    assert.equal(store.getSnapshot().coverNotebookId, 'nb');
+    assert.equal(store.getSnapshot().structure!.active.activeSheetId, secondSheet);
+    store.dismissNotebookCover();
+    assert.equal(store.getSnapshot().coverNotebookId, null);
+    await store.createNotebook('Tim mạch');
+    assert.equal(store.getSnapshot().coverNotebookId, store.getSnapshot().structure!.active.activeNotebookId);
+    await store.openNotebook('nb');
+    assert.equal(store.getSnapshot().structure!.active.activeSheetId, secondSheet);
+    await store.openSheet(secondSheet);
+    assert.equal(store.getSnapshot().coverNotebookId, null);
+    await Promise.all([store.openNotebook('nb'), store.openSheet('sheet')]);
+    assert.equal(store.getSnapshot().coverNotebookId, null);
+    assert.equal(store.getSnapshot().structure!.active.activeSheetId, 'sheet');
+    assert.equal((await repository.loadLibrary())!.sheetContents[secondSheet].body, 'Đang viết');
+    assert.equal(Object.hasOwn((await repository.loadLibrary())!, 'coverNotebookId'), false);
+  } finally { await deleteNoteRepositoryDatabase(dbName); }
+});

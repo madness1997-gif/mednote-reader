@@ -666,6 +666,7 @@ export default function Home() {
     stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
   };
   const notePaneViewModel: NotePaneViewModel = {
+    cover: { continue: () => noteStore.dismissNotebookCover(), save: (id, cover) => noteStore.updateNotebookCover(id, cover) },
     openLinkedSheet: async (sheetId) => {
       pendingNoteScrollRef.current = null;
       await noteStore.openSheet(sheetId);

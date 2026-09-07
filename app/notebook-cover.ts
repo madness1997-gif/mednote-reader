@@ -1,5 +1,5 @@
 /** Portable, bounded notebook metadata; omitted covers require no migration. */
-export const COVER_TEMPLATES = { minimal: 'Tối giản', classic: 'Cổ điển', academic: 'Học thuật', frame: 'Khung nhãn', band: 'Dải màu', photo: 'Ảnh riêng' } as const;
+export const COVER_TEMPLATES = { minimal: 'Tối giản', classic: 'Cổ điển', academic: 'Học thuật', frame: 'Khung nhãn', band: 'Dải màu', photo: 'Ảnh riêng', editorial: 'Tạp chí', geometric: 'Hình học', blueprint: 'Lưới kỹ thuật', gradient: 'Sắc độ' } as const;
 export const COVER_COLORS = ['#18334d', '#245847', '#702c43', '#eee3cb', '#315b85', '#594877', '#aa542f', '#343b43'] as const;
 export const COVER_ICONS = { book: 'Sách', heart: 'Tim', activity: 'Nhịp tim', brain: 'Não', microscope: 'Kính hiển vi', none: 'Không có' } as const;
 export type NotebookCover = {

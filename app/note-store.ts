@@ -25,6 +25,8 @@ export type NoteStoreStatus = "idle" | "loading" | "ready" | "error";
 
 export type NoteStoreSnapshot = {
   status: NoteStoreStatus;
+  /** Session-only opening surface; never serialized into notebook or sheet data. */
+  coverNotebookId: string | null;
   structure: NoteStructure | null;
   documents: DocumentGraph;
   activeSheetContent: SheetContent | null;
@@ -48,6 +50,7 @@ export type NoteStoreInitializeOptions = {
 
 const EMPTY_SNAPSHOT: NoteStoreSnapshot = {
   status: "idle",
+  coverNotebookId: null,
   structure: null,
   documents: { documents: [], contexts: [], groups: [], links: [], linkRelations: [] },
   activeSheetContent: null,
@@ -76,6 +79,7 @@ export class NoteStore {
   private initialized: Promise<void> | null = null;
   private legacyRelation: LegacyRelationV2 | undefined;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly lastSheetByNotebook = new Map<string, string>();
   private operationQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly repository: NoteRepository, commands?: NoteCommands) {
@@ -92,6 +96,12 @@ export class NoteStore {
 
   private publish(changes: Partial<NoteStoreSnapshot>) {
     this.snapshot = { ...this.snapshot, ...changes, revision: this.snapshot.revision + 1 };
+    if (changes.structure) {
+      const { active, notebooks } = changes.structure;
+      this.lastSheetByNotebook.set(active.activeNotebookId, active.activeSheetId);
+      const validIds = new Set(notebooks.map((notebook) => notebook.id));
+      for (const id of this.lastSheetByNotebook.keys()) if (!validIds.has(id)) this.lastSheetByNotebook.delete(id);
+    }
     this.listeners.forEach((listener) => listener());
   }
 
@@ -227,13 +237,16 @@ export class NoteStore {
     }
   }
 
-  private mutation<T extends NoteCommandResult>(operation: () => Promise<T>, forceHydrate = false) {
+  private mutation<T extends NoteCommandResult>(operation: () => Promise<T>, forceHydrate = false, showCover = false) {
     return this.serialize(async () => {
       await this.flushDraft();
       this.publish({ busy: true, error: null });
       try {
         const result = await operation();
+        const changedSheet = result.active.activeSheetId !== this.snapshot.structure?.active.activeSheetId;
         await this.hydrateCommitted(result, forceHydrate);
+        if (showCover) this.publish({ coverNotebookId: result.active.activeNotebookId });
+        else if (changedSheet) this.dismissNotebookCover();
         return result;
       } catch (error) {
         this.publish({ busy: false, hydratingSheetId: null, error: errorMessage(error) });
@@ -242,18 +255,34 @@ export class NoteStore {
     });
   }
 
-  openSheet(sheetId: string) {
+  showNotebookCover() {
+    const id = this.snapshot.structure?.active.activeNotebookId;
+    if (id) this.publish({ coverNotebookId: id });
+  }
+
+  dismissNotebookCover() {
+    if (this.snapshot.coverNotebookId) this.publish({ coverNotebookId: null });
+  }
+
+  openSheet(sheetId: string) { return this.navigateSheet(sheetId, false); }
+
+  private navigateSheet(sheetId: string, showCover: boolean) {
     return this.serialize(async () => {
       await this.flushDraft();
       const structure = this.snapshot.structure;
       if (!structure) throw new Error("Kho note v6 chưa sẵn sàng");
       const active = noteContextForSheet(structure, sheetId);
       if (!active) throw new Error(`Không tìm thấy Sheet ${sheetId}`);
-      if (active.activeSheetId === structure.active.activeSheetId && this.snapshot.activeSheetContent) return;
+      const coverNotebookId = showCover ? active.activeNotebookId : null;
+      if (active.activeSheetId === structure.active.activeSheetId && this.snapshot.activeSheetContent) {
+        this.publish({ coverNotebookId });
+        return;
+      }
       this.publish({ busy: true, hydratingSheetId: sheetId, hydratingPageId: null, activeSheetContent: null, dirty: false, error: null });
       try {
         const result = await this.commands.setActive(active);
         await this.hydrateCommitted(result, true);
+        this.publish({ coverNotebookId });
       } catch (error) {
         this.publish({ busy: false, hydratingSheetId: null, error: errorMessage(error) });
         throw error;
@@ -328,16 +357,25 @@ export class NoteStore {
   openNotebook(notebookId: string) {
     const structure = this.snapshot.structure;
     if (!structure) return Promise.reject(new Error("Kho note v6 chưa sẵn sàng"));
+    const rememberedSheet = this.lastSheetByNotebook.get(notebookId);
+    if (rememberedSheet && noteContextForSheet(structure, rememberedSheet)?.activeNotebookId === notebookId) {
+      return this.navigateSheet(rememberedSheet, true);
+    }
     const activeSection = structure.sections.find((section) => section.id === structure.active.activeSectionId && section.notebookId === notebookId);
     const section = activeSection || ordered(structure.sections.filter((record) => record.notebookId === notebookId))[0];
     if (!section) return Promise.reject(new Error(`Notebook ${notebookId} chưa có Section`));
     const pages = ordered(structure.pages.filter((record) => record.sectionId === section.id));
-    if (pages[0]) return this.openPage(pages[0].id);
+    const page = pages.find((item) => item.id === structure.active.activePageId) || pages[0];
+    if (page) {
+      const sheets = ordered(structure.sheets.filter((sheet) => sheet.pageId === page.id));
+      const sheet = sheets.find((item) => item.id === structure.active.activeSheetId) || sheets[0];
+      if (sheet) return this.navigateSheet(sheet.id, true);
+    }
     return this.createPage(section.id, "Page mới");
   }
 
   createNotebook(title: string, content?: SheetContent) {
-    return this.mutation(() => this.commands.createNotebook(title, content), true);
+    return this.mutation(() => this.commands.createNotebook(title, content), true, true);
   }
 
   createSection(notebookId: string, title: string) {

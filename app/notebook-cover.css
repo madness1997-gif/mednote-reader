@@ -6,11 +6,6 @@
 .notebook-cover .cover-content strong{font-size:clamp(14px,11cqw,32px);line-height:1.18;white-space:pre-wrap;overflow-wrap:anywhere;color:inherit;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden}
 .cover-subtitle{font-size:clamp(12px,5cqw,16px);line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .cover-symbol{flex-shrink:0;width:18%;height:auto;max-width:34px}
-.cover-academic .cover-content{justify-content:flex-start;padding-top:21%;border-top:8px solid #ffffff40}
-.cover-classic{background-image:repeating-linear-gradient(0deg,transparent 0 3px,#ffffff09 3px 4px)}
-.cover-classic .cover-content{margin:18% 10%;padding:10%;border:1px solid currentColor;text-align:center;align-items:center}
-.cover-frame .cover-content{margin:15% 10%;padding:12%;background:#ffffffeb;color:#203344;align-self:center;border-radius:3px}
-.cover-band .cover-content{background:linear-gradient(transparent 0 25%,#0002 25% 78%,transparent 78%)}
 .cover-photo .cover-content{justify-content:flex-end}
 .notebook-grid{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:18px!important;align-content:start}
 .notebook-card{position:relative;min-width:0}
@@ -29,3 +24,178 @@
 .notebook-list .library-item{grid-template-columns:54px minmax(0,1fr)}
 .notebook-list .library-item>span:last-child{display:flex;flex-direction:column;min-width:0;gap:4px}
 .notebook-library button:focus-visible,.cover-editor button:focus-visible{outline:2px solid #147d90;outline-offset:3px}
+
+/* Shared cover designs: the same composition is used on the shelf, opening page and picker. */
+.notebook-cover .cover-ornament {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.notebook-cover .cover-content { position: relative; }
+.cover-minimal .cover-content {
+  justify-content: flex-end;
+  padding-bottom: 20%;
+}
+.cover-minimal .cover-symbol { margin-bottom: auto; }
+.cover-minimal .cover-content::after {
+  content: '';
+  width: 25%;
+  height: 3px;
+  margin-top: 8%;
+  background: currentColor;
+}
+.cover-classic {
+  border-radius: 3px 7px 7px 3px;
+  background-image: repeating-linear-gradient(0deg, #0001 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, #fff1 0 1px, transparent 1px 4px);
+}
+.cover-classic .cover-content {
+  margin: 9% 8% 9% 12%;
+  padding: 10%;
+  text-align: center;
+  align-items: center;
+  border: 3px double var(--cover-accent);
+  justify-content: center;
+  color: var(--cover-accent);
+}
+.cover-classic .cover-content::before,
+.cover-classic .cover-content::after {
+  content: '◆';
+  font-size: clamp(12px, 5cqw, 22px);
+  margin: 8% 0;
+}
+.cover-academic .cover-ornament {
+  background: repeating-linear-gradient(135deg, transparent 0 14px, #fff1 14px 15px);
+  clip-path: polygon(30% 66%, 100% 36%, 100% 100%, 0 100%);
+}
+.cover-academic .cover-content {
+  border-top: 0;
+  padding-top: 19%;
+  justify-content: flex-start;
+}
+.cover-academic .cover-content::after {
+  content: '';
+  margin-top: auto;
+  height: 6px;
+  width: 50%;
+  background: var(--cover-accent);
+}
+.cover-frame .cover-ornament {
+  background-image: radial-gradient(#fff4 1.5px, transparent 1.5px);
+  background-size: 12px 12px;
+}
+.cover-frame .cover-content {
+  padding: 12%;
+  background: #ffffffeb;
+  color: #203344;
+  align-self: center;
+  border-radius: 3px;
+  box-shadow: 0 0 0 4px var(--cover-color), 0 0 0 5px #fff8;
+  text-align: center;
+  align-items: center;
+  margin: 20% 12%;
+}
+.cover-band .cover-ornament {
+  background: linear-gradient(145deg, transparent 0 48%, var(--cover-accent) 48% 66%, #0003 66% 67%, transparent 67%);
+}
+.cover-band .cover-content {
+  background: none;
+  justify-content: flex-start;
+  padding-top: 17%;
+}
+.cover-band .cover-subtitle { margin-top: auto; }
+.cover-editorial .cover-ornament {
+  inset: 7% 8% 8% 12%;
+  border-top: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  background: linear-gradient(90deg, transparent 67%, #ffffff15 67%);
+}
+.cover-editorial .cover-content {
+  justify-content: flex-end;
+  padding-bottom: 18%;
+}
+.cover-editorial .cover-symbol { margin-bottom: auto; }
+.cover-editorial .cover-content strong {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-size: clamp(16px, 14cqw, 48px);
+  line-height: 1.04;
+}
+.cover-geometric .cover-ornament {
+  background: conic-gradient(from 90deg at 72% 24%, #ffffff26 0 25%, transparent 25%),
+    conic-gradient(from 180deg at 32% 66%, transparent 0 50%, #0002 50% 75%, transparent 75%);
+}
+.cover-geometric .cover-content { justify-content: center; padding-top: 35%; }
+.cover-geometric .cover-symbol { color: var(--cover-accent); }
+.cover-blueprint .cover-ornament {
+  background-image: linear-gradient(#fff1 1px, transparent 1px), linear-gradient(90deg, #fff1 1px, transparent 1px),
+    linear-gradient(#fff2 1px, transparent 1px), linear-gradient(90deg, #fff2 1px, transparent 1px);
+  background-size: 12px 12px, 12px 12px, 60px 60px, 60px 60px;
+}
+.cover-blueprint .cover-content {
+  margin: 12%;
+  padding: 10%;
+  border: 1px solid currentColor;
+  background: var(--cover-color);
+  align-self: flex-end;
+  flex: 1;
+}
+.cover-blueprint .cover-content strong { font-family: 'Courier New', monospace; }
+.cover-gradient .cover-ornament {
+  background: radial-gradient(ellipse at 95% 10%, #f3aa7966, transparent 65%),
+    radial-gradient(ellipse at 0 90%, #559cd680, transparent 70%), linear-gradient(150deg, #fff1, #0004);
+}
+.cover-gradient .cover-content { text-align: center; align-items: center; }
+.cover-gradient .cover-symbol {
+  padding: 9%;
+  border: 1px solid #ffffff55;
+  border-radius: 50%;
+  box-sizing: content-box;
+}
+.cover-photo:not(:has(img)) .cover-ornament {
+  background: linear-gradient(160deg, #ffffff18, transparent 50%, #0004);
+}
+
+/* Keep the live sheet mounted at its existing dimensions while its cover is shown. */
+.notes-pane { position: relative; }
+.note-content-surface { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.notebook-opening {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  box-sizing: border-box;
+  background: radial-gradient(ellipse at 50% 35%, #fff, #eef2f5);
+}
+.notebook-opening-inner { width: min(100%, 400px); display: grid; gap: 26px; }
+.notebook-opening-book {
+  padding: 0;
+  border: 0;
+  background: none;
+  width: min(100%, 320px);
+  justify-self: center;
+  cursor: pointer;
+  border-radius: 5px 12px 12px 5px;
+}
+.notebook-opening-book .notebook-cover { box-shadow: 10px 18px 32px #18334d30, inset 7px 0 0 #0002; }
+.notebook-opening-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.notebook-opening-actions h2 { width: 100%; margin: 0 0 6px; text-align: center; font-size: 18px; color: #203344; overflow-wrap: anywhere; }
+.notebook-opening-actions button { display: inline-flex; align-items: center; gap: 9px; padding: 11px 17px; border-radius: 8px; font: inherit; font-size: 14px; cursor: pointer; }
+.notebook-enter { background: #18334d; color: white; border: 1px solid #18334d; }
+.notebook-customize { background: white; color: #18334d; border: 1px solid #bdcbd2; }
+.notebook-opening button:focus-visible { outline: 3px solid #28869a; outline-offset: 5px; }
+.notebook-opening button:disabled { opacity: .6; cursor: wait; }
+.cover-template-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cover-template-picker button { min-width: 0; padding: 5px; background: #fff; }
+.cover-template-picker button > span:last-child { display: block; font-size: 12px; margin-top: 7px; }
+.cover-template-picker button[aria-pressed=true] { outline: 2px solid #147d90; outline-offset: 1px; background: #edf6f8; }
+.cover-template-picker .cover-content { gap: 3px; }
+.cover-template-picker .cover-subtitle { display: none; }
+@media (max-height: 700px) and (min-width: 600px) {
+  .notebook-opening-inner { grid-template-columns: minmax(0, 240px) minmax(0, 200px); align-items: center; width: min(100%, 470px); }
+  .notebook-opening-actions { flex-direction: column; align-items: center; }
+}

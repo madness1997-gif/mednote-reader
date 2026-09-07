@@ -70,7 +70,7 @@ export function NoteSidebar({ status, model, controller, busy, hydratingSheetId,
     <div className="note-sidebar" data-testid="note-sidebar" aria-label="Điều hướng ghi chú" aria-busy={busy}>
       {coverOpen && activeNotebook && <NotebookCoverEditor key={activeNotebook.id} notebook={activeNotebook} onSave={(id, cover) => controller.updateNotebookCover(id, cover)} onClose={() => setCoverOpen(false)} />}
       <header className="note-sidebar-bookbar">
-        <button className="sidebar-cover-button" aria-label="Đổi bìa notebook" disabled={busy} onClick={() => setCoverOpen(true)}>{activeNotebook && <NotebookCover id={activeNotebook.id} title={activeNotebook.title} cover={activeNotebook.cover} small />}</button>
+        <button className="sidebar-cover-button" aria-label="Xem bìa notebook" disabled={busy} onClick={() => controller.showNotebookCover()}>{activeNotebook && <NotebookCover id={activeNotebook.id} title={activeNotebook.title} cover={activeNotebook.cover} small />}</button>
         <select value={model.activeNotebookId} onChange={(event) => run(() => controller.openNotebook(event.target.value))} aria-label="Notebook" disabled={busy}>
           {model.notebooks.map((notebook) => <option value={notebook.id} key={notebook.id}>{notebook.title}</option>)}
         </select>

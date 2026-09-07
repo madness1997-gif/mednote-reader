@@ -8,8 +8,8 @@ export function NotebookCover({ id, title, cover, small = false }: { id: string;
   const Icon = icons[c.icon];
   const rgb = [1, 3, 5].map((start) => parseInt(c.color.slice(start, start + 2), 16));
   const light = rgb[0] * .299 + rgb[1] * .587 + rgb[2] * .114 > 165;
-  return <span aria-hidden="true" className={`notebook-cover cover-${c.template} ${small ? 'cover-small' : ''}`} style={{ '--cover-color': c.color, '--cover-ink': c.template === 'photo' && c.image ? '#fff' : light ? '#203344' : '#fff', fontFamily: c.font === 'serif' ? 'Georgia, serif' : 'inherit' } as CSSProperties}>
+  return <span aria-hidden="true" className={`notebook-cover cover-${c.template} ${small ? 'cover-small' : ''}`} style={{ '--cover-color': c.color, '--cover-accent': light ? '#8d592d' : '#e7c78e', '--cover-ink': c.template === 'photo' && c.image ? '#fff' : light ? '#203344' : '#fff', fontFamily: c.font === 'serif' ? 'Georgia, serif' : 'inherit' } as CSSProperties}>
     {c.template === 'photo' && c.image && <img src={small ? c.thumbnail || c.image : c.image} alt="" loading="lazy" decoding="async" style={{ objectPosition: `${c.positionX}% ${c.positionY}%` }} />}
-    <span className="cover-content">{Icon && <Icon className="cover-symbol" size={28} />}<strong>{c.title.trim() || title}</strong>{c.subtitle && <span className="cover-subtitle">{c.subtitle}</span>}</span>
+    <span className="cover-ornament" /><span className="cover-content">{Icon && <Icon className="cover-symbol" size={28} />}<strong>{c.title.trim() || title}</strong>{c.subtitle && <span className="cover-subtitle">{c.subtitle}</span>}</span>
   </span>;
 }
