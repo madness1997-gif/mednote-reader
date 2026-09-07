@@ -167,16 +167,32 @@
   overflow: auto;
   display: grid;
   place-items: center;
-  padding: 32px 24px;
+  padding: clamp(12px, 2.5vw, 28px);
   box-sizing: border-box;
   background: radial-gradient(ellipse at 50% 35%, #fff, #eef2f5);
 }
-.notebook-opening-inner { width: min(100%, 400px); display: grid; gap: 26px; }
+.notebook-opening-inner {
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  display: grid;
+  grid-template-rows: minmax(140px, 1fr) auto;
+  gap: 20px;
+}
+/* Measure the space left after the actual action rows, including wrapped labels. */
+.notebook-opening-book-area {
+  container-type: size;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
 .notebook-opening-book {
   padding: 0;
   border: 0;
   background: none;
-  width: min(100%, 320px);
+  width: min(100cqw, 75cqh);
+  aspect-ratio: 3 / 4;
   justify-self: center;
   cursor: pointer;
   border-radius: 5px 12px 12px 5px;
@@ -195,7 +211,3 @@
 .cover-template-picker button[aria-pressed=true] { outline: 2px solid #147d90; outline-offset: 1px; background: #edf6f8; }
 .cover-template-picker .cover-content { gap: 3px; }
 .cover-template-picker .cover-subtitle { display: none; }
-@media (max-height: 700px) and (min-width: 600px) {
-  .notebook-opening-inner { grid-template-columns: minmax(0, 240px) minmax(0, 200px); align-items: center; width: min(100%, 470px); }
-  .notebook-opening-actions { flex-direction: column; align-items: center; }
-}

@@ -17,9 +17,11 @@ export function NotebookCoverPage({ notebook, busy, onContinue, onSave }: {
 
   return <div className="notebook-opening" aria-label={`Trang bìa ${notebook.title}`}>
     <div className="notebook-opening-inner">
+      <div className="notebook-opening-book-area">
       <button ref={continueButton} type="button" className="notebook-opening-book" disabled={busy} onClick={onContinue} aria-label={`Mở nội dung ${notebook.title}`}>
         <NotebookCover id={notebook.id} title={notebook.title} cover={notebook.cover} />
       </button>
+      </div>
       <div className="notebook-opening-actions">
         <h2>{notebook.title}</h2>
         <button type="button" className="notebook-enter" disabled={busy} onClick={onContinue}>Vào nội dung <ArrowRight size={18} /></button>
