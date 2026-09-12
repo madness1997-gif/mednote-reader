@@ -1,4 +1,12 @@
 /** Portable, bounded notebook metadata; omitted covers require no migration. */
+export const COVER_ENDOCRINE_PATTERNS = {
+  thyroid: 'Tuyến giáp',
+  insulin: 'Tụy – Insulin',
+  pituitary: 'Tuyến yên',
+  adrenal: 'Tuyến thượng thận',
+  calcium: 'Xương – Calci',
+  metabolism: 'Lipid – Chuyển hóa',
+} as const;
 export const COVER_PATTERNS = {
   strawberry: 'Dâu tây',
   citrus: 'Cam chanh',
@@ -6,6 +14,7 @@ export const COVER_PATTERNS = {
   meadow: 'Hoa đồng nội',
   nocturne: 'Vườn hoa đêm',
   waves: 'Sóng biển',
+  ...COVER_ENDOCRINE_PATTERNS,
 } as const;
 export const COVER_TEMPLATES = { minimal: 'Tối giản', classic: 'Cổ điển', academic: 'Học thuật', frame: 'Khung nhãn', band: 'Dải màu', photo: 'Ảnh riêng', editorial: 'Tạp chí', geometric: 'Hình học', blueprint: 'Lưới kỹ thuật', gradient: 'Sắc độ', ...COVER_PATTERNS } as const;
 export const COVER_COLORS = ['#18334d', '#245847', '#702c43', '#eee3cb', '#315b85', '#594877', '#aa542f', '#343b43'] as const;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { COVER_COLORS, COVER_ICONS, COVER_PATTERNS, COVER_TEMPLATES, defaultNotebookCover, normalizeNotebookCover, type NotebookCover as Cover } from '../notebook-cover';
+import { COVER_COLORS, COVER_ICONS, COVER_ENDOCRINE_PATTERNS, COVER_PATTERNS, COVER_TEMPLATES, defaultNotebookCover, normalizeNotebookCover, type NotebookCover as Cover } from '../notebook-cover';
 import { prepareNotebookCoverImage } from '../notebook-cover-image';
 import { NotebookCover } from './notebook-cover';
 export function NotebookCoverEditor({ notebook, onSave, onClose }: { notebook: { id: string; title: string; cover?: Cover }; onSave: (id: string, cover: Cover) => Promise<unknown>; onClose: () => void }) {
@@ -21,7 +21,8 @@ export function NotebookCoverEditor({ notebook, onSave, onClose }: { notebook: {
       <header><h2 id="cover-editor-title">Đổi bìa notebook</h2><button type="button" disabled={busy} onClick={onClose} aria-label="Đóng">×</button></header>
       <div className="cover-editor-layout"><div className="cover-preview"><NotebookCover id={notebook.id} title={notebook.title} cover={draft} /></div>
         <fieldset disabled={busy} className="cover-fields">{[
-          { title: 'Họa tiết minh họa', entries: Object.entries(COVER_PATTERNS) },
+          { title: 'Nội tiết & chuyển hóa', entries: Object.entries(COVER_ENDOCRINE_PATTERNS) },
+          { title: 'Họa tiết minh họa', entries: Object.entries(COVER_PATTERNS).filter(([id]) => !Object.hasOwn(COVER_ENDOCRINE_PATTERNS, id)) },
           { title: 'Bìa cơ bản', entries: Object.entries(COVER_TEMPLATES).filter(([id]) => !Object.hasOwn(COVER_PATTERNS, id)) },
         ].map((group) => <div className="cover-template-group" key={group.title}><h3>{group.title}</h3><div className="cover-template-picker" role="group" aria-label={group.title}>{group.entries.map(([id, name]) => <button type="button" key={id} aria-label={name} aria-pressed={draft.template === id} onClick={() => change('template', id as Cover['template'])}><NotebookCover id={notebook.id} title={notebook.title} cover={{ ...draft, template: id as Cover['template'] }} small /><span>{name}</span></button>)}</div></div>)}
           <label>{Object.hasOwn(COVER_PATTERNS, draft.template) ? "Màu viền nhãn" : "Màu bìa"}</label>
