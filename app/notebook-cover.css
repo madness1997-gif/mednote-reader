@@ -211,3 +211,35 @@
 .cover-template-picker button[aria-pressed=true] { outline: 2px solid #147d90; outline-offset: 1px; background: #edf6f8; }
 .cover-template-picker .cover-content { gap: 3px; }
 .cover-template-picker .cover-subtitle { display: none; }
+
+.cover-template-group h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cover-pattern .cover-ornament { display: none; }
+.cover-pattern .cover-content {
+  flex: 0 1 auto;
+  width: 72%;
+  box-sizing: border-box;
+  margin: 15% auto auto;
+  padding: 7% 8%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #203344;
+  background: #fffdf4f5;
+  border-top: 3px solid var(--cover-color);
+  border-bottom: 1px solid #fff;
+  box-shadow: 0 2px 8px #0002;
+  gap: 5px;
+}
+.cover-pattern .cover-content strong {
+  font-size: clamp(12px, 8cqw, 36px);
+  -webkit-line-clamp: 3;
+}
+.cover-pattern .cover-symbol { width: 15%; max-width: 22px; }
+.cover-pattern .cover-subtitle { font-size: clamp(12px, 4.5cqw, 17px); }
+.cover-meadow .cover-content,
+.cover-nocturne .cover-content,
+.cover-waves .cover-content { margin: auto auto 13%; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { COVER_COLORS, COVER_ICONS, COVER_TEMPLATES, defaultNotebookCover, normalizeNotebookCover, type NotebookCover as Cover } from '../notebook-cover';
+import { COVER_COLORS, COVER_ICONS, COVER_PATTERNS, COVER_TEMPLATES, defaultNotebookCover, normalizeNotebookCover, type NotebookCover as Cover } from '../notebook-cover';
 import { prepareNotebookCoverImage } from '../notebook-cover-image';
 import { NotebookCover } from './notebook-cover';
 export function NotebookCoverEditor({ notebook, onSave, onClose }: { notebook: { id: string; title: string; cover?: Cover }; onSave: (id: string, cover: Cover) => Promise<unknown>; onClose: () => void }) {
@@ -20,7 +20,11 @@ export function NotebookCoverEditor({ notebook, onSave, onClose }: { notebook: {
     <form onSubmit={(event) => { event.preventDefault(); void run(async () => { await onSave(notebook.id, draft); onClose(); }); }}>
       <header><h2 id="cover-editor-title">Đổi bìa notebook</h2><button type="button" disabled={busy} onClick={onClose} aria-label="Đóng">×</button></header>
       <div className="cover-editor-layout"><div className="cover-preview"><NotebookCover id={notebook.id} title={notebook.title} cover={draft} /></div>
-        <fieldset disabled={busy} className="cover-fields"><div className="cover-template-picker" role="group" aria-label="Mẫu bìa">{Object.entries(COVER_TEMPLATES).map(([id, name]) => <button type="button" key={id} aria-label={name} aria-pressed={draft.template === id} onClick={() => change('template', id as Cover['template'])}><NotebookCover id={notebook.id} title={notebook.title} cover={{ ...draft, template: id as Cover['template'] }} small /><span>{name}</span></button>)}</div>
+        <fieldset disabled={busy} className="cover-fields">{[
+          { title: 'Họa tiết minh họa', entries: Object.entries(COVER_PATTERNS) },
+          { title: 'Bìa cơ bản', entries: Object.entries(COVER_TEMPLATES).filter(([id]) => !Object.hasOwn(COVER_PATTERNS, id)) },
+        ].map((group) => <div className="cover-template-group" key={group.title}><h3>{group.title}</h3><div className="cover-template-picker" role="group" aria-label={group.title}>{group.entries.map(([id, name]) => <button type="button" key={id} aria-label={name} aria-pressed={draft.template === id} onClick={() => change('template', id as Cover['template'])}><NotebookCover id={notebook.id} title={notebook.title} cover={{ ...draft, template: id as Cover['template'] }} small /><span>{name}</span></button>)}</div></div>)}
+          <label>{Object.hasOwn(COVER_PATTERNS, draft.template) ? "Màu viền nhãn" : "Màu bìa"}</label>
           <div className="cover-swatches" role="group" aria-label="Màu bìa">{COVER_COLORS.map((color, i) => <button type="button" key={color} style={{ background: color }} aria-label={`Màu bìa ${i + 1}`} aria-pressed={draft.color === color} onClick={() => change('color', color)} />)}</div>
           <label>Tiêu đề<textarea rows={2} maxLength={120} placeholder={notebook.title} value={draft.title} onChange={(e) => change('title', e.target.value)} /><small>Để trống để dùng tên notebook.</small></label>
           <label>Phụ đề<input maxLength={160} value={draft.subtitle} onChange={(e) => change('subtitle', e.target.value)} /></label>

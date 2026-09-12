@@ -3,7 +3,7 @@ import test from 'node:test';
 import 'fake-indexeddb/auto';
 import { IndexedDbNoteRepository, deleteNoteRepositoryDatabase } from '../app/indexeddb-note-repository';
 import { NoteStore } from '../app/note-store';
-import { defaultNotebookCover, normalizeNotebookCover } from '../app/notebook-cover';
+import { COVER_PATTERNS, defaultNotebookCover, normalizeNotebookCover } from '../app/notebook-cover';
 import { createDriveBackup, parseDriveBackup, verifyLibraryRoundTrip } from '../app/drive-backup';
 import { projectLibrary } from '../app/library-projection';
 import type { LibraryV6 } from '../app/note-repository';
@@ -89,4 +89,15 @@ test('opening a notebook shows its cover and resumes its sheet without altering 
     assert.equal((await repository.loadLibrary())!.sheetContents[secondSheet].body, 'Đang viết');
     assert.equal(Object.hasOwn((await repository.loadLibrary())!, 'coverNotebookId'), false);
   } finally { await deleteNoteRepositoryDatabase(dbName); }
+});
+
+test('bundled illustrated covers persist by template ID without embedding shared artwork', () => {
+  for (const template of Object.keys(COVER_PATTERNS)) {
+    const cover = normalizeNotebookCover({ ...defaultNotebookCover('nb'), template }, 'nb');
+    const library = emptyLibrary();
+    library.notes.notebooks[0].cover = cover;
+    const restored = parseDriveBackup(JSON.parse(JSON.stringify(createDriveBackup(library))));
+    assert.equal(restored.notes.notebooks[0].cover?.template, template);
+    assert.equal(restored.notes.notebooks[0].cover?.image, undefined);
+  }
 });
