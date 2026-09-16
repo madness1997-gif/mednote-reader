@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { _electron: electron, expect } = require('@playwright/test');
 
 const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
@@ -40,6 +41,26 @@ function captureRuntimeErrors(page, runtimeErrors) {
     captureRuntimeErrors(page, runtimeErrors);
 
     await page.waitForLoadState('domcontentloaded');
+    // Decode every bundled cover in the real file:// desktop renderer. Empty
+    // source images can otherwise build successfully as empty data URLs.
+    const coverSources = (await fs.readdir(path.join(__dirname, '../app/assets/covers')))
+      .filter((name) => name.endsWith('.webp'));
+    const assetRoot = path.join(__dirname, '../dist-electron/assets');
+    const builtAssets = await fs.readdir(assetRoot);
+    for (const source of coverSources) {
+      const stem = source.slice(0, -5);
+      const built = builtAssets.find((name) => name.startsWith(`${stem}-`) &&
+        !name.startsWith(`${stem}-thumb-`) && name.endsWith('.webp'));
+      expect(built, `Missing bundled cover: ${source}`).toBeTruthy();
+      const dimensions = await page.evaluate(async (url) => {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        return { width: image.naturalWidth, height: image.naturalHeight };
+      }, pathToFileURL(path.join(assetRoot, built)).href);
+      expect(dimensions, source).toEqual(source.endsWith('-thumb.webp')
+        ? { width: 180, height: 240 } : { width: 900, height: 1200 });
+    }
     let sidebar = page.locator('.note-sidebar');
     await expect(sidebar).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.fa-block-editor')).toBeVisible();
