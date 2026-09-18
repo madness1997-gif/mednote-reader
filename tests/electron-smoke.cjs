@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { _electron: electron, expect } = require('@playwright/test');
+const { PDFDocument } = require('pdf-lib');
 
 const profile = path.join(os.tmpdir(), `mednote-electron-smoke-${Date.now()}`);
 
@@ -61,6 +62,42 @@ function captureRuntimeErrors(page, runtimeErrors) {
       expect(dimensions, source).toEqual(source.endsWith('-thumb.webp')
         ? { width: 180, height: 240 } : { width: 900, height: 1200 });
     }
+    // Exercise the on-demand fallback in the real file:// renderer. The worker
+    // must receive WASM bytes, render a nonblank page, and end on document close.
+    const rendererAsset = builtAssets.find((name) => /^pdfium-renderer-.*\.js$/.test(name));
+    expect(rendererAsset, 'Missing PDFium renderer chunk').toBeTruthy();
+    const fixture = await PDFDocument.create();
+    fixture.addPage([200, 300]).drawText('Desktop worker', { x: 20, y: 200, size: 16 });
+    const fixtureBytes = Array.from(await fixture.save());
+    const fallbackWorkers = new Set();
+    let fallbackWorkerCount = 0;
+    const observeWorker = (worker) => {
+      fallbackWorkerCount++;
+      fallbackWorkers.add(worker);
+      worker.on('close', () => fallbackWorkers.delete(worker));
+    };
+    page.on('worker', observeWorker);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rendered = await page.evaluate(async ({ rendererUrl, bytes }) => {
+        const module = await import(rendererUrl);
+        const [loadPdfiumDocument] = Object.values(module).filter((value) => typeof value === 'function');
+        const document = await loadPdfiumDocument(new Uint8Array(bytes));
+        try {
+          const bitmap = await (await document.getPage(0)).render({ width: 200, height: 300 });
+          return {
+            width: bitmap.width,
+            height: bitmap.height,
+            nonblank: bitmap.data.some((value, index) => index % 4 !== 3 && value < 200),
+          };
+        } finally {
+          await Promise.all([document.destroy(), document.destroy()]);
+        }
+      }, { rendererUrl: pathToFileURL(path.join(assetRoot, rendererAsset)).href, bytes: fixtureBytes });
+      expect(rendered).toEqual({ width: 200, height: 300, nonblank: true });
+      await expect.poll(() => fallbackWorkers.size).toBe(0);
+    }
+    expect(fallbackWorkerCount).toBe(2);
+    page.off('worker', observeWorker);
     let sidebar = page.locator('.note-sidebar');
     await expect(sidebar).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.fa-block-editor')).toBeVisible();
