@@ -7,7 +7,6 @@ import { PdfReaderController } from "./pdf-reader-controller";
 import { PdfNavigationControllerProvider, usePdfNavigationController } from "./pdf-navigation-controller";
 import { DriveControllerProvider, useDriveController } from "./drive-controller";
 import { resolveDocumentSource } from "./note-document-source";
-import type { PDFiumDocument } from "./pdfium-renderer";
 import { localBinaryStorage } from "./local-binary-storage";
 import { useLiveController } from "./live-controller";
 import { bootstrapMedNote, type BootstrapResult } from "./app-bootstrap";
@@ -82,9 +81,7 @@ export default function Home() {
   const pdfReader = useMemo(() => new PdfReaderController({
     readBlob: async (documentId) => (await documentLibrary.readPdf(documentId))?.blob ?? null,
   }), []);
-  const [pdfSource, setPdfSource] = useState<{ blob: Blob; documentId: string; lastModified: number } | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
-  const [pdfiumDocument, setPdfiumDocument] = useState<PDFiumDocument | null>(null);
   const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [pdfStatus, setPdfStatus] = useState<"idle" | "loading" | "error">("idle");
   const [noteZoom, setNoteZoom] = useState(1);
@@ -340,32 +337,8 @@ export default function Home() {
   }, [workspaces, activeWorkspaceId, readerShare, workspaceMode, noteZoom, ready]);
   // MEDNOTE_AUTOSAVE_EFFECT_END
 
-  useEffect(() => {
-    if (!ready) return;
-    let cancelled = false;
-    setPdfSource(null);
-    setPdfDocument(null);
-    setPdfiumDocument(null);
-    setLoadedDocumentId(null);
-    if (!activeDocument) {
-      setPdfStatus("idle");
-      return;
-    }
-    setPdfStatus("loading");
-    void documentLibrary.readPdf(activeDocument.id).then((stored) => {
-      if (cancelled) return;
-      if (!stored) {
-        setPdfStatus("error");
-        return;
-      }
-      setPdfSource({ blob: stored.blob, documentId: activeDocument.id, lastModified: activeDocument.lastModified });
-    }).catch(() => !cancelled && setPdfStatus("error"));
-    return () => { cancelled = true; };
-  }, [activeDocument?.id, ready]);
-
   useEffect(() => pdfReader.subscribe(({ status, session }) => {
     setPdfDocument(session?.pdf ?? null);
-    setPdfiumDocument(session?.pdfium ?? null);
     setLoadedDocumentId(session?.documentId ?? null);
     setPdfStatus(status === "loading" ? "loading" : status === "error" ? "error" : "idle");
   }), [pdfReader]);
@@ -375,28 +348,37 @@ export default function Home() {
   }, [pdfReader]);
 
   useEffect(() => {
-    if (!pdfSource) {
-      void pdfReader.close();
-      return;
-    }
+    if (!ready) return;
     let cancelled = false;
-    void pdfReader.open({ documentId: pdfSource.documentId, lastModified: pdfSource.lastModified, blob: pdfSource.blob }).then((session) => {
+    void pdfReader.close();
+    if (!activeDocument) return;
+    const { id: documentId, lastModified } = activeDocument;
+    setPdfStatus("loading");
+    void (async () => {
+      const stored = await documentLibrary.readPdf(documentId);
+      if (cancelled) return;
+      if (!stored) throw new Error("Missing PDF");
+      return pdfReader.open({ documentId, lastModified, blob: stored.blob });
+    })().then((session) => {
       if (!session || cancelled) return;
       setWorkspaces((items) => items.map((workspace) => ({
         ...workspace,
         sourcePage: workspace.id === activeWorkspaceId
-          ? pdfReader.clampPage(workspace.documents.find((item) => item.id === pdfSource.documentId)?.reader.page ?? workspace.sourcePage, session.pdf.numPages)
+          ? pdfReader.clampPage(workspace.documents.find((item) => item.id === documentId)?.reader.page ?? workspace.sourcePage, session.pdf.numPages)
           : workspace.sourcePage,
-        documents: workspace.documents.map((item) => item.id === pdfSource.documentId
+        documents: workspace.documents.map((item) => item.id === documentId
           ? { ...item, reader: { ...normalizeReader(item.reader), page: pdfReader.clampPage(item.reader?.page ?? 1, session.pdf.numPages) } }
           : item),
       })));
       setToast(`Đã mở ${session.pdf.numPages} trang`);
     }).catch(() => {
-      if (!cancelled) setToast("Không thể mở PDF này");
+      if (!cancelled) {
+        setPdfStatus("error");
+        setToast("Không thể mở PDF này");
+      }
     });
-    return () => { cancelled = true; };
-  }, [activeWorkspaceId, pdfReader, pdfSource]);
+    return () => { cancelled = true; void pdfReader.close(); };
+  }, [activeWorkspaceId, activeDocument?.id, ready, pdfReader]);
 
   useEffect(() => {
     if (!toast || toast === "Đã tự lưu") return;
@@ -663,7 +645,7 @@ export default function Home() {
   const contextReaderInteraction = useLiveController(readerInteraction);
   const readerPaneViewModel: ReaderPaneViewModel = {
     toolbar: { exportAnnotatedPdf, setSourceZoom, sourceZoom, totalPages },
-    stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
+    stage: { continuousPagesRef: continuousPdfPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, requestPdfium: pdfReader.ensurePdfium, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode },
   };
   const notePaneViewModel: NotePaneViewModel = {
     cover: { continue: () => noteStore.dismissNotebookCover(), save: (id, cover) => noteStore.updateNotebookCover(id, cover) },

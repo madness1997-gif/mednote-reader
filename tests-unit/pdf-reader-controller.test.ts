@@ -8,6 +8,7 @@ function proxy(id: string, pages = 2): any {
     numPages: pages,
     destroyed: 0,
     destroy() { this.destroyed += 1; return Promise.resolve(); },
+    getData: async () => new Uint8Array([1]),
     getOutline: async () => [],
     getDestination: async () => null,
     getPageIndex: async () => 0,
@@ -23,7 +24,7 @@ test("PDF.js becomes ready when PDFium fails", async () => {
   assert.equal(controller.getState().status, "ready");
 });
 
-test("visible PDF.js page is ready before outline and PDFium secondary work", async () => {
+test("secondary work loads outline without prewarming PDFium", async () => {
   const pdf = proxy("progressive");
   let outlineCalls = 0;
   let pdfiumCalls = 0;
@@ -47,6 +48,8 @@ test("visible PDF.js page is ready before outline and PDFium secondary work", as
   controller.notifyVisiblePageRendered("progressive");
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(outlineCalls, 1);
+  assert.equal(pdfiumCalls, 0);
+  await Promise.all([controller.ensurePdfium(pdf), controller.ensurePdfium(pdf)]);
   assert.equal(pdfiumCalls, 1);
 });
 
@@ -124,4 +127,34 @@ test("search works across targets, cancellation stops it, temporary proxy is des
   const aborted = new AbortController();
   aborted.abort();
   await assert.rejects(() => controller.search("x", [{ id: "x", name: "X", lastModified: 1, blob: new Blob(["x"]) }], { signal: aborted.signal }), /aborted/i);
+});
+
+
+test("fallback failure preserves the PDF.js session and does not retry for every page", async () => {
+  const pdf = proxy("failure");
+  let calls = 0;
+  const controller = new PdfReaderController({ loadPdf: async () => pdf, loadPdfium: async () => { calls++; throw new Error("failed"); } });
+  await controller.open({ documentId: "failure", lastModified: 1, blob: new Blob(["x"]) });
+  assert.equal(await controller.ensurePdfium(pdf), null);
+  assert.equal(await controller.ensurePdfium(pdf), null);
+  assert.equal(calls, 1);
+  assert.equal(controller.getState().status, "ready");
+});
+
+test("closing while PDFium is loading destroys stale fallback and rejects old-page requests", async () => {
+  const pdf = proxy("stale-fallback");
+  let release!: (value: any) => void;
+  let started!: () => void;
+  const loading = new Promise<any>((resolve) => { release = resolve; });
+  const start = new Promise<void>((resolve) => { started = resolve; });
+  let destroyed = 0;
+  const controller = new PdfReaderController({ loadPdf: async () => pdf, loadPdfium: () => { started(); return loading; } });
+  await controller.open({ documentId: "stale-fallback", lastModified: 1, blob: new Blob(["x"]) });
+  const request = controller.ensurePdfium(pdf);
+  await start;
+  await controller.close();
+  release({ destroy: async () => { destroyed++; } });
+  assert.equal(await request, null);
+  assert.equal(destroyed, 1);
+  assert.equal(await controller.ensurePdfium(pdf), null);
 });

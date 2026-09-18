@@ -429,7 +429,7 @@ function PdfObjectLayer({ viewport, annotations }: { viewport: PageViewport; ann
 
 export type PdfPageViewProps = {
   document: PDFDocumentProxy;
-  pdfiumDocument?: PDFiumDocument | null;
+  requestPdfium?: (document: PDFDocumentProxy) => Promise<PDFiumDocument | null>;
   page: number;
   zoom: number;
   fitMode: PdfFitMode;
@@ -453,7 +453,7 @@ export type PdfPageViewProps = {
 
 export function PdfPageView({
   document,
-  pdfiumDocument = null,
+  requestPdfium,
   page,
   zoom,
   fitMode,
@@ -602,7 +602,9 @@ export function PdfPageView({
       signal: AbortSignal,
     ) => {
       const canvas = canvasRef.current;
-      if (!canvas || !pdfiumDocument || signal.aborted) return false;
+      if (!canvas || !requestPdfium || signal.aborted || disposed) return false;
+      const pdfiumDocument = await requestPdfium(document);
+      if (!pdfiumDocument || signal.aborted || disposed) return false;
       const normalizedRotation = ((rotation % 360) + 360) % 360;
       const unrotatedViewport = pdfPage.getViewport({ scale: nextViewport.scale, rotation: 0 });
       const bitmap = await withRenderTimeout(
@@ -667,16 +669,12 @@ export function PdfPageView({
         const ratio = firstPass ? previewRenderRatio(nextViewport.width, nextViewport.height, fullRatio) : fullRatio;
 
         let renderedWithPdfium = false;
-        if (!firstPass && pdfiumDocument && renderPriority === "visible") {
-          try {
-            renderedWithPdfium = await renderPdfium(pdfPage, nextViewport, ratio, signal);
-          } catch {
-            // PDF.js remains a safe fallback if PDFium cannot open a specific page.
-          }
-        }
-
-        if (!renderedWithPdfium) {
+        try {
           await renderPdfJs(pdfPage, nextViewport, ratio, hasRenderedRef.current, signal);
+        } catch (error) {
+          if (disposed || signal.aborted || isRenderCancellation(error)) throw error;
+          renderedWithPdfium = await renderPdfium(pdfPage, nextViewport, ratio, signal);
+          if (!renderedWithPdfium) throw error;
         }
         if (disposed || signal.aborted) throw new DOMException("PDF render cancelled", "AbortError");
 
@@ -690,7 +688,7 @@ export function PdfPageView({
         // The first pass is deliberately a 1x preview. Refine it only after the
         // visible bitmap has been committed, and let newly visible pages jump
         // ahead of this quality pass.
-        if (firstPass && fullRatio > ratio + .08) {
+        if (!renderedWithPdfium && firstPass && fullRatio > ratio + .08) {
           refinementTimer = window.setTimeout(() => {
             if (disposed) return;
             refinement = pdfWorkScheduler.schedule("nearby", async (refinementSignal) => {
@@ -716,7 +714,7 @@ export function PdfPageView({
       scheduled?.cancel();
       refinement?.cancel();
     };
-  }, [continuous, document, fitMode, hostSize.height, hostSize.pixelRatio, hostSize.width, page, pdfiumDocument, renderPriority, rotation, zoom]);
+  }, [continuous, document, fitMode, hostSize.height, hostSize.pixelRatio, hostSize.width, page, requestPdfium, renderPriority, rotation, zoom]);
 
   useEffect(() => {
     if (renderPriority !== "visible" || !hasRenderedRef.current || hasNotifiedVisibleBitmapRef.current) return;

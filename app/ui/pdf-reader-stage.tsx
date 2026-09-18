@@ -4,7 +4,7 @@ import type { ReaderState } from "../document-runtime-adapter";
 import type { PdfFitMode, PdfRect, PdfViewMode } from "../pdf-domain";
 import { useActivePdfNavigationController } from "../pdf-navigation-controller";
 import { PdfPageView } from "../pdf-reader";
-import type { PDFiumDocument } from "../pdfium-renderer";
+import type { PdfPageViewProps } from "../pdf-reader";
 import { VirtualizedPdfPages, type VirtualizedPdfPagesHandle } from "../virtualized-pdf-pages";
 import { useReaderPaneControllers } from "../workspace-controllers-context";
 
@@ -14,7 +14,7 @@ export type PdfReaderStageViewModel = {
   fitMode: PdfFitMode;
   onPdfPageRendered: (page: number) => void;
   pdfStatus: "idle" | "loading" | "error";
-  pdfiumDocument: PDFiumDocument | null;
+  requestPdfium: PdfPageViewProps["requestPdfium"];
   ready: boolean;
   rotation: number;
   sourceFocus: { documentId: string; page: number; rect: PdfRect } | null;
@@ -57,7 +57,7 @@ function DemoDocument({ page }: { page: number }) {
 }
 
 export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewModel }) {
-  const { continuousPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, pdfiumDocument, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode } = viewModel;
+  const { continuousPagesRef, documentStageRef, fitMode, onPdfPageRendered, pdfStatus, requestPdfium, ready, rotation, sourceFocus, sourceZoom, updateReader, viewMode } = viewModel;
   const { documents, layout, readerInteraction } = useReaderPaneControllers();
   const { INK_COLORS, commitPdfPageAnnotations, handleCrop, handlePdfSelection, handlePdfWheelZoom, handleReaderScroll, inkColor, inkWidth, pdfAnnotationText, pdfAnnotations, pdfHighlightColor, pdfPanel, pdfPanelColor, pdfSignatureDraft, pdfStampDraft, pdfTextDraft, pdfTool, setInkWidth, setPdfPanel, setPdfSignatureDraft, setPdfStampDraft, setPdfTextDraft, updatePdfPanelColor } = readerInteraction;
   const { activeDocument, activeQuery: activeSearchQuery, activeWorkspace, currentDocument: currentPdfDocument, sourcePage, sourcePages } = useActivePdfNavigationController();
@@ -93,7 +93,7 @@ export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewMod
               {["note", "text", "stamp", "signature"].includes(pdfTool) && <p className="pdf-placement-help">Bấm nhiều vị trí để đặt lại cùng nội dung. Dùng công cụ Tẩy hoặc danh sách Chú thích để xóa.</p>}
             </div>
           )}<div className={`document-stage workspace-frame pdf-view-${viewMode}`} ref={documentStageRef} onScroll={handleReaderScroll}>
-            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} pdfiumDocument={pdfiumDocument} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={handleCrop} onBitmapReady={onPdfPageRendered} /> : currentPdfDocument ? (
+            {currentPdfDocument && viewMode === "single" ? <PdfPageView key={`${activeDocument?.id}-${sourcePage}-${rotation}`} document={currentPdfDocument} requestPdfium={requestPdfium} page={sourcePage} zoom={sourceZoom} fitMode={fitMode} rotation={rotation} tool={pdfTool} inkColor={inkColor} highlightColor={pdfHighlightColor} inkWidth={inkWidth} annotationText={pdfAnnotationText} annotations={pdfAnnotations} searchQuery={activeSearchQuery} sourceFocus={sourceFocus && sourceFocus.documentId === activeDocument?.id && sourceFocus.page === sourcePage ? sourceFocus.rect : null} onSelection={handlePdfSelection} onAnnotationCommit={(next, previous) => commitPdfPageAnnotations(sourcePage, next, previous)} onCrop={handleCrop} onBitmapReady={onPdfPageRendered} /> : currentPdfDocument ? (
               <VirtualizedPdfPages
                 key={`${activeDocument?.id}-${rotation}`}
                 ref={continuousPagesRef}
@@ -102,7 +102,7 @@ export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewMod
                 pages={sourcePages}
                 rootRef={documentStageRef}
                 document={currentPdfDocument}
-                pdfiumDocument={pdfiumDocument}
+                requestPdfium={requestPdfium}
                 zoom={sourceZoom}
                 rotation={rotation}
                 tool={pdfTool}
