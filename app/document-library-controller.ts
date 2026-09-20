@@ -81,7 +81,7 @@ export type LinkWorkspaceToNoteInput = DocumentRuntimeSettings & {
   target: LinkedNoteTarget;
 };
 
-type PdfStorage = Pick<typeof localBinaryStorage, "savePdf" | "readPdf" | "deletePdf">;
+type PdfStorage = Pick<typeof localBinaryStorage, "savePdf" | "readPdf" | "deletePdf" | "renamePdf">;
 type RuntimeWriter = (snapshot: PersistedLibrary) => void;
 
 export type DocumentLibraryControllerDependencies = {
@@ -233,6 +233,7 @@ export class DocumentLibraryController {
       : `temporary-${sessionToken}`;
     const existing = input.saveToLibrary ? input.workspaces.find((workspace) => workspace.id === workspaceId) : undefined;
     if (existing) {
+      await Promise.all(files.map((file, index) => this.pdfStorage.savePdf(documents[index].id, documents[index].name, file)));
       const savedAt = this.persist(input.workspaces, existing.id, { ...input, workspaceMode: "reader" });
       return {
         workspaces: input.workspaces,
@@ -313,7 +314,7 @@ export class DocumentLibraryController {
     });
     const success = destination.mode === "none"
       ? input.saveToLibrary
-        ? files.length === 1 ? "Đã lưu PDF vào thư viện — chưa tạo note" : "Đã lưu cụm PDF — chưa tạo note"
+        ? files.length === 1 ? "Đã ghi nhớ liên kết PDF — chưa tạo note" : "Đã ghi nhớ các liên kết PDF — chưa tạo note"
         : files.length === 1 ? "Đang xem PDF tạm — không lưu, không tạo note" : "Đang xem cụm PDF tạm — không lưu, không tạo note"
       : input.saveToLibrary ? "Đã thêm tài liệu và tạo vị trí note" : "Đã mở PDF tạm; note được lưu độc lập";
     return { workspaces, activeWorkspaceId: workspace.id, workspaceMode, savedAt, message: warning || success };
@@ -334,6 +335,10 @@ export class DocumentLibraryController {
       : `collection-${stableHash(documents.map((document) => document.id).sort().join(":"))}`;
     const existing = input.workspaces.find((workspace) => workspace.id === workspaceId);
     if (existing) {
+      await Promise.all(temporary.documents.map(async (document, index) => {
+        const stored = this.temporaryPdfs.get(document.id);
+        if (stored) await this.pdfStorage.savePdf(documents[index].id, stored.name, stored.blob);
+      }));
       const reconnectTarget = pendingNoteTarget
         && pendingNoteTarget.notebookId === temporary.noteNotebookId
         && this.noteTargetExists(pendingNoteTarget.target)
@@ -425,6 +430,26 @@ export class DocumentLibraryController {
     };
   }
 
+  async relinkPdf(input: DocumentRuntimeSettings & { workspaces: WorkspaceItem[]; activeWorkspaceId: string; documentId: string; file: File }): Promise<DocumentMutationResult> {
+    this.requireReady();
+    const target = input.workspaces.find((workspace) => workspace.documents.some((document) => document.id === input.documentId));
+    if (!target) throw new Error("Không tìm thấy tài liệu cần nối lại");
+    const file = input.file;
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) throw new Error("Vui lòng chọn tệp PDF");
+    const updated = { ...target, documents: target.documents.map((document) => document.id === input.documentId
+      ? { ...document, size: file.size, lastModified: file.lastModified } : document) };
+    if (target.kind === "temporary") {
+      this.temporaryPdfs.set(input.documentId, { name: file.name, blob: file });
+    } else {
+      await this.pdfStorage.savePdf(input.documentId, file.name, file);
+      await this.notes.saveDocumentWorkspace(documentWorkspaceInput(updated, null, input));
+    }
+    const workspaces = input.workspaces.map((workspace) => workspace.id === target.id ? updated : workspace);
+    const savedAt = this.persist(workspaces, input.activeWorkspaceId, input);
+    return { workspaces, activeWorkspaceId: input.activeWorkspaceId, workspaceMode: input.workspaceMode, savedAt,
+      message: "Đã nối lại PDF gốc; giữ nguyên vị trí đọc và ghi chú" };
+  }
+
   async renameWorkspace(input: RenameWorkspaceInput): Promise<DocumentMutationResult> {
     this.requireReady();
     const name = input.name.trim().replace(/\.pdf$/i, "").trim();
@@ -442,8 +467,7 @@ export class DocumentLibraryController {
       await this.notes.saveDocumentWorkspace(documentWorkspaceInput(updated, null, input));
     }
     if (renamedDocument) {
-      const stored = await this.readPdf(renamedDocument.id);
-      if (stored && target.kind !== "temporary") await this.pdfStorage.savePdf(renamedDocument.id, renamedDocument.name, stored.blob);
+      if (target.kind !== "temporary") await this.pdfStorage.renamePdf(renamedDocument.id, renamedDocument.name);
     }
     const workspaces = input.workspaces.map((workspace) => workspace.id === target.id ? updated : workspace);
     const savedAt = this.persist(workspaces, input.activeWorkspaceId, input);

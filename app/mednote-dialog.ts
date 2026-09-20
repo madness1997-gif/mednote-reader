@@ -167,7 +167,7 @@ export function requestNoteDestination(options: {
   const canUseExisting = options.notebooks.length > 0;
   const form = document.createElement("form");
   form.innerHTML = `
-    <p class="mednote-note-destination-hint">PDF sẽ ${options.savedToLibrary ? "được lưu trong thư viện" : "chỉ mở tạm, không chiếm bộ nhớ lâu dài"}. Note luôn được lưu độc lập.</p>
+    <p class="mednote-note-destination-hint">PDF sẽ ${options.savedToLibrary ? "được ghi nhớ bằng liên kết đến file gốc, không sao chép vào thư viện" : "chỉ mở tạm, không chiếm bộ nhớ lâu dài"}. Note luôn được lưu độc lập.</p>
     <div class="mednote-note-destination-modes">
       <label><input type="radio" name="mode" value="none" checked><span><b>Chỉ mở tài liệu</b><small>Không tạo note lúc này</small></span></label>
       <label><input type="radio" name="mode" value="notebook"><span><b>Notebook mới</b><small>Tạo một sổ note riêng</small></span></label>

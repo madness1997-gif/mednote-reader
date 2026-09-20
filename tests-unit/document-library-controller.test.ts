@@ -44,6 +44,7 @@ async function harness() {
   const controller = new DocumentLibraryController({
     notes,
     pdfStorage: {
+      renamePdf: async (id, name) => { const stored = binaries.get(id); if (stored) binaries.set(id, { ...stored, name }); },
       savePdf: async (id, name, blob) => { binaries.set(id, { blob, name }); },
       readPdf: async (id) => binaries.get(id),
       deletePdf: async (id) => { binaries.delete(id); },
@@ -354,5 +355,34 @@ test("temporary duplicate PDF merges its new exact note link into the existing D
     assert.ok(graph?.links.some((link) => link.targetType === target.targetType && link.targetId === target.targetId));
     assert.equal(graph?.documents.length, 1);
     assert.equal(graph?.contexts.length, 1);
+  } finally { await context.close(); }
+});
+
+test("relinking a moved PDF preserves document ID, reader state and note links", async () => {
+  const context = await harness();
+  try {
+    context.controller.activate();
+    const imported = await context.controller.importPdfFiles({
+      ...baseInput([pdf("old.pdf")]),
+      destination: { mode: "existing", notebookId: "nb", target: { targetType: "page", targetId: "page" } },
+    });
+    const workspace = imported.workspaces[0];
+    const document = workspace.documents[0];
+    document.reader.page = 17;
+    document.reader.zoom = 1.5;
+    const before = await context.repository.loadDocumentGraph();
+    const result = await context.controller.relinkPdf({
+      ...baseInput([], imported.workspaces),
+      activeWorkspaceId: imported.activeWorkspaceId,
+      documentId: document.id,
+      file: pdf("moved.pdf", "replacement PDF", 99),
+    });
+    const relinked = result.workspaces[0].documents[0];
+    assert.equal(relinked.id, document.id);
+    assert.equal(relinked.reader.page, 17);
+    assert.equal(relinked.reader.zoom, 1.5);
+    assert.equal(relinked.lastModified, 99);
+    assert.equal(await context.binaries.get(document.id)?.blob.text(), "replacement PDF");
+    assert.deepEqual((await context.repository.loadDocumentGraph())?.links, before?.links);
   } finally { await context.close(); }
 });

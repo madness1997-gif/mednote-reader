@@ -92,7 +92,7 @@ export function LibraryPanel({
                       : <><button className="library-action library-rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }} aria-label={`Đổi tên ${item.name}`} title="Đổi tên tài liệu"><Pencil size={17} /></button><button className="library-action library-delete" onClick={() => { void documents.deleteWorkspace(item.id); }} aria-label={`Xóa ${item.name}`} title="Xóa PDF; giữ nguyên NoteStructure"><Trash2 size={17} /></button></>}
                   </div>
                 );
-              }) : <div className="library-domain-empty">Chưa có PDF đã lưu. PDF tạm không xuất hiện ở đây.</div>}
+              }) : <div className="library-domain-empty">Chưa có liên kết PDF. PDF tạm không xuất hiện ở đây.</div>}
             </div>
           </section>
 

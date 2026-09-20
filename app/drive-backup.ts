@@ -13,6 +13,7 @@ export type DriveBackupV2 = {
   format: typeof DRIVE_BACKUP_FORMAT;
   schemaVersion: typeof NOTE_SCHEMA_VERSION;
   exportedAt: number;
+  linkedPdfIds?: string[];
   sheetHashAlgorithm?: typeof DRIVE_SHEET_HASH_ALGORITHM;
   sheetContentHashes: Record<string, string>;
   library: LibraryV6;

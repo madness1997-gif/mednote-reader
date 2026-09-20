@@ -1,3 +1,5 @@
+import { pickLinkedPdfFiles } from "./pdf-file-reference";
+import { localBinaryStorage } from "./local-binary-storage";
 import { useRef, type ChangeEvent, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { documentLibrary, type DocumentMutationResult } from "./document-library-controller";
 import type { ResolvedDocumentSource } from "./note-document-source";
@@ -56,6 +58,7 @@ export type DocumentWorkspaceController = {
   openLibraryDocument: (workspaceId: string) => Promise<void>;
   openLibraryPdfPicker: () => void;
   openPreviewPdfPicker: () => void;
+  relinkActivePdf: () => void;
   previewPdfInputRef: RefObject<HTMLInputElement | null>;
   renameLibraryDocument: (workspaceId: string, name: string) => Promise<void>;
   saveTemporaryWorkspace: () => Promise<void>;
@@ -88,6 +91,7 @@ export function useDocumentWorkspaceController({
 }: UseDocumentWorkspaceControllerOptions): DocumentWorkspaceController {
   const previewPdfInputRef = useRef<HTMLInputElement>(null);
   const libraryPdfInputRef = useRef<HTMLInputElement>(null);
+  const relinkTargetRef = useRef<string | null>(null);
   const activeWorkspaceLinkedNotebookIds = activeWorkspace.kind === "temporary"
     ? activeWorkspace.noteNotebookId ? [activeWorkspace.noteNotebookId] : []
     : libraryProjection.documents.find((item) => item.id === activeWorkspace.id)?.linkedNotebookIds || [];
@@ -141,16 +145,54 @@ export function useDocumentWorkspaceController({
         noteZoom,
       });
       applyDocumentMutation(result);
+      window.dispatchEvent(new Event("mednote:pdf-source-changed"));
       setLibraryOpen(false);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể mở PDF");
     }
   };
 
+  const applyPickedFiles = async (files: File[], saveToLibrary: boolean, relinkId: string | null) => {
+    if (!files.length) return;
+    if (relinkId) {
+      try {
+        applyDocumentMutation(await documentLibrary.relinkPdf({
+          documentId: relinkId, file: files[0], workspaces: workspacesRef.current,
+          activeWorkspaceId: activeWorkspaceIdRef.current, readerShare,
+          workspaceMode: workspaceModeRef.current, noteZoom,
+        }));
+        dropDocumentHistories([relinkId]);
+        window.dispatchEvent(new Event("mednote:pdf-source-changed"));
+
+      } catch {
+        notify("Không thể lưu liên kết đến PDF gốc");
+      }
+      return;
+    }
+    await handlePdfFiles(files, saveToLibrary);
+  };
+
+  const openPdfPicker = async (saveToLibrary: boolean, relinkId: string | null = null) => {
+    try {
+      const files = await pickLinkedPdfFiles(!relinkId);
+      if (files === null) {
+        relinkTargetRef.current = relinkId;
+        (saveToLibrary ? libraryPdfInputRef : previewPdfInputRef).current?.click();
+        return;
+      }
+      await applyPickedFiles(files, saveToLibrary, relinkId);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      notify("Không thể truy cập PDF gốc. Hãy chọn lại file.");
+    }
+  };
+
   const handlePdfInputChange = (event: ChangeEvent<HTMLInputElement>, saveToLibrary: boolean) => {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
-    void handlePdfFiles(files, saveToLibrary);
+    const relinkId = relinkTargetRef.current;
+    relinkTargetRef.current = null;
+    void applyPickedFiles(files, saveToLibrary, relinkId);
   };
 
   const saveTemporaryWorkspace = async () => {
@@ -213,6 +255,9 @@ export function useDocumentWorkspaceController({
       return;
     }
     try {
+      if (workspace.activeDocumentId) {
+        await localBinaryStorage.requestPdfAccess(workspace.activeDocumentId);
+      }
       const currentNotebookId = noteStore.getSnapshot().structure?.active.activeNotebookId || null;
       const linkedNotebookId = currentNotebookId && item.linkedNotebookIds.includes(currentNotebookId)
         ? currentNotebookId
@@ -223,6 +268,7 @@ export function useDocumentWorkspaceController({
       workspaceModeRef.current = "reader";
       setWorkspaceMode("reader");
       setLibraryOpen(false);
+      window.dispatchEvent(new Event("mednote:pdf-source-changed"));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể mở tài liệu");
     }
@@ -252,7 +298,7 @@ export function useDocumentWorkspaceController({
       ? target.noteNotebookId ? 1 : 0
       : libraryProjection.documents.find((item) => item.id === target.id)?.linkedNotebookIds.length || 0;
     const targetLabel = target.kind === "collection" ? "cụm tài liệu" : target.kind === "demo" ? "tài liệu mẫu" : "tài liệu";
-    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebookCount ? `Các Notebook đang liên kết (${linkedNotebookCount}) vẫn được giữ nguyên trong Ghi chú.` : "Thao tác này chỉ xóa bản PDF đã lưu."}`)) return;
+    if (!window.confirm(`Xóa ${targetLabel} “${target.name}”? ${linkedNotebookCount ? `Các Notebook đang liên kết (${linkedNotebookCount}) vẫn được giữ nguyên trong Ghi chú.` : "Thao tác này chỉ xóa mục trong thư viện, không xóa PDF gốc."}`)) return;
     try {
       applyDocumentMutation(await documentLibrary.deleteWorkspace({
         workspaceId,
@@ -339,8 +385,9 @@ export function useDocumentWorkspaceController({
     libraryPdfInputRef,
     openExcerptSource,
     openLibraryDocument,
-    openLibraryPdfPicker: () => libraryPdfInputRef.current?.click(),
-    openPreviewPdfPicker: () => previewPdfInputRef.current?.click(),
+    openLibraryPdfPicker: () => { void openPdfPicker(true); },
+    relinkActivePdf: () => { if (activeDocument) void openPdfPicker(true, activeDocument.id); },
+    openPreviewPdfPicker: () => { void openPdfPicker(false); },
     previewPdfInputRef,
     renameLibraryDocument,
     saveTemporaryWorkspace,

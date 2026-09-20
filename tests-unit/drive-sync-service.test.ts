@@ -672,3 +672,35 @@ test("Drive controller owns auto-sync and watches canonical NoteStore content an
     "integration.workspaces",
   ]) assert.match(controller, new RegExp(dependency.replace(".", "\\.")));
 });
+
+test("linked PDFs sync metadata only and restore without downloading an old remote copy", async () => {
+  const context = await harness(library({ withAsset: false }));
+  try {
+    const linked = new Set(["doc-harrison"]);
+    const service = new DriveSyncService({
+      notes: context.notes,
+      remote: context.remote,
+      binaries: {
+        ...context.binaries,
+        isLinkedPdf: async (id) => linked.has(id),
+        rememberMissingPdf: async (id) => { linked.add(id); },
+        readPdf: async (_id, options) => {
+          assert.equal(options?.forBackup, true, "backup must not open the local PDF");
+          return undefined;
+        },
+      },
+    });
+    await service.sync("token", context.snapshot);
+    assert.deepEqual(context.remote.upserts, [DRIVE_MANIFEST_ID]);
+    const manifest = JSON.parse(await context.remote.shared.get(DRIVE_MANIFEST_ID)!.blob.text());
+    assert.deepEqual(manifest.linkedPdfIds, ["doc-harrison"]);
+    // An old uploaded copy must not cause a linked PDF to become embedded again.
+    context.remote.add("shared", "pdf:doc-harrison", new Blob(["old remote PDF"]));
+    linked.clear();
+    const result = await service.restore("token");
+    assert.equal(result.missingFiles, 0);
+    assert.equal(context.pdfs.size, 0);
+    assert.equal(linked.has("doc-harrison"), true);
+    assert.equal((await context.notes.exportLibrary()).documents.documents[0].payload?.reader.page, 42);
+  } finally { await context.close(); }
+});

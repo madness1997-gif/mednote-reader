@@ -66,7 +66,7 @@ export type DriveConnectionResult = {
 
 export type DriveAccount = DriveUser;
 
-type BinaryStorage = Pick<typeof localBinaryStorage, "savePdf" | "readPdf" | "deletePdf" | "saveAsset" | "readAsset" | "deleteAsset">;
+type BinaryStorage = Pick<typeof localBinaryStorage, "savePdf" | "readPdf" | "deletePdf" | "saveAsset" | "readAsset" | "deleteAsset"> & Partial<Pick<typeof localBinaryStorage, "isLinkedPdf" | "rememberMissingPdf">>;
 
 export type DriveRemoteGateway = {
   requestToken: (clientId: string, clientSecret?: string) => Promise<string>;
@@ -393,7 +393,7 @@ export class DriveSyncService {
       for (const document of library.documents.documents) {
         const mednoteId = `pdf:${document.id}`;
         if (remoteByMednoteId.has(mednoteId)) continue;
-        const stored = await this.binaries.readPdf(document.id);
+        const stored = await this.binaries.readPdf(document.id, { forBackup: true });
         if (!stored) continue;
         const uploaded = await this.remote.upsertFile(token, {
           name: `${document.id}__${document.name}`,
@@ -423,6 +423,9 @@ export class DriveSyncService {
       }
 
       const backup = createDriveBackup(library);
+      backup.linkedPdfIds = (await Promise.all(library.documents.documents.map(async (document) =>
+        await this.binaries.isLinkedPdf?.(document.id) ? document.id : null
+      ))).filter((id): id is string => id !== null);
       // Re-read the manifest after potentially slow binary uploads. This closes
       // the normal multi-device race window before replacing the canonical JSON.
       const indexedBeforeCommit = await this.inspectIndexed(token);
@@ -463,10 +466,13 @@ export class DriveSyncService {
       );
       if (indexed.inspection.sourceVersion === "v2") {
         const staged = await stageDriveBackup(manifestPayload);
+        const linkedPdfIds = new Set(Array.isArray((manifestPayload as { linkedPdfIds?: unknown }).linkedPdfIds)
+          ? (manifestPayload as { linkedPdfIds: string[] }).linkedPdfIds.filter((id) => typeof id === "string") : []);
         const pdfs: { id: string; name: string; blob: Blob }[] = [];
         const assets: { id: string; blob: Blob }[] = [];
         let missingFiles = 0;
         for (const document of staged.documents.documents) {
+          if (linkedPdfIds.has(document.id) || await this.binaries.isLinkedPdf?.(document.id)) continue;
           const remote = indexed.filesByMednoteId.get(`pdf:${document.id}`);
           if (!remote) {
             missingFiles += 1;
@@ -483,6 +489,9 @@ export class DriveSyncService {
           assets.push({ id: assetId, blob: await this.remote.downloadFile(token, remote.id) });
         }
         await this.commitRestore(pdfs, assets, () => this.notes.replaceFromLibrary(staged));
+        for (const document of staged.documents.documents) {
+          if (linkedPdfIds.has(document.id)) await this.binaries.rememberMissingPdf?.(document.id, document.name);
+        }
         const runtime = restoreRuntime(staged, staged.preferences.activeDocumentContextId);
         const restoredWorkspaceMode = runtime.activeWorkspaceId === NOTE_RUNTIME_WORKSPACE_ID && staged.preferences.workspaceMode === "reader"
           ? "note"
@@ -511,6 +520,7 @@ export class DriveSyncService {
       let missingFiles = 0;
       for (const workspace of normalized) {
         for (const document of workspace.documents) {
+          if (await this.binaries.isLinkedPdf?.(document.id)) continue;
           const remote = indexed.filesByMednoteId.get(`pdf:${document.id}`);
           if (!remote) {
             missingFiles += 1;

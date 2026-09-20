@@ -352,6 +352,8 @@ function createWindow() {
   else void mainWindow.loadFile(path.join(__dirname, "..", "dist-electron", "index.html"));
 }
 
+require("./pdf-file-links.cjs").installPdfFileLinks({ app, dialog, ipcMain, getWindow: () => mainWindow });
+
 ipcMain.handle("drive:authorize", async (_event, credentials = {}) => {
   if (activeAuthorization) return activeAuthorization;
   activeAuthorization = authorizeDrive(credentials.clientId, credentials.clientSecret).finally(() => { activeAuthorization = null; });

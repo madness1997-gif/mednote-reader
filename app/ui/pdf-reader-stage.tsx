@@ -119,9 +119,9 @@ export function PdfReaderStage({ viewModel }: { viewModel: PdfReaderStageViewMod
                 onBitmapReady={onPdfPageRendered}
               />
             ) : activeDocument ? (
-              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy bản PDF đã lưu" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={documents.openLibraryPdfPicker}>Chọn lại PDF</button>}</div>
+              <div className="empty-document"><FileText size={34} /><strong>{pdfStatus === "error" ? "Không tìm thấy hoặc chưa có quyền truy cập PDF gốc" : "Đang mở tài liệu…"}</strong>{pdfStatus === "error" && <button className="primary-button" disabled={!ready} onClick={documents.relinkActivePdf}>Chọn lại PDF gốc</button>}</div>
             ) : activeWorkspace.kind === "demo" ? <><div className="demo-reader-hint"><BookOpen size={16} /><span>Đây là tài liệu minh họa. Thêm một PDF để dùng chọn chữ, chú thích và cắt hình.</span></div><DemoDocument page={sourcePage} /></> : (
-              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Mở PDF để đọc tạm, hoặc lưu riêng vào thư viện khi cần.</span><button className="primary-button" disabled={!ready} onClick={documents.openPreviewPdfPicker}>Mở PDF</button></div>
+              <div className="empty-document"><FolderOpen size={34} /><strong>Chưa có tài liệu</strong><span>Mở PDF để đọc tạm, hoặc ghi nhớ liên kết trong thư viện.</span><button className="primary-button" disabled={!ready} onClick={documents.openPreviewPdfPicker}>Mở PDF</button></div>
             )}
           </div></>);
 }

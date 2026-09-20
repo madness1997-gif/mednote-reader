@@ -343,6 +343,13 @@ export default function Home() {
     setPdfStatus(status === "loading" ? "loading" : status === "error" ? "error" : "idle");
   }), [pdfReader]);
 
+  const [pdfSourceRevision, setPdfSourceRevision] = useState(0);
+  useEffect(() => {
+    const reloadSource = () => setPdfSourceRevision((revision) => revision + 1);
+    window.addEventListener("mednote:pdf-source-changed", reloadSource);
+    return () => window.removeEventListener("mednote:pdf-source-changed", reloadSource);
+  }, []);
+
   useEffect(() => () => {
     void pdfReader.close();
   }, [pdfReader]);
@@ -357,7 +364,7 @@ export default function Home() {
     void (async () => {
       const stored = await documentLibrary.readPdf(documentId);
       if (cancelled) return;
-      if (!stored) throw new Error("Missing PDF");
+      if (!stored) throw new Error("Không tìm thấy PDF gốc. File có thể đã được di chuyển hoặc xóa; hãy chọn lại file.");
       return pdfReader.open({ documentId, lastModified, blob: stored.blob });
     })().then((session) => {
       if (!session || cancelled) return;
@@ -371,14 +378,14 @@ export default function Home() {
           : item),
       })));
       setToast(`Đã mở ${session.pdf.numPages} trang`);
-    }).catch(() => {
+    }).catch((error) => {
       if (!cancelled) {
         setPdfStatus("error");
-        setToast("Không thể mở PDF này");
+        setToast(error instanceof Error ? error.message : "Không thể mở PDF này");
       }
     });
     return () => { cancelled = true; void pdfReader.close(); };
-  }, [activeWorkspaceId, activeDocument?.id, ready, pdfReader]);
+  }, [activeWorkspaceId, activeDocument?.id, ready, pdfReader, pdfSourceRevision]);
 
   useEffect(() => {
     if (!toast || toast === "Đã tự lưu") return;

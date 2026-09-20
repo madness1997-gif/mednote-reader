@@ -36,6 +36,8 @@ declare global {
   interface Window {
     mednoteDesktop?: {
       isDesktop: true;
+      pickPdfFiles?: (multiple: boolean) => Promise<Array<{ token: string; name: string; lastModified: number }>>;
+      readLinkedPdf?: (token: string) => Promise<Uint8Array<ArrayBuffer>>;
       authorizeDrive: (clientId: string, clientSecret?: string) => Promise<string>;
       resumeDrive: (clientId: string) => Promise<string | null>;
       cancelDriveAuthorization: () => Promise<boolean>;

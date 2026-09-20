@@ -139,3 +139,34 @@ test("legacy current-pdf remains import-readable", async () => {
   assert.equal(stored?.name, "legacy.pdf");
   assert.equal(await stored?.blob.text(), "legacy PDF");
 });
+
+test("newly selected PDFs persist only a reference, not their bytes", async () => {
+  const file = new File(["selected PDF"], "selected.pdf", { type: "application/pdf" });
+  await localBinaryStorage.savePdf("linked", file.name, file);
+  const raw = await readRawRecord<{ reference: { kind: string }; blob?: Blob }>("pdf:linked");
+  assert.equal(raw?.reference.kind, "session");
+  assert.equal(raw?.blob, undefined);
+  assert.equal(await (await localBinaryStorage.readPdf("linked"))?.blob.text(), "selected PDF");
+  assert.equal(await localBinaryStorage.readPdf("linked", { forBackup: true }), undefined);
+  await localBinaryStorage.renamePdf("linked", "renamed.pdf");
+  assert.equal(await localBinaryStorage.isLinkedPdf("linked"), true);
+  assert.equal((await localBinaryStorage.readPdf("linked"))?.name, "renamed.pdf");
+  await localBinaryStorage.deletePdf("linked");
+  assert.equal(await localBinaryStorage.readPdf("linked"), undefined);
+});
+
+test("missing references keep metadata without inventing a stored PDF", async () => {
+  await localBinaryStorage.rememberMissingPdf("missing-source", "source.pdf");
+  assert.equal(await localBinaryStorage.isLinkedPdf("missing-source"), true);
+  assert.equal(await localBinaryStorage.readPdf("missing-source"), undefined);
+  await localBinaryStorage.renamePdf("missing-source", "display name.pdf");
+  assert.equal(await localBinaryStorage.isLinkedPdf("missing-source"), true);
+});
+
+test("relinking replaces legacy embedded bytes while retaining document identity", async () => {
+  await localBinaryStorage.savePdf("legacy", "old.pdf", new Blob(["old"]));
+  await localBinaryStorage.savePdf("legacy", "source.pdf", new File(["new"], "source.pdf"));
+  assert.equal(await localBinaryStorage.isLinkedPdf("legacy"), true);
+  assert.equal(await (await localBinaryStorage.readPdf("legacy"))?.blob.text(), "new");
+  assert.equal(await localBinaryStorage.readPdf("legacy", { forBackup: true }), undefined);
+});
