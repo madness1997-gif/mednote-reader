@@ -1,5 +1,5 @@
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, Link2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
+import { ImagePlus, AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BringToFront, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, IndentDecrease, IndentIncrease, Italic, Layers2, Link2, List, ListOrdered, Maximize2, MessageSquareText, Minus, NotebookTabs, Omega, PaintBucket, PanelRightOpen, Plus, Redo2, RemoveFormatting, Rows3, ScanText, SendToBack, Sigma, Square, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from "lucide-react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
 import type { NotePage } from "../note-runtime-adapter";
 import { useNotePaneControllers } from "../workspace-controllers-context";
 import type { NotePanel, NoteSheetViewMode, TextLineHeight } from "./ui-contracts";
@@ -17,9 +17,10 @@ export type NoteToolbarViewModel = {
   setNoteViewZoom: (zoom: number) => void;
 };
 export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteToolbarViewModel; onCreateSheetLink: () => void }) {
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets } = viewModel;
   const { layout, noteCanvas: canvas, noteEditor: editor } = useNotePaneControllers();
-  const { activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
+  const { addImageFile, activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
   const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
   return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
@@ -55,6 +56,12 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
                 })}
                 <button className={`tool-button expandable sticker-primary-button ${textInsertPopover === "stickers" ? "active" : ""}`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} /><ChevronDown className="tool-chevron" size={11} /></button>
               </div>
+              <input ref={imageInputRef} type="file" accept="image/*" hidden aria-label="Chọn ảnh từ máy" onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void addImageFile(file);
+              }} />
+              <button className="icon-button compact" onClick={() => imageInputRef.current?.click()} aria-label="Chèn ảnh từ máy" title="Chèn ảnh từ máy (Browse)"><ImagePlus size={20} /></button>
               <button className="icon-button compact" onPointerDown={(event) => event.preventDefault()} onClick={onCreateSheetLink} aria-label="Liên kết đến sheet" title="Tạo hoặc sửa liên kết đến sheet (Ctrl+K)"><Link2 size={17} /></button>
               <span className="toolbar-spacer" />
               <div className={`toolbar-cluster object-layer-cluster ${selectedExcerpt ? "has-selection" : ""}`} aria-label="Sắp xếp lớp đối tượng">

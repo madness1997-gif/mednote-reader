@@ -6,7 +6,7 @@
   padding: 0 2px 32px;
   overflow: auto;
   color: var(--fa-ink, #26343a);
-  font-family: "Times New Roman", Times, serif;
+  font-family: "Mali", cursive;
   scrollbar-width: thin;
   scrollbar-color: #aab8bd transparent;
 }
@@ -999,4 +999,9 @@
   .template-first-aid .fa-block.selected .fa-image-zone:not(.has-image) {
     min-height: 86px;
   }
+}
+
+/* Default block typography; explicit formatting inside rich text remains editable. */
+.template-first-aid .fa-block-editor .fa-rich-editor {
+  font-family: "Mali", cursive !important;
 }

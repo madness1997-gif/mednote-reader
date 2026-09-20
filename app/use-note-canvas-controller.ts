@@ -1,7 +1,8 @@
 import { Brush, Eraser, Highlighter, Lasso, MessageSquareText, MousePointer2, Pencil, PenLine, PenTool, ScanText, Shapes, TextCursorInput, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type PointerEvent, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type PointerEvent, type SetStateAction } from "react";
 import type { PdfCropResult, PdfRect, PdfSelection, PdfTool } from "./pdf-domain";
 import { localBinaryStorage } from "./local-binary-storage";
+import { compressFirstAidImage } from "./first-aid-image-service";
 import { fitFirstAidImageLayout } from "./first-aid-image-placement";
 import { firstAidTemplateTransition } from "./first-aid-block-model";
 import { firstAidThemeVariables } from "./first-aid-theme";
@@ -169,6 +170,9 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
   const [firstAidCropResult, setFirstAidCropResult] = useState<FirstAidCropResult | null>(null);
   const noteInkSession = useMemo(() => new NoteInkSession(60), []);
   const [inkHistoryVersion, setInkHistoryVersion] = useState(0);
+
+  const imageTargetRef = useRef({ activeNote, canvasScopeKey, updateActiveNote });
+  imageTargetRef.current = { activeNote, canvasScopeKey, updateActiveNote };
 
   const selectedExcerptIndex = activeNote.excerpts.findIndex((excerpt) => excerpt.id === selectedExcerptId);
   const selectedExcerpt = selectedExcerptIndex >= 0 ? activeNote.excerpts[selectedExcerptIndex] : null;
@@ -346,6 +350,36 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     }
   };
 
+  const addImageFile = async (file: File) => {
+    const targetScope = canvasScopeKey;
+    const assetId = canvasUid("note-image");
+    try {
+      const { blob, aspectRatio } = await compressFirstAidImage(file);
+      await localBinaryStorage.saveAsset(assetId, blob);
+      const current = imageTargetRef.current;
+      if (current.canvasScopeKey !== targetScope) {
+        await localBinaryStorage.deleteAsset(assetId);
+        notify("Đã hủy chèn ảnh vì trang note đã thay đổi");
+        return;
+      }
+      const layout = defaultExcerptLayout(current.activeNote.excerpts.length, "image");
+      Object.assign(layout, fitFirstAidImageLayout({ x: layout.x, y: layout.y, width: layout.width, maxHeight: .6 }, aspectRatio, paperWidth, paperHeight), { aspectRatio });
+      const excerpt: NoteExcerpt = {
+        id: canvasUid("excerpt"), kind: "image", sourceKind: "manual",
+        assetId, documentName: file.name, createdAt: Date.now(), layout,
+      };
+      const excerpts = [...current.activeNote.excerpts, excerpt];
+      imageTargetRef.current = { ...current, activeNote: { ...current.activeNote, excerpts } };
+      current.updateActiveNote({ excerpts });
+      setSelectedExcerptId(excerpt.id);
+      setActiveTool("pointer");
+      setNotePanel(null);
+      notify("Đã chèn ảnh vào trang note");
+    } catch {
+      notify("Không thể đọc hoặc lưu ảnh đã chọn");
+    }
+  };
+
   const deleteExcerpt = (excerptId: string) => {
     updateActiveNote({ excerpts: activeNote.excerpts.filter((excerpt) => excerpt.id !== excerptId) });
     if (selectedExcerptId === excerptId) setSelectedExcerptId(null);
@@ -482,7 +516,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     }
     updateActiveNote({
       paper: { ...activeNote.paper, size: "a4", orientation: "portrait", template: "first-aid", color: "white" },
-      text: { ...activeNote.text, font: "times", size: 12, align: "left" },
+      text: { ...activeNote.text, font: "mali", size: 12, align: "left" },
       ...transition,
     });
     setActiveTool("text");
@@ -491,7 +525,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
 
   return {
     INK_COLORS, PAPER_COLORS, PAPER_SIZES, PAPER_TEMPLATES, PEN_STYLES, STICKER_PRESETS, TEXT_BOX_BACKGROUND_COLORS, tools: TOOLS,
-    activeTool, addCalloutAt, addFirstAidImage, addImageExcerpt, addSticker, addTextBoxAt, addTextExcerpt, basePaperMaxWidth,
+    activeTool, addCalloutAt, addFirstAidImage, addImageExcerpt, addImageFile, addSticker, addTextBoxAt, addTextExcerpt, basePaperMaxWidth,
     cancelFirstAidCrop, canRedo: noteInkSession.canRedo(activeNote.id), canUndo: noteInkSession.canUndo(activeNote.id), chooseNoteTool,
     commitStrokes, deleteExcerpt, editExcerpt, finishFirstAidPdfCrop, firstAidCropResult, highlighterWidth, inkColor, inkHistoryVersion,
     inkWidth, moveExcerpt, notePanel, notify, paperHeight, paperStyle, paperWidth, penStyle, redo, requestFirstAidPdfCrop, selectedExcerpt,
