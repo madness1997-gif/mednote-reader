@@ -16,6 +16,10 @@ const PAPER_SIZES: Record<PaperSize, { label: string; dimensions: string; width:
 };
 
 const TEXT_FAMILIES: Record<TextFont, string> = {
+  "patrick-hand": '"Patrick Hand", cursive',
+  "dancing-script": '"Dancing Script", cursive',
+  "mali": '"Mali", cursive',
+
   times: '"Times New Roman", Times, serif', segoe: '"Segoe UI", Arial, sans-serif', arial: 'Arial, "Helvetica Neue", sans-serif',
   tahoma: 'Tahoma, "Segoe UI", sans-serif', verdana: 'Verdana, Geneva, sans-serif', trebuchet: '"Trebuchet MS", Arial, sans-serif',
   calibri: 'Calibri, Carlito, "Segoe UI", sans-serif', aptos: 'Aptos, Calibri, "Segoe UI", sans-serif', sans: 'Inter, "Segoe UI", Arial, sans-serif',

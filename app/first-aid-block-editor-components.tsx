@@ -279,7 +279,7 @@ export function FirstAidBlockBody({ block, canEdit, assetUrl, pageObjectLayouts,
     if (block.imageObjectId) {
       const objectHeight = pageObjectLayouts[block.imageObjectId]?.height;
       const linkedHeight = objectHeight && pageHeightCss > 0 ? Math.max(28, Math.round(objectHeight * pageHeightCss)) : undefined;
-      return <div className="fa-linked-image-space" data-layout-key={pageObjectLayoutKey} style={linkedHeight ? { height: `${linkedHeight}px` } : { aspectRatio: String(Math.max(.05, block.imageAspectRatio ?? 1.5)) }} aria-label="Ảnh là đối tượng có thể chọn và thao tác trên trang"><span>Ảnh đã là đối tượng trên trang</span></div>;
+      return <div className="fa-linked-image-space" data-layout-key={pageObjectLayoutKey} style={linkedHeight ? { height: `${linkedHeight}px` } : { aspectRatio: String(Math.max(.05, block.imageAspectRatio ?? 1.5)) }} aria-label="Ảnh là đối tượng có thể chọn và thao tác trên trang"></div>;
     }
     return <div className={`fa-image-zone ${assetUrl ? "has-image" : ""}`} onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => {
       if (!canEdit) return;

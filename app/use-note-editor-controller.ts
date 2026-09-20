@@ -42,6 +42,9 @@ const TEXT_FONTS: NoteEditorFont[] = [
   { id: "courier", label: "Courier New", family: '"Courier New", Courier, monospace' },
   { id: "cascadia", label: "Cascadia Mono", family: '"Cascadia Mono", Consolas, monospace' },
   { id: "mono", label: "Đơn cách (hệ thống)", family: '"Courier New", monospace' },
+  { id: "patrick-hand", label: "Patrick Hand (viết tay)", family: '"Patrick Hand", cursive' },
+  { id: "dancing-script", label: "Dancing Script (viết tay)", family: '"Dancing Script", cursive' },
+  { id: "mali", label: "Mali (viết tay)", family: '"Mali", cursive' },
   { id: "handwriting", label: "Viết tay", family: '"Segoe Print", "Bradley Hand", cursive' },
 ];
 

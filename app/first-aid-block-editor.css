@@ -351,17 +351,7 @@
   border: 0;
   background: transparent;
 }
-.fa-linked-image-space > span {
-  position: absolute;
-  right: 5px;
-  bottom: 4px;
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--fa-muted-bg, #eff7f8) 88%, transparent);
-  color: var(--fa-muted-ink, #5e747c);
-  font: 600 7px/1.2 "Segoe UI", Arial, sans-serif;
-  pointer-events: none;
-}
+
 .fa-caption-input {
   min-height: 24px;
   padding: 4px 6px !important;

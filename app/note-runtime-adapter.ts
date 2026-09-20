@@ -34,6 +34,9 @@ export type PaperColor = "white" | "ivory" | "yellow" | "mint" | "blue" | "dark"
 
 export type TextFont =
   | "handwriting"
+  | "patrick-hand"
+  | "dancing-script"
+  | "mali"
   | "segoe"
   | "arial"
   | "tahoma"
