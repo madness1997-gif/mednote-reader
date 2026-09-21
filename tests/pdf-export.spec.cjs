@@ -29,7 +29,8 @@ for (const desktop of [false, true]) {
     } else output = await readBrowserPrint(page);
     expect(output.bytes.subarray(0, 5).toString()).toBe('%PDF-');
     expect(output.pages).toHaveLength(1);
-    expect(output.pages[0]).toContain('MEDNOTE PDF E2E');
+    // PDF.js can split a shaped font run into multiple items; the helper adds spaces between them.
+    expect(output.pages[0].replace(/\s/g, '')).toContain('MEDNOTEPDFE2E');
     expect(output.pages[0]).toContain('Đây là nội dung');
     await expect(page.locator('.note-pdf-export-surface')).toHaveCount(0);
   });
