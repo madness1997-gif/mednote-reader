@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mednoteDesktop", {
   isDesktop: true,
+  printNotePdf: (html) => ipcRenderer.invoke("note:print-pdf", html),
   pickPdfFiles: (multiple) => ipcRenderer.invoke("pdf:pick", multiple),
   readLinkedPdf: (token) => ipcRenderer.invoke("pdf:read-linked", token),
   authorizeDrive: (clientId, clientSecret) => ipcRenderer.invoke("drive:authorize", { clientId, clientSecret }),

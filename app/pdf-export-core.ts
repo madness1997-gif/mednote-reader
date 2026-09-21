@@ -57,7 +57,7 @@ async function settleLayout() {
   await delay(isMobile() ? 20 : 35);
 }
 
-async function settleCaptureAssets(source: HTMLElement) {
+export async function settleCaptureAssets(source: HTMLElement) {
   const fonts = document.fonts?.ready;
   if (fonts) await Promise.race([fonts, delay(2500)]).catch(() => undefined);
   const images = Array.from(source.querySelectorAll<HTMLImageElement>("img"));
@@ -150,7 +150,7 @@ export function materializePdfInlineBackgrounds(source: HTMLElement) {
   return fragmentCount;
 }
 
-function paperNaturalSize(source: HTMLElement) {
+export function paperNaturalSize(source: HTMLElement) {
   const computed = window.getComputedStyle(source);
   const width = Number.parseFloat(computed.getPropertyValue("--note-natural-width"))
     || Number.parseFloat(computed.getPropertyValue("--paper-max-width"))
@@ -206,7 +206,7 @@ function copyCanvasPixels(source: HTMLElement, clone: HTMLElement) {
   });
 }
 
-function createCaptureClone(source: HTMLElement, width: number, height: number) {
+export function createCaptureClone(source: HTMLElement, width: number, height: number) {
   const host = document.createElement("div");
   host.className = CAPTURE_HOST_CLASS;
   host.setAttribute("aria-hidden", "true");
@@ -324,7 +324,7 @@ const PAPER_CANDIDATES: PaperCandidate[] = [
   { widthMm: 210, heightMm: 210, naturalWidth: 720 },
 ];
 
-function pdfPageSize(width: number, height: number) {
+export function pdfPageSize(width: number, height: number) {
   const ratio = width / Math.max(1, height);
   const candidates = PAPER_CANDIDATES.flatMap((candidate) => [
     { widthMm: candidate.widthMm, heightMm: candidate.heightMm, expectedWidth: candidate.naturalWidth },

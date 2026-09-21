@@ -2,7 +2,8 @@ import { ChevronDown, FileDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { resolveDocumentSource } from "./note-document-source";
-import { appendPaperToPdf, createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
+import { createPdfDocument, saveVerifiedPdf } from "./pdf-export-core";
+import { createVectorExport, vectorPrintDocument, openVectorPrint } from "./note-vector-pdf";
 import { ordered, type NoteStructure } from "./note-domain";
 import { notePageFromSheet, type NotePage } from "./note-runtime-adapter";
 import { noteStore, useNoteStoreSnapshot } from "./note-store";
@@ -167,6 +168,9 @@ async function exportPlanToPdfBytes(
 
   const preparedSheets = structure ? await prepareExportSheets(plan, structure) : null;
   const pdf = await createPdfDocument();
+  const serialize = createVectorExport();
+  const sheets = [];
+  const desktopPrint = window.mednoteDesktop?.printNotePdf;
   document.body.classList.add("note-pdf-export-active");
 
   try {
@@ -178,7 +182,15 @@ async function exportPlanToPdfBytes(
         : fallbackPaper(plan.sheetIds[position]);
       if (!paper) throw new Error(`Không tải được Sheet ${displayPage} để xuất`);
       onProgress({ page: displayPage, total: plan.sheetIds.length, scope: plan.scope, phase: "capture" });
-      await appendPaperToPdf(pdf, paper, displayPage);
+      const sheet = await serialize(paper, position);
+      if (desktopPrint) {
+        const bytes = await desktopPrint(vectorPrintDocument([sheet]));
+        const { PDFDocument } = await import("pdf-lib");
+        const rendered = await PDFDocument.load(bytes);
+        if (rendered.getPageCount() !== 1) throw new Error(`Sheet ${displayPage} bị ngắt trang sai`);
+        const [page] = await pdf.copyPages(rendered, [0]);
+        pdf.addPage(page);
+      } else sheets.push(sheet);
       await nextFrame();
     }
   } finally {
@@ -187,6 +199,10 @@ async function exportPlanToPdfBytes(
   }
 
   onProgress({ page: plan.sheetIds.length, total: plan.sheetIds.length, scope: plan.scope, phase: "save" });
+  if (!desktopPrint) {
+    await openVectorPrint(vectorPrintDocument(sheets), plan.fileName);
+    return null;
+  }
   return saveVerifiedPdf(pdf);
 }
 
@@ -269,6 +285,7 @@ export default function NotePdfExporter() {
 
     void exportPlanToPdfBytes(plan, noteState.structure, renderSheet, setProgress)
       .then((bytes) => {
+        if (!bytes) return;
         const url = makePdfUrl(bytes);
         readyUrlRef.current = url;
         setReady({ url, fileName: plan.fileName, bytes: bytes.length });
@@ -315,7 +332,7 @@ export default function NotePdfExporter() {
         {menuOpen && !exporting && !ready && !error && (
           <>
             <div className="note-pdf-export-dialog-title">Xuất PDF</div>
-            <div className="note-pdf-export-dialog-hint">Chọn phạm vi cần xuất</div>
+            <div className="note-pdf-export-dialog-hint">Chọn phạm vi cần xuất{!window.mednoteDesktop?.printNotePdf && " · Chọn Lưu thành PDF trong hộp thoại in"}</div>
             <div className="note-pdf-export-menu note-pdf-export-menu-portal">
               {plans.map((plan) => (
                 <button
