@@ -1,11 +1,14 @@
 const { test, expect } = require('@playwright/test');
+const { captureBrowserPrint, readBrowserPrint } = require('./vector-pdf-helpers.cjs');
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
 const APP_URL = 'http://127.0.0.1:4173/mednote-reader/';
 
 test('same-Page Sheets switch between single and continuous views without duplicate toolbar CRUD', async ({ page }) => {
+  await captureBrowserPrint(page);
   await page.addInitScript(() => {
+    if (window !== window.top) return;
     if (window.name === 'mednote-wave4-seeded') return;
     window.name = 'mednote-wave4-seeded';
     localStorage.clear();
@@ -70,16 +73,10 @@ test('same-Page Sheets switch between single and continuous views without duplic
   const activeBeforeExport = await page.locator('.note-paper.interactive').getAttribute('data-note-page-id');
   await page.getByRole('button', { name: 'Xuất note thành PDF' }).click();
   await page.locator('[data-export-scope="page"]').click();
-  await expect(page.getByText('PDF đã tạo xong')).toBeVisible({ timeout: 30_000 });
+  const exported = await readBrowserPrint(page);
   await expect(page.locator('.note-paper.interactive')).toHaveAttribute('data-note-page-id', activeBeforeExport);
-  await expect(page.locator('.note-pdf-export-surface')).toHaveCount(0);
-  const exported = await page.locator('[data-pdf-download="1"]').evaluate(async (link) => {
-    const bytes = new Uint8Array(await (await fetch(link.href)).arrayBuffer());
-    return { header: new TextDecoder().decode(bytes.slice(0, 5)), size: bytes.length };
-  });
-  expect(exported.header).toBe('%PDF-');
-  expect(exported.size).toBeGreaterThan(2000);
-  await page.getByRole('button', { name: 'Đóng' }).click();
+  expect(exported.pages).toHaveLength(3);
+  expect(exported.pages[0]).toContain('Nội dung tờ đầu');
 
   await page.getByRole('toolbar', { name: 'Công cụ ghi chú' }).getByRole('button', { name: 'Từng trang' }).click();
   await expect(page.locator('.note-stage-single .note-paper')).toHaveCount(1);

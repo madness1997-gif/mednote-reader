@@ -21,6 +21,7 @@ export default function PdfExportE2EHarness() {
             overflow: "hidden",
             background: "#fff",
             color: "#15242b",
+            fontFamily: "Mali",
             boxShadow: "0 3px 16px rgba(0,0,0,.12)",
             ['--note-natural-width' as string]: "420px",
             ['--note-natural-height' as string]: "594px",
@@ -39,7 +40,7 @@ export default function PdfExportE2EHarness() {
             </div>
             <h2 style={{ margin: "24px 0 10px", fontSize: 22 }}>Sheet test</h2>
             <p style={{ fontSize: 15, lineHeight: 1.5 }}>
-              Đây là nội dung dùng để kiểm tra luồng Xuất PDF thật từ nút bấm tới Blob tải xuống.
+              Đây là nội dung dùng để kiểm tra luồng Xuất PDF thật từ nút bấm tới PDF có thể chọn và sao chép chữ.
             </p>
             <div style={{ marginTop: 24, width: 120, height: 120, borderRadius: 60, background: "#c7d8eb" }} />
           </div>
