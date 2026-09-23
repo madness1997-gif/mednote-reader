@@ -29,7 +29,7 @@ export function LibraryPanel({
   onSaveCover,
 }: LibraryPanelProps) {
   const [coverId, setCoverId] = useState<string | null>(null);
-  const [grid, setGrid] = useState(true);
+  const [grid, setGrid] = useState(false);
   const coverNotebook = libraryProjection.notes.find((item) => item.id === coverId);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState("");
