@@ -10,7 +10,7 @@ import type {
 
 export type Tool = "pointer" | "pen" | "highlight" | "eraser" | "lasso" | "shape" | "text" | "textbox" | "callout";
 export type TextLineHeight = "1" | "1.15" | "1.5" | "1.8" | "2";
-export type BulletStyle = "none" | "disc" | "circle" | "square" | "diamond" | "arrow" | "check" | "dash";
+export type BulletStyle = "none" | "disc" | "circle" | "square" | "diamond" | "arrow" | "check" | "dash" | "hollow-square" | "hollow-diamond" | "triangle" | "hollow-triangle" | "thin-arrow" | "double-arrow" | "star" | "hollow-star" | "sparkle" | "hollow-sparkle" | "plus" | "cross";
 export type NumberingStyle = "decimal" | "decimal-leading-zero" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman" | "lower-greek" | "cjk-decimal";
 export type TextToolbarState = TextSettings & {
   strike: boolean;
