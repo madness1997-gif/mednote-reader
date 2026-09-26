@@ -201,9 +201,26 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   await modeSwitcher.getByRole('button', { name: 'Note' }).click();
   await expect(stage).toBeHidden();
   await page.waitForTimeout(1_200);
-  await modeSwitcher.getByRole('button', { name: 'Cả hai' }).click();
+  const boundaryFramesPromise = stage.evaluate(async (element) => {
+    const samples = [];
+    const start = performance.now();
+    while (performance.now() - start < 3_200) {
+      await new Promise(requestAnimationFrame);
+      if (!element.clientHeight || element.dataset.readerScrollRestoring) continue;
+      const target = element.querySelector('[data-pdf-page="88"]');
+      const canvas = target?.querySelector('canvas.pdf-page-canvas');
+      samples.push({
+        offset: target ? target.getBoundingClientRect().top - element.getBoundingClientRect().top : null,
+        width: canvas?.width || 0,
+      });
+    }
+    return samples;
+  });
+  await modeSwitcher.getByRole('button', { name: 'Reader' }).click();
   await expect(stage).toBeVisible();
-  await page.waitForTimeout(3_200);
+  const boundaryFrames = await boundaryFramesPromise;
+  expect(boundaryFrames.length).toBeGreaterThan(0);
+  expect(boundaryFrames.filter((frame) => frame.offset === null || Math.abs(frame.offset - boundaryBefore) > 2 || frame.width <= 2)).toEqual([]);
   const boundaryAfter = await stage.evaluate((element) => {
     const target = element.querySelector('[data-pdf-page="88"]');
     return target.getBoundingClientRect().top - element.getBoundingClientRect().top;

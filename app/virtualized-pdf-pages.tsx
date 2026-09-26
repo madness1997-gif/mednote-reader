@@ -171,7 +171,12 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     const index = pages.indexOf(anchor.page);
     if (index < 0) return false;
     const currentOffset = host.getBoundingClientRect().top + currentMetrics.offsets[index] - stage.getBoundingClientRect().top;
-    const targetOffset = pdfPageVirtualAnchorTargetOffset(anchor, currentMetrics.heights[index]);
+    // The mounted page can finish resizing before its ResizeObserver updates
+    // virtual metrics. Use its actual height so restoration has one target.
+    const mountedPage = host.querySelector<HTMLElement>(`[data-pdf-page="${anchor.page}"]`);
+    const mountedHeight = mountedPage?.getBoundingClientRect().height;
+    const targetOffset = pdfPageVirtualAnchorTargetOffset(anchor,
+      mountedHeight && mountedHeight > 1 ? mountedHeight : currentMetrics.heights[index]);
     stage.scrollTop += currentOffset - targetOffset;
     return true;
   }, [pages, rootRef]);
@@ -182,11 +187,12 @@ export const VirtualizedPdfPages = forwardRef<VirtualizedPdfPagesHandle, Virtual
     if (!stage || index < 0) return false;
     pendingAnchorRef.current = anchor;
     holdPinnedAnchor(anchor);
-    setRange(pdfPageVirtualRange(metricsRef.current, metricsRef.current.offsets[index], stage.clientHeight, PDF_CONTINUOUS_OVERSCAN));
     const restored = applyScrollAnchor(anchor);
-    queueRangeUpdate();
+    // Derive the range from the restored viewport, not the anchor page's top.
+    // Alternating those two ranges at a boundary repeatedly unmounts pages.
+    updateRange();
     return restored;
-  }, [applyScrollAnchor, holdPinnedAnchor, pages, queueRangeUpdate, rootRef]);
+  }, [applyScrollAnchor, holdPinnedAnchor, pages, rootRef, updateRange]);
 
   const scrollToPage = useCallback((page: number, smooth = true) => {
     const stage = rootRef.current;

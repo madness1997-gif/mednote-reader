@@ -21,8 +21,12 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
   const { activeNote, exportNotebook, fitNoteToView, notePanel, noteSheetViewMode, noteZoom, noteZoomPercent, setNotePanel, setNoteSheetViewMode, setNoteViewZoom, zoomPresets } = viewModel;
   const { layout, noteCanvas: canvas, noteEditor: editor } = useNotePaneControllers();
   const { addImageFile, activeTool, canRedo, canUndo, chooseNoteTool, inkHistoryVersion, redo, selectedExcerpt, selectedExcerptIndex, selectedTextBoxAppearance, setActiveTool, shiftExcerptLayer, tools, undo } = canvas;
-  const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
-  return (<><div className={`note-toolbar two-row-toolbar ${notePanel === "text" ? "text-tools-open" : ""}`} role="toolbar" aria-label="Công cụ ghi chú">
+  const { TEXT_FONTS, applyTextCommand, applyTextLineHeight, changeListLevel, openTextPopover: openEditorTextPopover, scrollTextToolbar, scrollTextToolbarWithWheel, selectedToolbarFont, tableBorder, textCharacterToolbarRef, textInsertPopover, textParagraphToolbarRef, textToolbar } = editor;
+  const openTextPopover: typeof openEditorTextPopover = (popover, button) => {
+    setNotePanel("text");
+    openEditorTextPopover(popover, button);
+  };
+  return (<><div className="note-toolbar two-row-toolbar text-tools-open" role="toolbar" aria-label="Công cụ ghi chú">
             <div className="toolbar-row toolbar-row-primary">
               <div className="toolbar-cluster note-file-actions">
                 <button className="note-create-button icon-only" onClick={() => { void exportNotebook(); }} aria-label="Xuất note" title="Xuất note"><Download size={16} /></button>
@@ -51,8 +55,8 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
             <div className="toolbar-row toolbar-row-tools">
               <div className="toolbar-cluster note-tool-cluster">
                 {tools.map(({ id, label, icon: Icon }) => {
-                  const hasPanel = ["pen", "highlight", "shape", "text", "textbox", "callout"].includes(id);
-                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : (id === "text" || id === "textbox" || id === "callout") ? notePanel === "text" : notePanel === id) : undefined}><Icon size={20} />{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
+                  const hasPanel = ["pen", "highlight", "shape"].includes(id);
+                  return <button key={id} className={`tool-button ${hasPanel ? "expandable" : ""} ${activeTool === id ? "active" : ""}`} onClick={() => chooseNoteTool(id)} aria-label={label} title={label} aria-expanded={hasPanel ? ((id === "pen" || id === "highlight") ? notePanel === "ink" : notePanel === id) : undefined}><Icon size={20} />{hasPanel && <ChevronDown className="tool-chevron" size={11} />}</button>;
                 })}
                 <button className={`tool-button expandable sticker-primary-button ${textInsertPopover === "stickers" ? "active" : ""}`} onClick={(event) => { setActiveTool("text"); setNotePanel("text"); openTextPopover("stickers", event.currentTarget); }} aria-label="Sticker note" title="Sticker note" aria-expanded={textInsertPopover === "stickers"}><MessageSquareText size={20} /><ChevronDown className="tool-chevron" size={11} /></button>
               </div>
@@ -72,7 +76,6 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
                 <button className="icon-button compact" disabled={!selectedExcerpt || selectedExcerptIndex === activeNote.excerpts.length - 1} onClick={() => shiftExcerptLayer("front")} aria-label="Đưa đối tượng lên trên cùng" title="Lên trên cùng"><BringToFront size={17} /></button>
               </div>
             </div>
-            {notePanel === "text" && <>
               <div className="toolbar-scroll-shell">
                 <button className="toolbar-scroll-button scroll-left" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textCharacterToolbarRef.current, -1)} aria-label="Cuộn công cụ sang trái"><ChevronLeft size={15} /></button>
                 <div ref={textCharacterToolbarRef} className="toolbar-row text-command-row text-character-row" onWheel={scrollTextToolbarWithWheel} aria-label="Định dạng ký tự">
@@ -112,6 +115,5 @@ export function NoteToolbar({ viewModel, onCreateSheetLink }: { viewModel: NoteT
                 </div>
                 <button className="toolbar-scroll-button scroll-right" onPointerDown={(event) => event.preventDefault()} onClick={() => scrollTextToolbar(textParagraphToolbarRef.current, 1)} aria-label="Cuộn công cụ sang phải"><ChevronRight size={15} /></button>
               </div>
-            </>}
           </div></>);
 }

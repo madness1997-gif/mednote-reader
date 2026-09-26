@@ -442,23 +442,11 @@ export function useReaderInteractionController({
     let stableRevealFrames = 0;
     const revealDeadline = window.performance.now() + 750;
     if (saved.continuousAnchor) stage.dataset.readerScrollRestoring = "true";
-    const restoreContinuousDomAnchor = () => {
-      const continuousAnchor = saved.continuousAnchor;
-      if (!continuousAnchor) return false;
-      const page = stage.querySelector<HTMLElement>(`[data-pdf-page="${continuousAnchor.page}"]`);
-      if (!page) return false;
-      const stageRect = stage.getBoundingClientRect();
-      const pageRect = page.getBoundingClientRect();
-      const targetOffset = pdfPageVirtualAnchorTargetOffset(continuousAnchor, pageRect.height);
-      stage.scrollTop += pageRect.top - stageRect.top - targetOffset;
-      return true;
-    };
     const restore = () => {
       if (cancelled) return;
       stage.scrollLeft = saved.left;
       if (saved.continuousAnchor) {
-        const restoredVirtualAnchor = restoreContinuousScrollAnchor(saved.continuousAnchor);
-        if (restoreContinuousDomAnchor() || restoredVirtualAnchor) return;
+        if (restoreContinuousScrollAnchor(saved.continuousAnchor)) return;
       }
       const anchor = stage.querySelector<HTMLElement>(`[data-pdf-page="${saved.anchorPage}"]`);
       if (anchor) {

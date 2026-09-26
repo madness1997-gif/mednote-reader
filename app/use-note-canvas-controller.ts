@@ -214,7 +214,7 @@ export function useNoteCanvasController({ activeDocument, activeNote, canvasScop
     } else if (tool === "shape") {
       setNotePanel((panel) => panel === "shape" && activeTool === tool ? null : "shape");
     } else if (tool === "text" || tool === "textbox" || tool === "callout") {
-      setNotePanel((panel) => panel === "text" && activeTool === tool ? null : "text");
+      setNotePanel("text");
       if (tool === "text") {
         const editorId = selectedExcerpt?.kind === "text" ? `excerpt:${selectedExcerpt.id}` : `body:${activeNote.id}`;
         window.requestAnimationFrame(() => editor.focusTypeEditor(editorId));
