@@ -60,6 +60,18 @@ const BULLET_STYLES: { id: BulletStyle; glyph: string; label: string }[] = [
   { id: "arrow", glyph: "➤", label: "Mũi tên" },
   { id: "check", glyph: "✓", label: "Dấu kiểm" },
   { id: "dash", glyph: "–", label: "Gạch ngang" },
+  { id: "hollow-square", glyph: "□", label: "Hình vuông rỗng" },
+  { id: "hollow-diamond", glyph: "◇", label: "Hình thoi rỗng" },
+  { id: "triangle", glyph: "▶", label: "Tam giác đặc" },
+  { id: "hollow-triangle", glyph: "▷", label: "Tam giác rỗng" },
+  { id: "thin-arrow", glyph: "→", label: "Mũi tên nét mảnh" },
+  { id: "double-arrow", glyph: "⇒", label: "Mũi tên kép" },
+  { id: "star", glyph: "★", label: "Ngôi sao đặc" },
+  { id: "hollow-star", glyph: "☆", label: "Ngôi sao rỗng" },
+  { id: "sparkle", glyph: "✦", label: "Sao bốn cánh đặc" },
+  { id: "hollow-sparkle", glyph: "✧", label: "Sao bốn cánh rỗng" },
+  { id: "plus", glyph: "+", label: "Dấu cộng" },
+  { id: "cross", glyph: "✗", label: "Dấu chéo" },
 ];
 const NUMBERING_STYLES: { id: NumberingStyle; sample: string; label: string }[] = [
   { id: "decimal", sample: "1.  2.  3.", label: "Số thường" },
@@ -154,10 +166,10 @@ function normalizedLineHeight(style: CSSStyleDeclaration): TextLineHeight {
 function normalizedBulletStyle(value: string): BulletStyle {
   if (value === "none") return "none";
   if (value === "circle" || value === "square") return value;
-  if (value.includes("◆")) return "diamond";
-  if (value.includes("➤")) return "arrow";
-  if (value.includes("✓")) return "check";
-  if (value.includes("–") || value.includes("-") || value === "none") return "dash";
+  const custom = BULLET_STYLES.find((option) =>
+    !["none", "disc", "circle", "square"].includes(option.id) && value.includes(option.glyph));
+  if (custom) return custom.id;
+  if (value.includes("-")) return "dash";
   return "disc";
 }
 
@@ -377,7 +389,11 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
   }, [finishTextCommand, requireSelection]);
 
   const applyBulletStyle = useCallback((style: BulletStyle) => {
-    applyListStyle("ul", { disc: "disc", circle: "circle", square: "square", diamond: '\"◆  \"', arrow: '\"➤  \"', check: '\"✓  \"', dash: '\"–  \"', none: null }[style]);
+    const option = BULLET_STYLES.find((item) => item.id === style);
+    const cssStyle = style === "none" ? null
+      : ["disc", "circle", "square"].includes(style) ? style
+      : option ? `"${option.glyph}  "` : "disc";
+    applyListStyle("ul", cssStyle);
   }, [applyListStyle]);
 
   const applyNumberingStyle = useCallback((style: NumberingStyle) => {
