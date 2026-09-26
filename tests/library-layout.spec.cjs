@@ -23,8 +23,8 @@ for (const viewport of [
   test(`Library remains a real two-column split at ${viewport.label} width`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('button', { name: 'Mở thư viện' })).toBeEnabled({ timeout: 12_000 });
-    await page.getByRole('button', { name: 'Mở thư viện' }).click();
+    await expect(page.getByRole('button', { name: 'Mở thư viện', exact: true })).toBeEnabled({ timeout: 12_000 });
+    await page.getByRole('button', { name: 'Mở thư viện', exact: true }).click();
 
     const panel = page.getByRole('complementary', { name: 'Thư viện tài liệu và ghi chú' });
     const documents = panel.locator('.library-domain[aria-label="Tài liệu"]');
@@ -77,7 +77,7 @@ test('Library callbacks rename and open canonical documents and notebooks', asyn
   await destination.locator('button[type="submit"]').click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
 
-  await page.getByRole('button', { name: 'Mở thư viện' }).click();
+  await page.getByRole('button', { name: 'Mở thư viện', exact: true }).click();
   const panel = page.getByRole('complementary', { name: 'Thư viện tài liệu và ghi chú' });
   const documentRow = panel.locator('.library-domain[aria-label="Tài liệu"] .library-row').first();
   await expect(documentRow).toContainText('library-callbacks');
@@ -90,7 +90,7 @@ test('Library callbacks rename and open canonical documents and notebooks', asyn
   await expect(panel).toBeHidden();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
 
-  await page.getByRole('button', { name: 'Mở thư viện' }).click();
+  await page.getByRole('button', { name: 'Mở thư viện', exact: true }).click();
   await panel.locator('.library-domain[aria-label="Ghi chú"] .library-item').first().click();
   await expect(panel).toBeHidden();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-note/);
