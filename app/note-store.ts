@@ -8,6 +8,7 @@ import {
   type LegacySnapshot,
 } from "./note-migration";
 import { NoteCommands, type NoteCommandResult } from "./note-commands";
+import { dedupeNotebookTitles } from "./note-migration-core";
 import type { DocumentGraph } from "./document-domain";
 import type { SaveDocumentWorkspaceInput } from "./document-repository";
 import { remapDocumentReferencesInContent } from "./note-document-source";
@@ -46,6 +47,8 @@ export type NoteStoreInitializeOptions = {
   fallbackSnapshot?: LegacySnapshot;
   /** Unit/integration harnesses may seed the injected repository directly. */
   skipMigration?: boolean;
+  /** Bootstrap loads the catalogue; the visible note pane requests its content. */
+  deferActiveSheet?: boolean;
 };
 
 const EMPTY_SNAPSHOT: NoteStoreSnapshot = {
@@ -117,7 +120,10 @@ export class NoteStore {
     this.initialized = this.serialize(async () => {
       this.publish({ status: "loading", busy: true, error: null });
       try {
-        if (!options.skipMigration) {
+        let structure = await this.repository.loadNoteStructure();
+        // Existing v6 data is already split into metadata and content records.
+        // Do not run the eager migration/integrity bundle on ordinary startup.
+        if (!structure && !options.skipMigration) {
           let migrated = await migrateStoredLibraryToV6({
             relation: options.relation,
             localSnapshot: options.localSnapshot,
@@ -129,11 +135,20 @@ export class NoteStore {
             migrated = fallback;
           }
           if (!migrated) throw new Error("Không tìm thấy dữ liệu note để khởi tạo schema v6");
+          structure = await this.repository.loadNoteStructure();
         }
-        const structure = await this.repository.loadNoteStructure();
         if (!structure) throw new Error("Không thể đọc cấu trúc note v6 sau migration");
+        // Preserve the existing duplicate-title repair using metadata-only writes.
+        const titles = new Map(structure.notebooks.map((notebook) => [notebook.id, notebook.title]));
+        const notebooks = dedupeNotebookTitles(structure.notebooks);
+        for (const notebook of notebooks) {
+          if (titles.get(notebook.id) !== notebook.title) {
+            await this.repository.renameNotebook(notebook.id, notebook.title);
+          }
+        }
+        structure = { ...structure, notebooks };
         const [activeSheetContent, documents] = await Promise.all([
-          structure.active.activeSheetId ? this.repository.loadSheetContent(structure.active.activeSheetId) : Promise.resolve(null),
+          !options.deferActiveSheet && structure.active.activeSheetId ? this.repository.loadSheetContent(structure.active.activeSheetId) : Promise.resolve(null),
           this.repository.loadDocumentGraph(),
         ]);
         this.publish({
@@ -160,7 +175,7 @@ export class NoteStore {
 
   updateActiveSheetContent(content: SheetContent) {
     const sheetId = this.snapshot.structure?.active.activeSheetId;
-    if (this.snapshot.status !== "ready" || !sheetId) return;
+    if (this.snapshot.status !== "ready" || !sheetId || !this.snapshot.activeSheetContent) return;
     const nextContent = clone(content);
     this.publish({
       activeSheetContent: nextContent,
@@ -265,6 +280,21 @@ export class NoteStore {
   }
 
   openSheet(sheetId: string) { return this.navigateSheet(sheetId, false); }
+
+  /** Hydrate a restored, visible Sheet without navigating or dismissing its cover. */
+  ensureActiveSheetContent(sheetId: string) {
+    return this.serialize(async () => {
+      const structure = this.snapshot.structure;
+      if (!structure || structure.active.activeSheetId !== sheetId || this.snapshot.activeSheetContent) return;
+      this.publish({ busy: true, error: null });
+      try {
+        await this.hydrateCommitted({ structure, active: structure.active }, true);
+      } catch (error) {
+        this.publish({ busy: false, hydratingSheetId: null, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
 
   private navigateSheet(sheetId: string, showCover: boolean) {
     return this.serialize(async () => {

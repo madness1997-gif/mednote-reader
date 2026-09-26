@@ -153,6 +153,7 @@ async function initializeV6Library(snapshots: BootstrapSnapshots, warnings: stri
   };
   try {
     await noteStore.initialize({
+      deferActiveSheet: true,
       relation: snapshots.relation,
       localSnapshot: snapshots.localSnapshot || undefined,
       fallbackSnapshot,
@@ -296,6 +297,21 @@ async function migrateLegacyNotebook(
 export async function bootstrapMedNote(): Promise<BootstrapResult> {
   const warnings: string[] = [];
   const existingV6Metadata = await readV6RuntimeMetadata(warnings);
+  if (existingV6Metadata) {
+    // The canonical catalogue is enough to restore the UI. Legacy snapshots may
+    // embed every note, so don't even parse them once v6 exists.
+    let documentSnapshot: PersistedLibrary | null = null;
+    try {
+      documentSnapshot = readDocumentRuntimeSnapshot();
+    } catch {
+      warnings.push("Không thể đọc document runtime v1; đã dùng runtime dự phòng.");
+    }
+    await noteStore.initialize({ deferActiveSheet: true });
+    const metadata = await readV6RuntimeMetadata(warnings);
+    const runtime = restoreV6DocumentRuntime(documentSnapshot || runtimeSourceFromV6(metadata || existingV6Metadata), warnings);
+    if (runtime) return runtime;
+    throw new Error("Không thể đọc danh mục note v6");
+  }
   const snapshots = await readLegacySnapshots(warnings);
   const initializedV6 = await initializeV6Library(snapshots, warnings);
   const canonicalMetadata = initializedV6 ? await readV6RuntimeMetadata(warnings) : null;

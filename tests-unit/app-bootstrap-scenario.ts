@@ -8,9 +8,10 @@ import type { LibraryV6 } from "../app/note-repository";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
+  readonly reads: string[] = [];
   get length() { return this.values.size; }
   clear() { this.values.clear(); }
-  getItem(key: string) { return this.values.get(key) ?? null; }
+  getItem(key: string) { this.reads.push(key); return this.values.get(key) ?? null; }
   key(index: number) { return [...this.values.keys()][index] ?? null; }
   removeItem(key: string) { this.values.delete(key); }
   setItem(key: string, value: string) { this.values.set(key, String(value)); }
@@ -179,8 +180,13 @@ async function seedStoredV5Library() {
 }
 
 async function seed() {
-  if (scenario === "v6") {
+  if (scenario === "v6" || scenario === "v6-with-legacy") {
     await new IndexedDbNoteRepository().replaceLibrary(v6Library());
+    if (scenario === "v6-with-legacy") {
+      for (const key of ["mednote-library-v2", "mednote-notebook-v1", "mednote-relations-v2"]) {
+        localStorage.setItem(key, "{invalid legacy data that should never be parsed");
+      }
+    }
   }
   if (scenario === "v6-runtime") {
     await new IndexedDbNoteRepository().replaceLibrary(v6Library(["context-a", "context-b"]));
@@ -192,7 +198,7 @@ async function seed() {
   if (scenario === "v6-with-v5") {
     await new IndexedDbNoteRepository().replaceLibrary(v6Library());
     // Deliberately malformed: reading this as a v5 library would throw. A
-    // verified v6 bootstrap must delete the namespace without hydrating it.
+    // Catalogue-only startup must leave legacy cleanup to verified migration.
     await writeRawRecord("library:v5:meta", { version: 5, contextIds: null });
     await writeRawRecord("library:v5:orphan", { stale: true });
   }
@@ -238,7 +244,19 @@ async function seed() {
 await seed();
 const { bootstrapMedNote } = await import("../app/app-bootstrap");
 const { noteRepository, noteStore } = await import("../app/note-store");
+const bootstrapReads: string[] = [];
+const originalGet = IDBObjectStore.prototype.get;
+IDBObjectStore.prototype.get = function (key) {
+  bootstrapReads.push(String(key));
+  return originalGet.call(this, key);
+};
 const first = await bootstrapMedNote();
+IDBObjectStore.prototype.get = originalGet;
+const bootstrapHadContent = noteStore.getSnapshot().activeSheetContent !== null;
+const legacyReads = (localStorage as MemoryStorage).reads.filter((key) => ["mednote-library-v2", "mednote-notebook-v1", "mednote-relations-v2"].includes(key));
+// Simulate opening the restored note after bootstrap, as the visible pane does.
+const activeSheetId = noteStore.getSnapshot().structure?.active.activeSheetId;
+if (activeSheetId) await noteStore.ensureActiveSheetContent(activeSheetId);
 
 let pdf: { name?: string; text?: string; textAfterSecondBootstrap?: string } | undefined;
 if (scenario === "legacy-pdf") {
@@ -263,6 +281,9 @@ const v5StoragePresent = scenario === "v6-with-v5"
   ? Boolean(await readRawRecord("library:v5:meta") || await readRawRecord("library:v5:orphan"))
   : undefined;
 process.stdout.write(JSON.stringify({
+  bootstrapContentReads: bootstrapReads.filter((key) => key.startsWith("library:v6:sheet-content:")),
+  bootstrapHadContent,
+  legacyReads,
   result: {
     workspaceIds: first.workspaces.map((workspace) => workspace.id),
     workspaceKinds: first.workspaces.map((workspace) => workspace.kind),

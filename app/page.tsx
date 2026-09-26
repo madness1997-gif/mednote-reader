@@ -398,8 +398,16 @@ export default function Home() {
   }, [noteSheetViewMode]);
 
   useEffect(() => {
+    const sheetId = noteState.structure?.active.activeSheetId;
+    if (!ready || noteState.status !== "ready" || !sheetId || workspaceMode === "reader" || libraryOpen || noteState.coverNotebookId) return;
+    void noteStore.ensureActiveSheetContent(sheetId).catch((error) => {
+      setToast(error instanceof Error ? error.message : "Không thể mở nội dung tờ note");
+    });
+  }, [ready, noteState.status, noteState.structure?.active.activeSheetId, workspaceMode, libraryOpen, noteState.coverNotebookId]);
+
+  useEffect(() => {
     const pageId = noteState.structure?.active.activePageId;
-    if (noteState.status !== "ready" || !pageId) return;
+    if (!ready || noteState.status !== "ready" || !pageId || workspaceMode === "reader" || libraryOpen || noteState.coverNotebookId) return;
     if (noteSheetViewMode !== "continuous") {
       noteStore.releaseInactiveSheetContents();
       return;
@@ -407,7 +415,7 @@ export default function Home() {
     void noteStore.loadPageSheetContents(pageId).catch((error) => {
       setToast(error instanceof Error ? error.message : "Không thể tải các tờ trong Page");
     });
-  }, [activePageSheetKey, noteSheetViewMode, noteState.status, noteState.structure?.active.activePageId]);
+  }, [ready, activePageSheetKey, noteSheetViewMode, noteState.status, noteState.structure?.active.activePageId, workspaceMode, libraryOpen, noteState.coverNotebookId]);
 
   useEffect(() => {
     const pending = pendingNoteScrollRef.current;

@@ -20,6 +20,9 @@ type ScenarioResult = {
   libraryDocumentNames: string[];
   pdf?: { name?: string; text?: string; textAfterSecondBootstrap?: string };
   v5StoragePresent?: boolean;
+  bootstrapContentReads: string[];
+  bootstrapHadContent: boolean;
+  legacyReads: string[];
 };
 
 const scenarioFixture = fileURLToPath(new URL("./app-bootstrap-scenario.ts", import.meta.url));
@@ -51,6 +54,16 @@ test("P6.5 restores v6 NoteStructure and DocumentGraph plus one note runtime she
   assert.equal(restored.result.workspaceMode, "reader");
   assert.equal(restored.result.noteZoom, 1.4);
   assert.equal(restored.result.savedAt, 600);
+  assert.deepEqual(restored.bootstrapContentReads, []);
+  assert.equal(restored.bootstrapHadContent, false);
+});
+
+test("v6 startup does not read or parse legacy note snapshots", () => {
+  const restored = runScenario("v6-with-legacy");
+  assert.deepEqual(restored.legacyReads, []);
+  assert.deepEqual(restored.bootstrapContentReads, []);
+  assert.deepEqual(restored.result.warnings, []);
+  assert.equal(restored.activeBody, "from v6");
 });
 
 test("P6.5 v6 documents keep document-runtime preference for active context and UI settings", () => {
@@ -63,10 +76,11 @@ test("P6.5 v6 documents keep document-runtime preference for active context and 
   assert.equal(result.savedAt, 777);
 });
 
-test("P6.5 verified v6 skips malformed v5 and removes its storage namespace", () => {
+test("v6 catalogue startup skips malformed v5 without purging unverified legacy data", () => {
   const restored = runScenario("v6-with-v5");
   assert.equal(restored.activeBody, "from v6");
-  assert.equal(restored.v5StoragePresent, false);
+  assert.equal(restored.v5StoragePresent, true);
+  assert.deepEqual(restored.bootstrapContentReads, []);
   assert.equal(restored.result.warnings.some((warning) => warning.includes("incremental library v5")), false);
 });
 
