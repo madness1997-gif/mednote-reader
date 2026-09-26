@@ -94,3 +94,16 @@ for (const parentKind of ['ol', 'ul']) {
     });
   }
 }
+
+test('new bullet styles apply to the selected level and remain selected when reopened', async ({ page }) => {
+  const editor = page.getByRole('textbox', { name: 'Đoạn hoặc danh sách', exact: true });
+  await editor.locator('i').click();
+  await page.getByRole('button', { name: 'Mở thư viện dấu đầu dòng', exact: true }).click();
+  await page.getByRole('button', { name: 'Ngôi sao rỗng', exact: true }).click();
+  await expect(editor.locator('ol ul')).toHaveCSS('list-style-type', '"☆  "');
+  await expect(editor.locator(':scope > ol')).toHaveCSS('list-style-type', 'decimal');
+  await expect(editor.locator('i')).toHaveText('Con');
+  await editor.locator('i').click();
+  await page.getByRole('button', { name: 'Mở thư viện dấu đầu dòng', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Ngôi sao rỗng', exact: true })).toHaveClass('selected');
+});
