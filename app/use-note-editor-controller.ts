@@ -365,7 +365,29 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
     if (style === null) {
       if (nearest?.tagName.toLowerCase() === kind) noteRichTextController.execCommand(command, false);
     } else {
-      if (nearest?.tagName.toLowerCase() !== kind) noteRichTextController.execCommand(command, false);
+      if (nearest && nearest.tagName.toLowerCase() !== kind && range) {
+        // Chromium's list command can split the parent of a nested list.
+        // Replace only this list, keeping its children and selection intact.
+        const startNode = range.startContainer;
+        const startOffset = range.startOffset;
+        const endNode = range.endContainer;
+        const endOffset = range.endOffset;
+        const replacement = document.createElement(kind);
+        for (const attribute of Array.from(nearest.attributes)) {
+          if (!["start", "reversed", "type"].includes(attribute.name)) replacement.setAttribute(attribute.name, attribute.value);
+        }
+        while (nearest.firstChild) replacement.appendChild(nearest.firstChild);
+        nearest.replaceWith(replacement);
+        const restoredRange = document.createRange();
+        restoredRange.setStart(startNode === nearest ? replacement : startNode, startOffset);
+        restoredRange.setEnd(endNode === nearest ? replacement : endNode, endOffset);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(restoredRange);
+        noteRichTextController.captureCurrentSelection();
+      } else if (!nearest) {
+        noteRichTextController.execCommand(command, false);
+      }
       const current = noteRichTextController.captureCurrentSelection();
       // Resolve the innermost list for each selected text node, never its ancestors.
       const lists = new Set<HTMLElement>();
