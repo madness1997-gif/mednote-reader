@@ -235,8 +235,10 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
   const pendingFontSizeRef = useRef(new Map<string, number>());
   const textCharacterToolbarRef = useRef<HTMLDivElement>(null);
   const textParagraphToolbarRef = useRef<HTMLDivElement>(null);
+  const popoverSelectionRef = useRef<{ id: string; editor: HTMLElement; range: Range } | null>(null);
 
   const clearActiveTextEditor = useCallback(() => {
+    popoverSelectionRef.current = null;
     noteRichTextController.clear();
   }, []);
 
@@ -251,6 +253,9 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
   }, [notePanel]);
 
   const openTextPopover = useCallback((popover: Exclude<TextInsertPopover, null>, button: HTMLElement) => {
+    const target = noteRichTextController.activeEditorRef.current;
+    const range = noteRichTextController.captureCurrentSelection() ?? noteRichTextController.savedRangeRef.current;
+    popoverSelectionRef.current = target && range ? { ...target, range: range.cloneRange() } : null;
     const pane = button.closest<HTMLElement>(".notes-pane");
     if (pane) {
       const paneRect = pane.getBoundingClientRect();
@@ -304,6 +309,9 @@ export function useNoteEditorController({ editorScopeKey, defaultText, notePanel
   }, [activateTextEditor, notify]);
 
   const requireSelection = useCallback((message: string) => {
+    const saved = popoverSelectionRef.current;
+    popoverSelectionRef.current = null;
+    if (saved?.editor.isConnected) noteRichTextController.activate(saved.id, saved.editor, saved.range);
     const target = noteRichTextController.restoreSelection();
     if (!target) notify(message);
     return target;
