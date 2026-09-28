@@ -43,6 +43,10 @@ test('Reader keeps its continuous-scroll position after returning from a long No
   await dialog.locator('[data-title]').fill('Reader position regression');
   await dialog.locator('button[type="submit"]').click();
 
+  // Submitting the destination starts an asynchronous import which sets split mode.
+  // Wait for the imported PDF before exercising the user's mode selection.
+  await expect(page.getByText('Đã mở 120 trang', { exact: true })).toBeVisible();
+
   const modeSwitcher = page.locator('.workspace-mode-switcher');
   await modeSwitcher.getByRole('button', { name: 'Reader' }).click();
   await expect(page.locator('.workspace')).toHaveClass(/workspace-mode-reader/);
