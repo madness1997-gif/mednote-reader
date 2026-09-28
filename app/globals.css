@@ -514,10 +514,12 @@ body {
 .appearance-color-section { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 6px; margin-top: 8px; }
 .appearance-color-section > span { color: #65777e; font-size: 9px; font-weight: 750; }
 .appearance-color-section .popover-color-strip { min-width: 0; margin: 0; padding: 0; overflow-x: auto; border: 0; }
+.symbol-popover { max-height: min(560px, calc(100dvh - 180px)); overflow-y: auto; overscroll-behavior: contain; }
 .symbol-popover section + section { margin-top: 9px; padding-top: 8px; border-top: 1px solid #edf1f2; }
 .symbol-popover section > label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 750; text-transform: uppercase; }
 .symbol-popover section > div, .equation-presets { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 .symbol-popover section button, .equation-presets button { min-width: 0; height: 31px; padding: 0 3px; border: 1px solid #e0e7e9; border-radius: 6px; background: #fafcfc; color: #30464f; font-family: "Cambria Math", "Times New Roman", serif; font-size: 15px; cursor: pointer; }
+.symbol-popover section button { font-family: "Segoe UI Symbol", "Cambria Math", "DejaVu Sans", sans-serif; }
 .symbol-popover section button:hover, .equation-presets button:hover { border-color: #8cb7b9; background: var(--selected); color: var(--teal); }
 .equation-input-label { display: flex; flex-direction: column; gap: 5px; color: #61737b; font-size: 9px; font-weight: 700; }
 .equation-input-label input { height: 35px; padding: 0 9px; border: 1px solid #cfdcdf; border-radius: 7px; outline: 0; color: #263741; font: 15px "Cambria Math", "Times New Roman", serif; }
