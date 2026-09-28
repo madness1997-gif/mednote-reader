@@ -54,7 +54,7 @@ test('same-Page Sheets switch between single and continuous views without duplic
   await toolbar.getByRole('button', { name: 'Liên tục' }).click();
   const stage = page.locator('.note-stage-continuous');
   await expect(stage).toBeVisible();
-  await expect(stage.locator('.note-paper')).toHaveCount(3);
+  await expect(stage.locator(':scope > .note-sheet-virtual-slot, :scope > .note-paper.interactive')).toHaveCount(3);
   await expect(stage.locator('.note-paper-preview.template-first-aid .fa-block-editor.mode-view')).toHaveCount(1);
   await expect(stage.locator('.note-paper-preview.template-first-aid .fa-view-hint')).toBeHidden();
   await expect(stage.locator('.note-paper.interactive.template-first-aid .fa-block-editor.mode-edit')).toHaveCount(1);
@@ -63,12 +63,13 @@ test('same-Page Sheets switch between single and continuous views without duplic
   const beforeScroll = await stage.evaluate((element) => { element.scrollTop = 180; return element.scrollTop; });
   await stage.getByRole('button', { name: 'Chỉnh sửa tờ 2' }).evaluate((button) => button.click());
   await expect(page.locator(`.note-paper.interactive[data-note-page-id="${secondSheetId}"]`)).toBeVisible();
-  await expect(stage.locator('.note-paper')).toHaveCount(3);
+  await expect(stage.locator(':scope > .note-sheet-virtual-slot, :scope > .note-paper.interactive')).toHaveCount(3);
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(Math.max(0, beforeScroll - 2));
 
+  // Offscreen previews may be unmounted; their slots still represent saved Sheets.
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('.note-stage-continuous')).toBeVisible({ timeout: 12_000 });
-  await expect(page.locator('.note-stage-continuous .note-paper')).toHaveCount(3);
+  await expect(page.locator('.note-stage-continuous > .note-sheet-virtual-slot, .note-stage-continuous > .note-paper.interactive')).toHaveCount(3);
 
   const activeBeforeExport = await page.locator('.note-paper.interactive').getAttribute('data-note-page-id');
   await page.getByRole('button', { name: 'Xuất note thành PDF' }).click();
